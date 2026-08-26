@@ -2,6 +2,15 @@ version: "3"
 
 dotenv: [".env"]
 
+vars:
+  # Host platform for the native build steps below. Detected from uname so the
+  # same Taskfile works on x86_64 and arm64 hosts; override explicitly with
+  # e.g. `task build-agent-deps ARCH=arm64`. Names match the root Taskfile.
+  OS:
+    sh: case "$(uname -s)" in Linux) echo linux ;; Darwin) echo mac ;; *) echo linux ;; esac
+  ARCH:
+    sh: case "$(uname -m)" in x86_64 | amd64) echo x64 ;; aarch64 | arm64) echo arm64 ;; *) echo x64 ;; esac
+
 tasks:
   lint:
     desc: lint-agent
@@ -37,7 +46,7 @@ tasks:
     desc: build agent
     dir: ./agents
     cmds:
-      - ./scripts/install_deps_and_build.sh linux x64
+      - ./scripts/install_deps_and_build.sh {{.OS}} {{.ARCH}}
 
   tts-guarder-test:
     desc: run tests for tts guarder
@@ -50,7 +59,7 @@ tasks:
     dotenv: [".env"]
     cmds:
       - cd agents/integration_tests/tts_guarder && sed "s/{{`{{extension_name}}`}}/$EXT_NAME/g" manifest-tmpl.json > manifest.json
-      - cd agents/integration_tests/tts_guarder && ./scripts/install_deps_and_build.sh linux x64 && ./tests/bin/start --extension_name {{.EXTENSION}} --config_dir {{.USER_WORKING_DIR}}/agents/ten_packages/extension/{{.EXTENSION}}/{{.CONFIG_DIR}} {{ .CLI_ARGS }}
+      - cd agents/integration_tests/tts_guarder && ./scripts/install_deps_and_build.sh {{.OS}} {{.ARCH}} && ./tests/bin/start --extension_name {{.EXTENSION}} --config_dir {{.USER_WORKING_DIR}}/agents/ten_packages/extension/{{.EXTENSION}}/{{.CONFIG_DIR}} {{ .CLI_ARGS }}
 
   test:
     desc: run tests
@@ -111,7 +120,7 @@ tasks:
     dotenv: [".env"]
     cmds:
       - cd agents/integration_tests/asr_guarder && sed "s/{{`{{extension_name}}`}}/$EXT_NAME/g" manifest-tmpl.json > manifest.json
-      - cd agents/integration_tests/asr_guarder && ./scripts/install_deps_and_build.sh linux x64 && ./tests/bin/start --extension_name {{.EXTENSION}} --config_dir {{.USER_WORKING_DIR}}/agents/ten_packages/extension/{{.EXTENSION}}/{{.CONFIG_DIR}} {{ .CLI_ARGS }}
+      - cd agents/integration_tests/asr_guarder && ./scripts/install_deps_and_build.sh {{.OS}} {{.ARCH}} && ./tests/bin/start --extension_name {{.EXTENSION}} --config_dir {{.USER_WORKING_DIR}}/agents/ten_packages/extension/{{.EXTENSION}}/{{.CONFIG_DIR}} {{ .CLI_ARGS }}
 
   format:
     desc: format code

@@ -6,8 +6,13 @@ includes:
     dir: ai_agents
 
 vars:
-  OS: "linux"
-  ARCH: "x64"
+  # Detected from the host so `task gen` / `task build` target the machine they
+  # run on instead of always assuming x86_64. Override explicitly when needed,
+  # e.g. `task build ARCH=arm64` or `task gen OS=mac ARCH=arm64`.
+  OS:
+    sh: case "$(uname -s)" in Linux) echo linux ;; Darwin) echo mac ;; *) echo linux ;; esac
+  ARCH:
+    sh: case "$(uname -m)" in x86_64 | amd64) echo x64 ;; aarch64 | arm64) echo arm64 ;; *) echo x64 ;; esac
   BUILD_TYPE: "debug"
 
 tasks:
