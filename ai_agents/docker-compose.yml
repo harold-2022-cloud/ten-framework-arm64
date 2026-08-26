@@ -1,8 +1,16 @@
 services:
   ten_agent_dev:
-    image: ghcr.io/ten-framework/ten_agent_build:0.7.14
+    # `ten_agent_build` is published for linux/amd64 only, so on an arm64 host
+    # the default below runs under emulation (and the AVX2 probe in
+    # agents/scripts/install_deps_and_build.sh is designed to catch exactly
+    # that). To run natively on arm64, build the multi-arch dev image from
+    # Dockerfile.dev (arm64 only -- see its header) and set these in
+    # ai_agents/.env:
+    #   TEN_AGENT_DEV_IMAGE=ten_agent_dev:local
+    #   TEN_AGENT_DEV_PLATFORM=linux/arm64
+    image: ${TEN_AGENT_DEV_IMAGE:-ghcr.io/ten-framework/ten_agent_build:0.7.14}
     container_name: ten_agent_dev
-    platform: linux/amd64
+    platform: ${TEN_AGENT_DEV_PLATFORM:-linux/amd64}
     tty: true
     stdin_open: true
     restart: always

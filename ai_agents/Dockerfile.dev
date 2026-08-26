@@ -1,0 +1,116 @@
+# arm64 AI-agents development environment.
+#
+# Why this exists, and why it is arm64-only:
+#
+# 1. `ghcr.io/ten-framework/ten_agent_build:0.7.14` -- the image
+#    docker-compose.yml defaults to -- is a single-arch linux/amd64 manifest,
+#    so it cannot run natively on arm64.
+#
+# 2. The arm64 packages in the TEN store require glibc >= 2.38
+#    (`__isoc23_strtol@GLIBC_2.38` in libten_utils.so and
+#    libpython_addon_loader.so). Ubuntu 22.04 ships glibc 2.35, so a 22.04 base
+#    -- including ten_building_ubuntu2204 -- cannot load them. Hence ubuntu:24.04.
+#
+# 3. A single image cannot serve both architectures. The published x64 packages
+#    are built against Python 3.10 headers, the arm64 ones against Python 3.12.
+#    Ubuntu 24.04 ships 3.12, which matches arm64 and breaks x64. amd64 users
+#    already have a working image; use that instead.
+#
+# Build (on an arm64 host, no emulation):
+#   docker build -f ai_agents/Dockerfile.dev -t ten_agent_dev:local ai_agents
+#
+# Then in ai_agents/.env:
+#   TEN_AGENT_DEV_IMAGE=ten_agent_dev:local
+#   TEN_AGENT_DEV_PLATFORM=linux/arm64
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Fail early and loudly rather than producing an image that breaks at
+# `tman install` time for the reasons in the header.
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  if [ "${arch}" != "arm64" ]; then \
+  echo "FATAL: Dockerfile.dev targets arm64 only (got ${arch})." >&2; \
+  echo "       On amd64 use ghcr.io/ten-framework/ten_agent_build instead." >&2; \
+  exit 1; \
+  fi
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential \
+  ca-certificates \
+  cmake \
+  curl \
+  git \
+  jq \
+  libasound2t64 \
+  libc++1 \
+  libgstreamer1.0-dev \
+  libssl-dev \
+  libunwind-dev \
+  pkg-config \
+  python3 \
+  python3-dev \
+  python3-pip \
+  python3-venv \
+  unzip \
+  vim \
+  zip \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The arm64 ten_runtime_python is compiled against Python 3.12 headers, which is
+# what ubuntu:24.04 provides. python_addon_loader hardcodes libpython3.10.so as
+# its default dlopen target, so it must be redirected explicitly or loading the
+# Python addon fails at runtime.
+ENV TEN_PYTHON_LIB_PATH=/usr/lib/aarch64-linux-gnu/libpython3.12.so
+RUN test -e "${TEN_PYTHON_LIB_PATH}" || \
+  ( echo "FATAL: ${TEN_PYTHON_LIB_PATH} missing" >&2; exit 1 )
+
+# Go -- the API server and the tenapp are Go; tman check requires >= 1.20.
+ARG GO_VERSION=1.24.3
+RUN set -eux; \
+  curl -fsSLO "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"; \
+  tar -C /usr/local -xzf "go${GO_VERSION}.linux-arm64.tar.gz"; \
+  rm "go${GO_VERSION}.linux-arm64.tar.gz"
+ENV PATH="/usr/local/go/bin:/root/go/bin:$PATH"
+RUN go version && go env -w GOFLAGS="-buildvcs=false"
+
+# Node 20 + Bun for the playground / example frontends.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && apt-get clean && rm -rf /var/lib/apt/lists/* \
+  && node --version
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
+RUN bun --version
+
+# uv (the pip driver used by install_python_deps) and task.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh \
+  && uv --version
+RUN sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin \
+  && task --version
+
+# Python tooling the lint/format/test tasks call.
+RUN pip3 install --break-system-packages --no-cache-dir \
+  black pylint pylint-exit pytest pytest-cov pytest-mock \
+  python-dotenv jinja2 requests
+
+# tman, arch-matched.
+ARG TMAN_VERSION=0.11.71
+RUN set -eux; \
+  url="https://github.com/TEN-framework/ten-framework/releases/download/${TMAN_VERSION}/tman-linux-release-arm64.zip"; \
+  curl -fsSL -o /tmp/tman.zip "${url}"; \
+  mkdir -p /tmp/tman && unzip -q /tmp/tman.zip -d /tmp/tman; \
+  if [ -f /tmp/tman/ten_manager/bin/tman ]; then \
+  tman_bin=/tmp/tman/ten_manager/bin/tman; \
+  else \
+  tman_bin="$(find /tmp/tman -name tman -type f | head -n 1)"; \
+  fi; \
+  test -n "${tman_bin}"; \
+  install -m 0755 "${tman_bin}" /usr/local/bin/tman; \
+  rm -rf /tmp/tman /tmp/tman.zip; \
+  tman --version
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+CMD ["/bin/bash"]

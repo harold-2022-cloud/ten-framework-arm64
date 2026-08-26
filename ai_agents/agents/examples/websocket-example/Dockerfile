@@ -1,4 +1,10 @@
-FROM ghcr.io/ten-framework/ten_agent_build:0.7.14 AS builder
+# The default builder image is published for linux/amd64 only. For an arm64
+# build, pass a multi-arch builder, e.g.:
+#   docker build --build-arg BUILDER_IMAGE=ten_agent_dev:local \
+#     -f agents/examples/websocket-example/Dockerfile -t ws-example:arm64 .
+# (build ten_agent_dev:local from ai_agents/Dockerfile.dev first)
+ARG BUILDER_IMAGE=ghcr.io/ten-framework/ten_agent_build:0.7.14
+FROM ${BUILDER_IMAGE} AS builder
 
 ARG USE_AGENT=agents/examples/websocket-example
 

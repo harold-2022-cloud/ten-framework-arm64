@@ -1,0 +1,140 @@
+name: AI Agents (Arm64 native build)
+
+# Proves the arm64-native path for the one example that has no Agora RTC
+# dependency. `agora_rtc` / `agora_rtc_sdk` / `agora_rtm` are published for
+# linux/x64 only, so every RTC example is x64-bound until upstream ships arm64
+# builds. websocket-example uses the pure-Python websocket_server extension
+# instead, and all of its native dependencies (ten_runtime, ten_runtime_go,
+# ten_runtime_python, python_addon_loader) do have linux/arm64 in the store.
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "ai_agents/agents/examples/websocket-example/**"
+      - "ai_agents/agents/ten_packages/extension/websocket_server/**"
+      - "ai_agents/agents/scripts/**"
+      - "ai_agents/Taskfile.yml"
+      - "ai_agents/Dockerfile.dev"
+      - "ai_agents/docker-compose.yml"
+      - ".github/workflows/ai_agents_arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-agents-arm64-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    env:
+      EXAMPLE: agents/examples/websocket-example
+      # ubuntu-24.04-arm ships glibc 2.39 (the arm64 packages need >= 2.38) and
+      # Python 3.12 (which the arm64 ten_runtime_python is built against), but
+      # python_addon_loader still hardcodes libpython3.10.so as its default
+      # dlopen target, so it has to be redirected explicitly.
+      TEN_PYTHON_LIB_PATH: /usr/lib/aarch64-linux-gnu/libpython3.12.so
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+          submodules: "false"
+
+      - name: Trust working directory
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Confirm the runner really is arm64 and meets the ABI baseline
+        run: |
+          set -eux
+          test "$(uname -m)" = "aarch64"
+          uname -a
+          ldd --version | head -1
+          # The arm64 packages need glibc >= 2.38.
+          glibc=$(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')
+          python3 -c "import sys; sys.exit(0 if tuple(int(x) for x in '$glibc'.split('.')) >= (2, 38) else 1)"
+          test -e "$TEN_PYTHON_LIB_PATH"
+
+      - name: Install toolchain (task, uv, tman, node, bun)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl unzip jq \
+            libasound2t64 libunwind-dev libssl-dev python3 python3-venv python3-dev
+
+          sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+          curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh
+
+          # tman: pick the arm64 release asset explicitly.
+          TMAN_VERSION=0.11.71
+          curl -fsSL -o /tmp/tman.zip \
+            "https://github.com/TEN-framework/ten-framework/releases/download/${TMAN_VERSION}/tman-linux-release-arm64.zip"
+          mkdir -p /tmp/tman && unzip -q /tmp/tman.zip -d /tmp/tman
+          if [ -f /tmp/tman/ten_manager/bin/tman ]; then
+            TMAN_BIN=/tmp/tman/ten_manager/bin/tman
+          else
+            TMAN_BIN="$(find /tmp/tman -name tman -type f | head -n 1)"
+          fi
+          sudo install -m 0755 "${TMAN_BIN}" /usr/local/bin/tman
+          tman --version
+
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          curl -fsSL https://bun.sh/install | bash
+
+          task --version
+          node --version
+
+      - name: Install the example (tman + python deps + frontend + api server)
+        run: |
+          set -eux
+          export PATH="$HOME/.bun/bin:$PATH"
+          cp ai_agents/.env.example ai_agents/.env
+          cd ai_agents/${EXAMPLE}
+          task install
+
+      - name: Assert the resolved packages are linux/arm64
+        run: |
+          set -eux
+          python3 - <<'PY'
+          import json, sys, os
+
+          lock = os.path.join(
+              "ai_agents", os.environ["EXAMPLE"], "tenapp", "manifest-lock.json"
+          )
+          with open(lock, encoding="utf-8") as f:
+              data = json.load(f)
+
+          native = []
+          for pkg in data.get("packages") or []:
+              supports = pkg.get("supports")
+              if supports:
+                  native.append((pkg["name"], supports))
+
+          if not native:
+              sys.exit("no platform-specific packages in %s -- nothing was resolved" % lock)
+
+          bad = [
+              (name, sup)
+              for name, sup in native
+              if not any(
+                  e.get("os") == "linux" and e.get("arch") == "arm64" for e in sup
+              )
+          ]
+          for name, sup in native:
+              print("  %-24s %s" % (name, sup))
+          if bad:
+              sys.exit("these packages did not resolve to linux/arm64: %r" % bad)
+          print("OK: all %d native packages resolved to linux/arm64" % len(native))
+          PY
+
+      - name: Assert the built artifacts are arm64 ELF binaries
+        run: |
+          set -eux
+          sudo apt-get install -y file
+          file ai_agents/server/bin/api | tee /dev/stderr | grep -q "ARM aarch64"
+          # The runtime shared objects tman pulled down must match.
+          find ai_agents/${EXAMPLE}/tenapp/ten_packages -name "*.so" -print -quit \
+            | xargs -r file | tee /dev/stderr | grep -q "ARM aarch64"
