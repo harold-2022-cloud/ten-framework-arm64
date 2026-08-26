@@ -1,0 +1,1368 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEN Framework 架構與 Fedora ARM64 建置手冊</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#E8EDED;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --rule-2:#B7C3C5;
+  --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+  --measure:70ch;
+  --s--1:.8125rem; --s-0:.9688rem; --s-1:1.15rem; --s-2:1.45rem; --s-3:1.9rem; --s-4:2.5rem;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+    --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+    --rule:#263033; --rule-2:#374447;
+    --accent:#4EC5D3; --accent-soft:#12292D;
+    --warn:#E4A063; --warn-soft:#2A1F14;
+    --danger:#E48A80; --danger-soft:#2B1817;
+    --ok:#63C39B; --ok-soft:#12251D;
+    --code-bg:#0A0E10; --code-ink:#DCE4E5;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;
+  font-size:var(--s-0); line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+code,pre,.mono,td.v{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+.serif{font-family:"IBM Plex Serif",Georgia,serif}
+
+/* ---------- shell ---------- */
+.shell{display:grid; grid-template-columns:16rem minmax(0,1fr); gap:0; max-width:82rem; margin:0 auto}
+@media(max-width:60rem){.shell{grid-template-columns:1fr}}
+
+nav.toc{
+  position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto;
+  padding:2rem 1.25rem 3rem; border-right:1px solid var(--rule);
+  font-size:var(--s--1);
+}
+@media(max-width:60rem){
+  nav.toc{position:static; max-height:none; border-right:none; border-bottom:1px solid var(--rule)}
+}
+nav.toc .brand{font-weight:700; font-size:var(--s-0); letter-spacing:-.01em; margin:0 0 .25rem}
+nav.toc .brandsub{color:var(--ink-3); margin:0 0 1.5rem; font-size:var(--s--1)}
+nav.toc ol{list-style:none; margin:0; padding:0}
+nav.toc .part{
+  font-weight:600; text-transform:uppercase; letter-spacing:.09em; font-size:.72rem;
+  color:var(--accent); margin:1.5rem 0 .5rem; padding-bottom:.3rem; border-bottom:1px solid var(--rule);
+}
+nav.toc .part:first-of-type{margin-top:0}
+nav.toc a{display:block; padding:.28rem 0; color:var(--ink-2); text-decoration:none; border-left:2px solid transparent; padding-left:.6rem; margin-left:-.6rem}
+nav.toc a:hover{color:var(--accent); border-left-color:var(--accent)}
+nav.toc a:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+nav.toc .num{color:var(--ink-3); display:inline-block; min-width:1.6rem; font-family:"IBM Plex Mono",monospace; font-size:.78rem}
+
+main{padding:2.5rem clamp(1.1rem,3.5vw,3rem) 7rem; min-width:0}
+
+/* ---------- masthead ---------- */
+.mast{padding-bottom:1.75rem; border-bottom:2px solid var(--ink); margin-bottom:2.5rem}
+.kicker{font-size:.72rem; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin:0 0 .8rem}
+h1{font-size:var(--s-4); font-weight:700; line-height:1.08; letter-spacing:-.025em; margin:0 0 .8rem; text-wrap:balance}
+.mast .lede{font-family:"IBM Plex Serif",Georgia,serif; font-size:var(--s-1); line-height:1.55; color:var(--ink-2); max-width:58ch; margin:0}
+.envbar{display:flex; flex-wrap:wrap; gap:.4rem .5rem; margin-top:1.4rem}
+.envchip{font-family:"IBM Plex Mono",monospace; font-size:.74rem; background:var(--sunk); border:1px solid var(--rule); padding:.2rem .55rem; border-radius:2px; color:var(--ink-2)}
+
+/* ---------- structure ---------- */
+.parthead{margin:4rem 0 2rem; padding-top:1.5rem; border-top:1px solid var(--rule)}
+.parthead .pl{font-size:.72rem; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin:0 0 .4rem}
+.parthead h2{font-size:var(--s-3); font-weight:700; letter-spacing:-.02em; line-height:1.12; margin:0 0 .5rem; text-wrap:balance}
+.parthead p{font-family:"IBM Plex Serif",Georgia,serif; color:var(--ink-2); max-width:var(--measure); margin:0}
+
+section.chap{margin:2.75rem 0 0; scroll-margin-top:1rem}
+section.chap > h3{
+  display:flex; gap:.7rem; align-items:baseline;
+  font-size:var(--s-2); font-weight:600; letter-spacing:-.015em; line-height:1.2;
+  margin:0 0 1rem; padding-bottom:.55rem; border-bottom:1px solid var(--rule-2); text-wrap:balance;
+}
+section.chap > h3 .n{font-family:"IBM Plex Mono",monospace; font-size:var(--s-1); color:var(--accent); font-weight:500; flex:none}
+h4{font-size:var(--s-1); font-weight:600; margin:2rem 0 .6rem; letter-spacing:-.01em}
+h5{font-size:var(--s-0); font-weight:600; margin:1.5rem 0 .5rem; color:var(--ink-2)}
+p{margin:0 0 .95rem; max-width:var(--measure)}
+ul,ol{margin:.5rem 0 1rem; padding-left:1.3rem; max-width:var(--measure)}
+li{margin-bottom:.35rem}
+li::marker{color:var(--accent)}
+strong{font-weight:600}
+a{color:var(--accent); text-underline-offset:2px}
+a:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+code:not(pre code){font-size:.86em; background:var(--sunk); border:1px solid var(--rule); border-radius:3px; padding:.05em .32em; word-break:break-word}
+
+/* ---------- code ---------- */
+pre{
+  background:var(--code-bg); color:var(--code-ink); padding:1rem 1.1rem; margin:1.1rem 0;
+  overflow-x:auto; font-size:.815rem; line-height:1.6; border-radius:3px; border:1px solid var(--rule); tab-size:2;
+}
+pre code{font-family:inherit}
+.cmt{color:#7C8D92} .add{color:#7FD1A8} .del{color:#E88E85} .kw{color:#C9A465} .out{color:#8FA3A8}
+.filebar{
+  font-size:.72rem; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3);
+  background:var(--sunk); border:1px solid var(--rule); border-bottom:none; padding:.45rem .85rem;
+  margin:1.1rem 0 -1.1rem; display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; border-radius:3px 3px 0 0;
+}
+.filebar .p{font-family:"IBM Plex Mono",monospace; text-transform:none; letter-spacing:0; color:var(--ink)}
+.filebar + pre{border-radius:0 0 3px 3px}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; border:1px solid var(--rule); background:var(--card); margin:1.2rem 0; border-radius:3px}
+table{border-collapse:collapse; width:100%; min-width:32rem; font-size:var(--s--1)}
+thead th{
+  text-align:left; font-weight:600; font-size:.73rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink-3); background:var(--sunk); padding:.6rem .85rem; border-bottom:1px solid var(--rule-2); white-space:nowrap;
+}
+tbody td{padding:.6rem .85rem; border-bottom:1px solid var(--rule); vertical-align:top; color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:none}
+td.v{font-variant-numeric:tabular-nums; color:var(--ink); white-space:nowrap}
+td.k{color:var(--ink); font-weight:500}
+td.k code{background:none; border:none; padding:0}
+
+/* ---------- callouts ---------- */
+.note,.warn,.danger,.ok{border-left:3px solid; padding:.85rem 1.1rem; margin:1.2rem 0; max-width:var(--measure); border-radius:0 3px 3px 0}
+.note{border-color:var(--accent); background:var(--accent-soft)}
+.warn{border-color:var(--warn); background:var(--warn-soft)}
+.danger{border-color:var(--danger); background:var(--danger-soft)}
+.ok{border-color:var(--ok); background:var(--ok-soft)}
+.note p,.warn p,.danger p,.ok p{margin:0; font-size:var(--s--1); line-height:1.6}
+.note p+p,.warn p+p,.danger p+p,.ok p+p{margin-top:.6rem}
+.lbl{font-size:.71rem; font-weight:600; letter-spacing:.09em; text-transform:uppercase; display:block; margin-bottom:.35rem}
+.note .lbl{color:var(--accent)} .warn .lbl{color:var(--warn)}
+.danger .lbl{color:var(--danger)} .ok .lbl{color:var(--ok)}
+
+/* ---------- pills ---------- */
+.pill{display:inline-block; font-size:.7rem; font-weight:600; letter-spacing:.04em; text-transform:uppercase; padding:.18em .5em; border-radius:2px; white-space:nowrap}
+.pill.go{background:var(--ok-soft); color:var(--ok)}
+.pill.no{background:var(--danger-soft); color:var(--danger)}
+.pill.mid{background:var(--warn-soft); color:var(--warn)}
+.pill.n{background:var(--sunk); color:var(--ink-2)}
+
+/* ---------- diagrams ---------- */
+.stack{display:flex; flex-direction:column; gap:2px; margin:1.4rem 0; max-width:44rem}
+.layer{background:var(--card); border:1px solid var(--rule); padding:.7rem .95rem; display:flex; gap:.9rem; align-items:baseline; flex-wrap:wrap}
+.layer .ln{font-family:"IBM Plex Mono",monospace; font-size:.72rem; color:var(--accent); min-width:5.5rem; flex:none; font-weight:600}
+.layer .lt{font-weight:600; font-size:var(--s--1); color:var(--ink)}
+.layer .ld{font-size:var(--s--1); color:var(--ink-3); flex:1 1 14rem; min-width:0}
+.layer.hi{border-left:3px solid var(--accent); background:var(--accent-soft)}
+
+.flow{display:flex; flex-wrap:wrap; align-items:center; gap:.45rem; margin:1.3rem 0; font-size:var(--s--1)}
+.node{background:var(--card); border:1px solid var(--rule-2); padding:.4rem .7rem; border-radius:3px; font-family:"IBM Plex Mono",monospace; font-size:.78rem; color:var(--ink)}
+.node.acc{border-color:var(--accent); color:var(--accent); font-weight:600}
+.arr{color:var(--ink-3); font-family:"IBM Plex Mono",monospace}
+.arrl{color:var(--ink-3); font-size:.7rem; font-family:"IBM Plex Mono",monospace; padding:0 .1rem}
+
+/* ---------- error map ---------- */
+.emap{display:grid; gap:1px; background:var(--rule); border:1px solid var(--rule); margin:1.3rem 0; border-radius:3px; overflow:hidden}
+.erow{background:var(--card); padding:.9rem 1rem; display:grid; grid-template-columns:11rem minmax(0,1fr); gap:.3rem 1rem}
+@media(max-width:44rem){.erow{grid-template-columns:1fr}}
+.erow .stage{font-family:"IBM Plex Mono",monospace; font-size:.76rem; font-weight:600; color:var(--accent)}
+.erow .where{font-size:var(--s--1); color:var(--ink-2)}
+.erow .where code{font-size:.85em}
+
+footer{margin-top:5rem; padding-top:1.5rem; border-top:1px solid var(--rule); font-size:var(--s--1); color:var(--ink-3); max-width:var(--measure)}
+footer p{margin:0 0 .5rem}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto} *{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<nav class="toc">
+  <p class="brand">TEN 架構與建置手冊</p>
+  <p class="brandsub">Fedora Linux · aarch64</p>
+
+  <div class="part">第一部 — 理解架構</div>
+  <ol>
+    <li><a href="#c1"><span class="num">1</span>TEN 是什麼</a></li>
+    <li><a href="#c2"><span class="num">2</span>執行期分層</a></li>
+    <li><a href="#c3"><span class="num">3</span>Extension</a></li>
+    <li><a href="#c4"><span class="num">4</span>Graph 與訊息路由</a></li>
+    <li><a href="#c5"><span class="num">5</span>Server–Worker 模型</a></li>
+    <li><a href="#c6"><span class="num">6</span>目錄地圖</a></li>
+  </ol>
+
+  <div class="part">第二部 — 操作手冊</div>
+  <ol>
+    <li><a href="#c7"><span class="num">7</span>工具鏈職責</a></li>
+    <li><a href="#c8"><span class="num">8</span>tman 指令</a></li>
+    <li><a href="#c9"><span class="num">9</span>task 指令</a></li>
+    <li><a href="#c10"><span class="num">10</span>執行與測試</a></li>
+  </ol>
+
+  <div class="part">第三部 — Fedora 建置</div>
+  <ol>
+    <li><a href="#c11"><span class="num">11</span>先確認環境</a></li>
+    <li><a href="#c12"><span class="num">12</span>安裝依賴</a></li>
+    <li><a href="#c13"><span class="num">13</span>Clone 與 submodule</a></li>
+    <li><a href="#c14"><span class="num">14</span>建置核心</a></li>
+    <li><a href="#c15"><span class="num">15</span>建置與執行 agent</a></li>
+  </ol>
+
+  <div class="part">第四部 — 排查錯誤</div>
+  <ol>
+    <li><a href="#c16"><span class="num">16</span>錯誤在哪裡看</a></li>
+    <li><a href="#c17"><span class="num">17</span>常見失敗對照表</a></li>
+    <li><a href="#c18"><span class="num">18</span>驗證指令集</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<header class="mast">
+  <p class="kicker">技術手冊</p>
+  <h1>TEN Framework 架構與 Fedora ARM64 建置</h1>
+  <p class="lede">
+    先理解這個框架由哪些部分組成、資料怎麼流動，再照著在 Fedora aarch64 上從
+    <code>git clone</code> 一路建到跑起來，最後知道出錯時該去哪裡看。
+  </p>
+  <div class="envbar">
+    <span class="envchip">Fedora Linux</span>
+    <span class="envchip">aarch64</span>
+    <span class="envchip">無 Docker</span>
+    <span class="envchip">ten_runtime 0.11.71</span>
+  </div>
+</header>
+
+<div class="warn">
+  <span class="lbl">關於本文的驗證狀態</span>
+  <p>
+    第一、二、四部的內容來自對這個 repo 的原始碼、CI 設定與官方發佈二進位的實際檢查（<code>readelf</code>、
+    registry API、GHCR manifest）。第三部的指令序列<strong>沒有在 Fedora aarch64 上實際跑過</strong> ——
+    撰寫環境是 x86_64。凡是我無法在此驗證的（特別是 dnf 套件名稱），文中都標示了對應的驗證指令，請以你機器上的結果為準。
+  </p>
+</div>
+
+<!-- ==================== PART I ==================== -->
+<div class="parthead">
+  <p class="pl">第一部</p>
+  <h2>理解架構</h2>
+  <p>先建立正確的心智模型。這一部不需要動手，但沒有它，第三部的每個錯誤訊息都會像天書。</p>
+</div>
+
+<section class="chap" id="c1">
+  <h3><span class="n">1</span>TEN 是什麼</h3>
+
+  <p>
+    TEN 是一個<strong>即時多模態 AI agent 框架</strong>。它要解決的問題是：把語音辨識、大型語言模型、語音合成、
+    視訊、頭像這些各自獨立的服務，串成一條延遲夠低、可以真的跟人對話的管線。
+  </p>
+
+  <p>
+    它的核心設計決定是：<strong>agent 的行為由設定檔定義，不是由程式碼定義</strong>。你不寫「呼叫 ASR 然後呼叫 LLM」
+    這種流程程式碼，而是宣告一張圖（graph）：有哪些節點、節點之間傳什麼訊息。換 TTS 廠商是改 JSON，不是改程式。
+  </p>
+
+  <h4>這個 repo 有兩個半邊，工具鏈完全不同</h4>
+  <p>這是理解一切的起點。搞錯自己在哪一邊，會用錯建置指令、看錯 log、查錯文件。</p>
+
+  <div class="tw"><table>
+    <thead><tr><th></th><th>框架核心</th><th>AI Agents</th></tr></thead>
+    <tbody>
+      <tr><td class="k">路徑</td><td><code>core/</code> <code>packages/</code> <code>tests/</code> <code>build/</code> <code>third_party/</code></td><td><code>ai_agents/</code></td></tr>
+      <tr><td class="k">語言</td><td>C/C++ 執行期、Rust（<code>ten_rust</code>、<code>ten_manager</code>）、Go/Python/Node 綁定</td><td>Python extension、Go API server、Next.js 前端</td></tr>
+      <tr><td class="k">建置系統</td><td>GN + Ninja，透過 <code>tgn</code> 包裝</td><td><code>task</code> + <code>tman</code> + <code>go build</code> + <code>bun</code></td></tr>
+      <tr><td class="k">產出位置</td><td><code>out/&lt;os&gt;/&lt;arch&gt;/</code></td><td><code>tenapp/.release/</code>、<code>server/bin/api</code></td></tr>
+      <tr><td class="k">入口 Taskfile</td><td>根目錄 <code>Taskfile.yml</code></td><td><code>ai_agents/Taskfile.yml</code></td></tr>
+      <tr><td class="k">CI workflow</td><td><code>linux_arm64.yml</code>、<code>linux_ubuntu2204.yml</code></td><td><code>ai_agents.yaml</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note">
+    <span class="lbl">重要</span>
+    <p>
+      兩套 CI 用<strong>互斥的 <code>paths-ignore</code></strong>：改 <code>ai_agents/</code> 不會觸發核心建置，
+      改 <code>core/</code> 不會觸發 agent 測試。這也意味著<strong>你不需要為了跑 agent 而建置核心</strong> ——
+      核心的產出可以從 package registry 直接下載。第三部會分開講這兩條路。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c2">
+  <h3><span class="n">2</span>執行期分層</h3>
+
+  <p>一個廠商 extension（例如接 Deepgram 的語音辨識）坐在這個堆疊的最上層：</p>
+
+  <div class="stack">
+    <div class="layer hi">
+      <span class="ln">你寫的</span>
+      <span class="lt">Vendor Extension</span>
+      <span class="ld">純 Python。<code>ai_agents/agents/ten_packages/extension/&lt;name&gt;/</code></span>
+    </div>
+    <div class="layer">
+      <span class="ln">registry</span>
+      <span class="lt">ten_ai_base</span>
+      <span class="ld">ASR / TTS / LLM / MLLM 的抽象基底類別 + <code>api/*-interface.json</code> 訊息契約</span>
+    </div>
+    <div class="layer">
+      <span class="ln">registry</span>
+      <span class="lt">語言綁定</span>
+      <span class="ld"><code>ten_runtime_python</code> / <code>_go</code> / <code>_nodejs</code> — C 擴充模組</span>
+    </div>
+    <div class="layer">
+      <span class="ln">core/</span>
+      <span class="lt">ten_runtime</span>
+      <span class="ld">C/C++ 執行期：extension 生命週期、訊息佇列、graph 解析、執行緒模型</span>
+    </div>
+    <div class="layer">
+      <span class="ln">core/</span>
+      <span class="lt">ten_utils</span>
+      <span class="ld">基礎設施：記憶體檢查、log、字串、容器</span>
+    </div>
+  </div>
+
+  <p>
+    這個分層決定了<strong>改動的成本</strong>。加一個新的 TTS 廠商只碰最上層，是純 Python 工作，不用編譯任何東西。
+    但如果你要改一個<em>訊息型別、schema 或生命週期契約</em>，就會伸進 <code>core/</code>，那是另一半邊的 repo，
+    另一套建置、另一套 CI。
+  </p>
+
+  <div class="warn">
+    <span class="lbl">在 repo 裡找不到 ten_ai_base 是正常的</span>
+    <p>
+      <code>ai_agents/agents/ten_packages/</code> 底下<strong>只有 <code>extension/</code></strong>。
+      <code>ten_packages/system/ten_ai_base</code> 是 <code>tman install</code> 從 registry 拉下來的<em>版本化依賴</em>
+      （每個範例的 <code>tenapp/manifest.json</code> 裡寫著 <code>{"type":"system","name":"ten_ai_base","version":"0.7"}</code>）。
+      所以 <code>docs/ai/</code> 裡引用的那些基底類別路徑，只存在於<strong>安裝後</strong>的 tenapp 內。
+      在乾淨的 checkout 裡 <code>find</code> 它們會是空的。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c3">
+  <h3><span class="n">3</span>Extension</h3>
+
+  <p>Extension 是 TEN 的基本組成單位。每一個都是一個目錄，長這樣：</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>檔案</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><code>addon.py</code></td><td>用 <code>@register_addon_as_extension("name")</code> 註冊</td></tr>
+      <tr><td class="k"><code>extension.py</code></td><td>主要邏輯，繼承某個基底類別</td></tr>
+      <tr><td class="k"><code>config.py</code></td><td>Pydantic 設定模型（慣例，非強制）</td></tr>
+      <tr><td class="k"><code>manifest.json</code></td><td>套件中介資料、依賴、API 介面宣告</td></tr>
+      <tr><td class="k"><code>property.json</code></td><td>預設設定值，支援 <code>${env:VAR}</code> 代換</td></tr>
+      <tr><td class="k"><code>requirements.txt</code></td><td>Python 依賴</td></tr>
+      <tr><td class="k"><code>tests/</code></td><td>standalone 測試，入口是 <code>tests/bin/start</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>生命週期</h4>
+  <div class="flow">
+    <span class="node">on_init</span><span class="arr">→</span>
+    <span class="node">on_start</span><span class="arr">→</span>
+    <span class="node acc">處理訊息</span><span class="arr">→</span>
+    <span class="node">on_stop</span><span class="arr">→</span>
+    <span class="node">on_deinit</span>
+  </div>
+
+  <h4>基底類別怎麼選</h4>
+  <div class="tw"><table>
+    <thead><tr><th>需求</th><th>基底類別</th><th>你要實作的主要方法</th></tr></thead>
+    <tbody>
+      <tr><td class="k">語音辨識</td><td><code>AsyncASRBaseExtension</code></td><td><code>vendor()</code>、<code>start_connection()</code>、<code>send_audio()</code>、<code>finalize()</code></td></tr>
+      <tr><td class="k">語音合成 (HTTP)</td><td><code>AsyncTTS2HttpExtension</code></td><td><code>create_config()</code>、<code>create_client()</code>、<code>synthesize_audio_sample_rate()</code></td></tr>
+      <tr><td class="k">語音合成 (WS)</td><td><code>AsyncTTS2BaseExtension</code></td><td><code>vendor()</code>、<code>request_tts()</code></td></tr>
+      <tr><td class="k">對話補全</td><td><code>AsyncLLMBaseExtension</code></td><td><code>on_call_chat_completion()</code>、<code>on_data_chat_completion()</code></td></tr>
+      <tr><td class="k">LLM 工具</td><td><code>AsyncLLMToolBaseExtension</code></td><td><code>get_tool_metadata()</code>、<code>run_tool()</code></td></tr>
+      <tr><td class="k">通用</td><td><code>AsyncExtension</code></td><td><code>on_cmd()</code>、<code>on_data()</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="danger">
+    <span class="lbl">三個名字必須完全一致</span>
+    <p>
+      否則 graph 載入時<strong>會靜默失敗</strong>，不會有明顯錯誤：
+    </p>
+    <p>
+      <code>addon.py</code> 裡 <code>@register_addon_as_extension("x")</code> 的參數 ·
+      extension 的 <code>manifest.json</code> 的 <code>name</code> 欄位 ·
+      範例 <code>tenapp/property.json</code> 裡 graph 節點的 <code>addon</code> 欄位
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c4">
+  <h3><span class="n">4</span>Graph 與訊息路由</h3>
+
+  <p>
+    Agent 的行為定義在 <code>ai_agents/agents/examples/&lt;ex&gt;/tenapp/property.json</code> 的
+    <code>predefined_graphs[]</code>。一張 graph 有兩個部分：<code>nodes</code>（要實例化哪些 extension）
+    和 <code>connections</code>（訊息怎麼流）。
+  </p>
+
+  <div class="filebar"><span>Graph 骨架</span><span class="p">tenapp/property.json</span></div>
+<pre><code>{
+  "ten": {
+    "predefined_graphs": [{
+      "name": "voice_assistant",
+      "auto_start": true,
+      "graph": {
+        "nodes": [
+          {"type":"extension","name":"stt","addon":"deepgram_asr_python","property":{}},
+          {"type":"extension","name":"llm","addon":"openai_llm2_python","property":{}},
+          {"type":"extension","name":"tts","addon":"elevenlabs_tts2_python","property":{}}
+        ],
+        "connections": [ <span class="cmt">/* 見下 */</span> ]
+      }
+    }]
+  }
+}</code></pre>
+
+  <h4>四種訊息型別</h4>
+  <div class="tw"><table>
+    <thead><tr><th>型別</th><th>承載</th><th>常見名稱</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><code>cmd</code></td><td>具名命令，有回應</td><td><code>tool_register</code>、<code>on_user_joined</code>、<code>flush</code></td></tr>
+      <tr><td class="k"><code>data</code></td><td>具名資料訊息</td><td><code>asr_result</code>、<code>text_data</code>、<code>tts_text_input</code></td></tr>
+      <tr><td class="k"><code>audio_frame</code></td><td>PCM 音訊流</td><td><code>pcm_frame</code>（16-bit mono，16/24/48 kHz）</td></tr>
+      <tr><td class="k"><code>video_frame</code></td><td>視訊流</td><td><code>video_frame</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>典型語音管線的訊息流</h4>
+  <div class="flow">
+    <span class="node acc">agora_rtc<br>／websocket</span>
+    <span class="arrl">pcm_frame</span><span class="arr">→</span>
+    <span class="node">stt</span>
+    <span class="arrl">asr_result</span><span class="arr">→</span>
+    <span class="node">main</span>
+    <span class="arrl">text_data</span><span class="arr">→</span>
+    <span class="node">llm</span>
+    <span class="arrl">tts_text_input</span><span class="arr">→</span>
+    <span class="node">tts</span>
+    <span class="arrl">pcm_frame</span><span class="arr">→</span>
+    <span class="node acc">傳輸層</span>
+  </div>
+
+  <p>
+    這些訊息名稱不是自由字串，而是<strong>契約</strong>，宣告在 <code>ten_ai_base/api/*-interface.json</code>，
+    由每個 extension 的 <code>manifest.json</code> 匯入。
+  </p>
+
+  <div class="note">
+    <span class="lbl">加 extension 進 graph 要改三個地方</span>
+    <p>
+      1. <code>tenapp/property.json</code> 的 <code>nodes[]</code> 加節點 ·
+      2. 同檔的 <code>connections[]</code> 接線 ·
+      3. <code>tenapp/manifest.json</code> 加依賴（本地 extension 用 <code>{"path": "../../../ten_packages/extension/&lt;name&gt;"}</code>）
+    </p>
+    <p>
+      然後跑 <code>task install</code>。<strong>新增或移除 graph 需要完整重啟</strong>（前端會快取
+      <code>/graphs</code> 回應）；只改既有 graph 裡的值則是每個 session 重新載入，不用重啟。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c5">
+  <h3><span class="n">5</span>Server–Worker 模型</h3>
+
+  <p>
+    Go 寫的 HTTP server（<code>ai_agents/server/</code>）本身是無狀態的路由層。真正跑 agent 的是它為每個
+    session 生出來的 worker 行程。
+  </p>
+
+  <div class="flow">
+    <span class="node">Client</span><span class="arr">→</span>
+    <span class="node acc">Go server :8080</span>
+    <span class="arrl">spawn</span><span class="arr">→</span>
+    <span class="node">worker（tman run start）</span>
+    <span class="arrl">載入 graph</span><span class="arr">→</span>
+    <span class="node">extensions</span>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>端點</th><th>方法</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><code>/health</code></td><td>GET</td><td>健康檢查，回 <code>{"code":"0"}</code></td></tr>
+      <tr><td class="k"><code>/graphs</code></td><td>GET</td><td>列出可用 graph</td></tr>
+      <tr><td class="k"><code>/start</code></td><td>POST</td><td>為某個 channel 生出 worker</td></tr>
+      <tr><td class="k"><code>/stop</code></td><td>POST</td><td>終止 worker</td></tr>
+      <tr><td class="k"><code>/ping</code></td><td>POST</td><td>保持 session 存活</td></tr>
+      <tr><td class="k"><code>/list</code></td><td>GET</td><td>列出進行中的 session</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>Property 注入</h4>
+  <p>
+    <code>/start</code> 被呼叫時，server 會把動態值注入 graph：<code>channel_name</code> 灌進<strong>每一個宣告了
+    <code>channel</code> 屬性的節點</strong>，加上 <code>startPropMap</code> 的
+    <code>remote_stream_id</code>、<code>bot_stream_id</code>、<code>token</code>，以及請求裡
+    <code>properties</code> 指定的個別 extension 覆寫。
+  </p>
+  <p>
+    這個設計的意義是：新的 extension 只要宣告 <code>channel</code> 屬性就會自動拿到值，<strong>不需要改 server 程式碼</strong>。
+  </p>
+</section>
+
+<section class="chap" id="c6">
+  <h3><span class="n">6</span>目錄地圖</h3>
+
+<pre><code>ten-framework/
+├── core/
+│   ├── ten_gn/                  <span class="cmt"># submodule！tgn 建置工具本體（含自帶 gn/ninja）</span>
+│   ├── src/
+│   │   ├── ten_runtime/         <span class="cmt"># C/C++ 執行期 + 語言綁定</span>
+│   │   ├── ten_utils/           <span class="cmt"># C 基礎設施</span>
+│   │   ├── ten_rust/            <span class="cmt"># Rust 元件</span>
+│   │   └── ten_manager/         <span class="cmt"># tman 本體（Rust）+ designer 前端</span>
+│   └── include/
+├── packages/                    <span class="cmt"># 核心/範例 app、extension、protocol、addon loader</span>
+├── third_party/                 <span class="cmt"># 全部原始碼編譯，無預編二進位</span>
+├── build/                       <span class="cmt"># GN 設定：options.gni 等</span>
+├── tests/                       <span class="cmt"># 核心測試（GN target）</span>
+├── tools/                       <span class="cmt"># 版本、pylint、docker 建置環境、tgn/tman 安裝腳本</span>
+├── out/                         <span class="cmt"># 建置產出（gitignored）</span>
+│
+└── ai_agents/
+    ├── agents/
+    │   ├── ten_packages/extension/   <span class="cmt"># ~90 個 extension，全部純 Python</span>
+    │   ├── examples/                 <span class="cmt"># 21+ 範例 agent 設定</span>
+    │   ├── integration_tests/        <span class="cmt"># asr_guarder / tts_guarder</span>
+    │   └── scripts/                  <span class="cmt"># 建置與打包腳本</span>
+    ├── server/                       <span class="cmt"># Go API server</span>
+    ├── playground/                   <span class="cmt"># Next.js 前端</span>
+    ├── Taskfile.yml
+    └── docker-compose.yml</code></pre>
+</section>
+
+<!-- ==================== PART II ==================== -->
+<div class="parthead">
+  <p class="pl">第二部</p>
+  <h2>操作手冊</h2>
+  <p>每個工具負責什麼、指令怎麼用。這一部是查閱用的，不用照順序讀。</p>
+</div>
+
+<section class="chap" id="c7">
+  <h3><span class="n">7</span>工具鏈職責</h3>
+
+  <div class="tw"><table>
+    <thead><tr><th>工具</th><th>屬於</th><th>職責</th><th>來源</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><code>tgn</code></td><td>核心</td><td>GN/Ninja 的包裝器，產生並執行建置</td><td><code>core/ten_gn</code> submodule</td></tr>
+      <tr><td class="k"><code>gn</code> / <code>ninja</code></td><td>核心</td><td>實際的建置系統</td><td><strong>tgn 自帶預編二進位</strong>，含 aarch64</td></tr>
+      <tr><td class="k"><code>tman</code></td><td>兩者</td><td>TEN 套件管理器：解析依賴、安裝、發佈、環境檢查</td><td>Release asset 或自行建置</td></tr>
+      <tr><td class="k"><code>task</code></td><td>兩者</td><td>Taskfile 執行器，包裝常用組合指令</td><td>taskfile.dev</td></tr>
+      <tr><td class="k"><code>uv</code></td><td>agents</td><td>安裝 extension 的 Python 依賴</td><td>astral.sh</td></tr>
+      <tr><td class="k"><code>go</code></td><td>agents</td><td>建 API server 與 tenapp</td><td>go.dev</td></tr>
+      <tr><td class="k"><code>bun</code></td><td>agents</td><td>前端依賴與 dev server</td><td>bun.sh</td></tr>
+      <tr><td class="k"><code>black</code> / <code>pylint</code></td><td>agents</td><td>格式化與靜態檢查（CI 會擋）</td><td>pip</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="ok">
+    <span class="lbl">對 Fedora ARM 是好消息</span>
+    <p>
+      <code>gn</code> 和 <code>ninja</code> 是 <code>tgn</code> 自帶的 aarch64 預編二進位
+      （<code>core/ten_gn/.gnfiles/bin/linux/arm64/</code>），glibc 只需 2.17／2.18。
+      <strong>你不需要在 Fedora 上安裝 gn 或 ninja。</strong>
+    </p>
+  </div>
+
+  <div class="warn">
+    <span class="lbl">沒有跨編譯</span>
+    <p>
+      <code>build.py</code> 是依<strong>主機</strong>架構（<code>os.uname().machine</code>）挑 gn/ninja 的，
+      整個 repo 也沒有任何 sysroot 或 cross-toolchain 設定。CI 也只在原生 arm64 runner 上建 arm64。
+      所以 aarch64 的建置必須在 aarch64 機器上做 —— 你的 Fedora ARM 正好符合。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c8">
+  <h3><span class="n">8</span>tman 指令</h3>
+
+<pre><code><span class="cmt"># 環境檢查 —— 建置前先跑這個，它會告訴你缺什麼</span>
+tman check env
+
+<span class="cmt"># 安裝 tenapp 的依賴（在有 manifest.json 的目錄執行）</span>
+tman install
+tman install --os linux --arch arm64      <span class="cmt"># 為指定平台解析（可在 x86 上為 arm64 備料）</span>
+tman install --locked                     <span class="cmt"># 嚴格依 manifest-lock.json，不更新 lock</span>
+tman install --standalone                 <span class="cmt"># 單一 extension 的獨立測試用</span>
+tman install --production                 <span class="cmt"># 忽略 dev_dependencies</span>
+
+<span class="cmt"># 驗證設定檔</span>
+tman check manifest-json --path manifest.json
+tman check property-json --path property.json
+
+<span class="cmt"># 打包與發佈</span>
+tman package --output-path foo.tpkg
+tman package --get-identity                <span class="cmt"># 印出 type name version hash</span>
+tman publish                               <span class="cmt"># 發到 config 裡的 registry</span>
+
+<span class="cmt"># 執行 tenapp / 開發伺服器</span>
+tman run start
+tman designer                              <span class="cmt"># TMAN Designer，預設 :49483</span></code></pre>
+
+  <h4>本地 registry</h4>
+  <p>
+    <code>tman</code> 的 registry index 支援 <code>file://</code> scheme，可以在沒有網路或需要塞自訂套件時使用：
+  </p>
+<pre><code>mkdir -p ~/ten-localreg
+cat &gt; ~/tman-local.json &lt;&lt;'JSON'
+{ "registry": { "default": { "index": "file:///home/&lt;you&gt;/ten-localreg" } } }
+JSON
+
+tman -c ~/tman-local.json publish          <span class="cmt"># 在套件目錄內執行</span>
+tman -c ~/tman-local.json -y install</code></pre>
+
+  <div class="note">
+    <span class="lbl">關於 manifest-lock.json</span>
+    <p>
+      committed 的 lockfile 的 <code>supports</code> 欄位<strong>只記錄產生它的那台機器所解析中的平台</strong>，
+      不是套件的完整平台矩陣。repo 裡每個 lock 都寫 <code>linux/x64</code>，那看起來像 arm64 被封死，其實不是。
+    </p>
+    <p>
+      而且整個 repo 都沒用 <code>--locked</code>，所以 <code>tman install</code> 會依主機平台重新解析並改寫 lock。
+      <strong>要判斷有沒有 arm64，看 registry，不要看 lock。</strong>
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c9">
+  <h3><span class="n">9</span>task 指令</h3>
+
+  <h5>核心（repo 根目錄）</h5>
+<pre><code>task gen                    <span class="cmt"># tgn gen &lt;偵測到的 os&gt; &lt;arch&gt; debug</span>
+task build                  <span class="cmt"># tgn build 同上</span>
+task clean                  <span class="cmt"># rm -rf out</span>
+task gen-tman               <span class="cmt"># 只開 ten_rust + ten_manager，最快，不含語言綁定</span>
+task build-tman
+
+task build ARCH=arm64 BUILD_TYPE=release   <span class="cmt"># 顯式覆寫</span></code></pre>
+
+  <h5>Agents（<code>ai_agents/</code>）</h5>
+<pre><code>task format                 <span class="cmt"># black --line-length 80</span>
+task check                  <span class="cmt"># black --check</span>
+task lint                   <span class="cmt"># pylint，任何 warning 都是致命的</span>
+task lint-extension EXTENSION=&lt;dir_name&gt;
+
+task test                   <span class="cmt"># 所有 extension standalone 測試 + server 的 go test</span>
+task test-extension EXTENSION=agents/ten_packages/extension/&lt;ext&gt;
+task test-extension-no-install EXTENSION=...      <span class="cmt"># 跳過安裝，迭代快</span>
+task tts-guarder-test EXTENSION=&lt;ext&gt;
+task asr-guarder-test EXTENSION=&lt;ext&gt;
+
+task build-agent-deps       <span class="cmt"># 走 install_deps_and_build.sh</span></code></pre>
+
+  <h5>單一範例（<code>ai_agents/agents/examples/&lt;ex&gt;/</code>）</h5>
+<pre><code>task install                <span class="cmt"># tman install + Python 依賴 + 前端 + go build api</span>
+task run                    <span class="cmt"># API server + 前端 + TMAN Designer 一起起</span>
+task release                <span class="cmt"># 產生 .release/ 供部署</span></code></pre>
+
+  <div class="note">
+    <span class="lbl">跑單一測試</span>
+    <p>
+      <code>--</code> 之後的東西會轉給 pytest（<code>tests/bin/start</code> 結尾是 <code>pytest tests/ "$@"</code>）：
+    </p>
+<pre style="margin:.6rem 0 0"><code>task test-extension-no-install EXTENSION=agents/ten_packages/extension/deepgram_tts -- -k test_flush -s -v</code></pre>
+  </div>
+</section>
+
+<section class="chap" id="c10">
+  <h3><span class="n">10</span>執行與測試</h3>
+
+  <h4>啟動一個 agent</h4>
+<pre><code>cd ai_agents/agents/examples/websocket-example
+task install
+task run</code></pre>
+
+  <div class="tw"><table>
+    <thead><tr><th>Port</th><th>服務</th></tr></thead>
+    <tbody>
+      <tr><td class="v">8080</td><td>Go API server</td></tr>
+      <tr><td class="v">3000</td><td>前端（Next.js）</td></tr>
+      <tr><td class="v">49483</td><td>TMAN Designer</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="danger">
+    <span class="lbl">一定要用 task run</span>
+    <p>
+      不要直接跑 <code>./bin/api</code> 或 <code>./bin/worker</code>。<code>task run</code> 會設好正確的
+      <code>PYTHONPATH</code> 並把三個服務一起帶起來。同理，用 <code>task install</code>，
+      不要用裸的 <code>tman install</code> —— 後者在系統依賴有新版時會替換執行期套件並<strong>刪掉
+      <code>bin/worker</code></strong>。
+    </p>
+  </div>
+
+  <h4>三層測試</h4>
+  <div class="tw"><table>
+    <thead><tr><th>層級</th><th>範圍</th><th>指令</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Standalone</td><td>單一 extension，mock 掉外部服務</td><td><code>task test-extension EXTENSION=...</code></td></tr>
+      <tr><td class="k">Guarder</td><td>框架層 ASR/TTS 驗證，打真的廠商 API</td><td><code>task tts-guarder-test EXTENSION=...</code></td></tr>
+      <tr><td class="k">核心</td><td>C/C++ 執行期，GN target</td><td><code>tgn build</code> 後跑 <code>out/&lt;os&gt;/&lt;arch&gt;/tests/</code> 下的二進位</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="warn">
+    <span class="lbl">Guarder 不要並行跑</span>
+    <p>
+      ASR 和 TTS guarder 在同一台機器上同時跑會在共用暫存路徑上撞在一起，錯誤長得像
+      <code>/tmp/test: Text file busy</code>。跑完一個再跑下一個。
+    </p>
+  </div>
+</section>
+
+<!-- ==================== PART III ==================== -->
+<div class="parthead">
+  <p class="pl">第三部</p>
+  <h2>在 Fedora aarch64 上建置</h2>
+  <p>
+    從 <code>git clone</code> 開始。這一部有順序性 —— 每一步的驗證通過了再做下一步，
+    因為後面的錯誤幾乎都源自前面某一步沒真的成功。
+  </p>
+</div>
+
+<section class="chap" id="c11">
+  <h3><span class="n">11</span>先確認環境</h3>
+
+  <p>
+    Fedora 對這個框架是<strong>相容的發行版</strong>，但有兩個 ABI 條件必須先確認。這些不是設定問題 ——
+    不符合的話官方二進位根本載不起來。
+  </p>
+
+<pre><code>uname -m                       <span class="cmt"># 必須是 aarch64</span>
+cat /etc/fedora-release
+ldd --version | head -1        <span class="cmt"># glibc 必須 &gt;= 2.38</span>
+python3 --version</code></pre>
+
+  <h4>條件一：glibc ≥ 2.38</h4>
+  <p>
+    官方 arm64 套件裡的 <code>libten_utils.so</code> 和 <code>libpython_addon_loader.so</code> 需要
+    <code>__isoc23_strtol@GLIBC_2.38</code>。（x64 套件只需 2.34 —— 這個落差是因為 arm64 CI 跑在
+    Ubuntu 24.04 而 x64 跑在 22.04，不是刻意的設計。）
+  </p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Fedora</th><th>glibc</th><th>Python</th><th>預編 arm64 套件</th></tr></thead>
+    <tbody>
+      <tr><td class="k">39</td><td class="v">2.38</td><td class="v">3.12</td><td><span class="pill go">可用</span></td></tr>
+      <tr><td class="k">40</td><td class="v">2.39</td><td class="v">3.12</td><td><span class="pill go">可用，最順</span></td></tr>
+      <tr><td class="k">41</td><td class="v">2.40</td><td class="v">3.13</td><td><span class="pill mid">需另裝 python3.12</span></td></tr>
+      <tr><td class="k">42+</td><td class="v">2.41+</td><td class="v">3.13+</td><td><span class="pill mid">需另裝 python3.12</span></td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:var(--s--1);color:var(--ink-3)">
+    上表的 glibc/Python 對應是依 Fedora 各版本的已知組合。請以你機器上 <code>ldd --version</code> 與
+    <code>python3 --version</code> 的實際輸出為準。
+  </p>
+
+  <h4>條件二：Python 必須是 3.12</h4>
+  <p>
+    arm64 的 <code>ten_runtime_python</code> 是用 <strong>Python 3.12 標頭</strong>編的，而且<strong>不是</strong>
+    穩定 ABI。它的 74 個 Python 符號裡有 7 個是私有 API：
+  </p>
+<pre><code>_Py_Dealloc          _Py_NoneStruct      _Py_TrueStruct     _Py_FalseStruct
+_PyArg_ParseTuple_SizeT   _PyObject_CallMethod_SizeT   _Py_BuildValue_SizeT</code></pre>
+  <p>
+    二進位裡沒有 <code>Py_LIMITED_API</code>／<code>abi3</code> 的跡象。所以它綁死 3.12，
+    <strong>不能指向 3.13</strong>。
+  </p>
+
+  <div class="note">
+    <span class="lbl">在你的機器上驗證這件事</span>
+    <p>
+      如果你在 Fedora 41+ 想確認 3.13 到底不行，直接查那些符號在不在：
+    </p>
+<pre style="margin:.6rem 0 0"><code>nm -D /usr/lib64/libpython3.13.so 2&gt;/dev/null | grep -c _PyArg_ParseTuple_SizeT
+<span class="cmt"># 回 0 → 確認不相容，必須裝 python3.12</span></code></pre>
+  </div>
+
+  <div class="danger">
+    <span class="lbl">Fedora 特有：TEN_PYTHON_LIB_PATH 是必填</span>
+    <p>
+      <code>python_addon_loader</code> 用 hardcode 的檔名 dlopen libpython，候選路徑只有三個，
+      <strong>全部是 Debian／Ubuntu 慣例</strong>：
+    </p>
+    <p>
+      <code>/usr/lib/aarch64-linux-gnu/libpython3.10.so</code> ·
+      <code>/usr/lib/libpython3.10.so</code> ·
+      <code>/usr/lib/x86_64-linux-gnu/libpython3.10.so</code>
+    </p>
+    <p>
+      Fedora 把 64-bit 函式庫放在 <code>/usr/lib64/</code>，而且版本是 3.12 不是 3.10 ——
+      所以三個路徑<strong>一個都不會命中</strong>。在 Fedora 上這個環境變數不是選配：
+    </p>
+<pre style="margin:.6rem 0 0"><code>export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so
+test -e "$TEN_PYTHON_LIB_PATH" &amp;&amp; echo OK || echo "缺 python3-devel"</code></pre>
+    <p>
+      沒設的話錯誤訊息是 <code>[Python addon loader] Failed to load system libpython.</code>
+    </p>
+  </div>
+
+  <div class="warn">
+    <span class="lbl">tman check env 在 arm64 上會給錯建議</span>
+    <p>
+      它會說 <em>"TEN Framework only supports Python 3.10"</em> 並建議 <code>pyenv install 3.10.18</code>。
+      對 arm64 的官方二進位而言<strong>這是錯的</strong> —— 照做會得到一個 3.10 解譯器配上 3.12 編的 binding。
+      arm64 上正確答案是 3.12。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c12">
+  <h3><span class="n">12</span>安裝依賴</h3>
+
+  <div class="warn">
+    <span class="lbl">套件名稱請自行確認</span>
+    <p>
+      以下 <code>dnf</code> 名稱是從這個 repo 的 Debian 依賴清單
+      （<code>tools/docker_for_building/ubuntu/22.04/Dockerfile</code>，那是權威的依賴來源）對映過來的，
+      <strong>我無法在此環境驗證</strong>。若某個名稱在你的 Fedora 版本上不存在，用
+      <code>dnf provides</code> 反查真正的套件。
+    </p>
+  </div>
+
+  <h4>系統套件</h4>
+<pre><code>sudo dnf install -y \
+  gcc gcc-c++ make cmake pkgconf-pkg-config \
+  git zip unzip jq tree \
+  openssl-devel zlib-devel libffi-devel \
+  libunwind-devel libuuid-devel expat-devel \
+  ncurses-devel readline-devel gdbm-devel nss-devel \
+  alsa-lib alsa-lib-devel \
+  python3 python3-devel python3-pip
+
+<span class="cmt"># clang 只有在你不加 is_clang=false 時才需要（見第 14 章）</span>
+sudo dnf install -y clang libcxx libcxx-devel
+
+<span class="cmt"># 名稱對不上時這樣反查</span>
+dnf provides '*/libunwind.so'
+dnf provides '*/libpython3.12.so'</code></pre>
+
+  <div class="note">
+    <span class="lbl">不需要裝的東西</span>
+    <p>
+      <strong><code>gn</code> 和 <code>ninja</code> 不用裝</strong> —— <code>tgn</code> 自帶 aarch64 預編版。
+    </p>
+    <p>
+      <strong>ffmpeg／x264 相關的 <code>-devel</code> 也不用裝</strong> ——
+      <code>ten_enable_ffmpeg_extensions</code> 預設關閉，arm64 CI 也沒開。在 Fedora 上這些要掛 RPM Fusion，
+      能省下這一步。只有你刻意要開那個 flag 才需要。
+    </p>
+  </div>
+
+  <h4>Fedora 41+ 才需要：平行安裝 Python 3.12</h4>
+<pre><code>sudo dnf install -y python3.12 python3.12-devel
+export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so</code></pre>
+
+  <h4>語言工具鏈</h4>
+<pre><code><span class="cmt"># Go（dnf 的 golang 通常夠新；要精確版本就用官方 tarball）</span>
+sudo dnf install -y golang
+go version                          <span class="cmt"># 需要 &gt;= 1.20</span>
+
+<span class="cmt"># Rust —— 只有建置核心的 ten_rust / ten_manager 時需要</span>
+sudo dnf install -y rust cargo
+cargo install --force cbindgen
+
+<span class="cmt"># Node + Bun（agents 的前端）</span>
+sudo dnf install -y nodejs npm
+curl -fsSL https://bun.sh/install | bash
+export PATH="$HOME/.bun/bin:$PATH"
+
+<span class="cmt"># uv、task</span>
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+<span class="cmt"># tgn 需要的 Python 套件</span>
+pip3 install --user python-dotenv jinja2
+
+<span class="cmt"># agents 的 lint/format 工具</span>
+pip3 install --user black pylint pylint-exit pytest pytest-cov pytest-mock</code></pre>
+
+  <h4>tman</h4>
+<pre><code>curl -fsSL -o /tmp/tman.zip \
+  https://github.com/TEN-framework/ten-framework/releases/download/0.11.71/tman-linux-release-arm64.zip
+unzip -q /tmp/tman.zip -d /tmp/tman
+sudo install -m 0755 /tmp/tman/ten_manager/bin/tman /usr/local/bin/tman
+tman --version</code></pre>
+</section>
+
+<section class="chap" id="c13">
+  <h3><span class="n">13</span>Clone 與 submodule</h3>
+
+  <div class="danger">
+    <span class="lbl">最常見的第一個坑</span>
+    <p>
+      <code>core/ten_gn</code> 是 <strong>git submodule</strong>，乾淨 clone 之後<strong>是空的</strong>。
+      而 <code>tgn</code> 這個建置工具本身就住在裡面 —— 沒初始化的話什麼都建不起來，錯誤會是
+      <code>tgn: command not found</code> 或 GN 找不到 <code>//.gnfiles/build/options.gni</code>。
+    </p>
+  </div>
+
+<pre><code>git clone git@github.com:harold-2022-cloud/ten-framework-arm64.git
+cd ten-framework-arm64
+git checkout feat/arm64-native-build
+
+<span class="cmt"># 初始化 submodule（portal/ 除外，跟 CI 一致）</span>
+git submodule update --init --recursive --depth 1 core/ten_gn
+
+<span class="cmt"># 讓 tgn 進 PATH</span>
+export PATH="$(pwd)/core/ten_gn:$PATH"
+
+<span class="cmt"># 驗證</span>
+ls core/ten_gn/.gnfiles/bin/linux/arm64/       <span class="cmt"># 應該看到 gn 和 ninja</span>
+file core/ten_gn/.gnfiles/bin/linux/arm64/gn   <span class="cmt"># 應該說 ARM aarch64</span>
+tgn --help | head -3</code></pre>
+
+  <div class="ok">
+    <span class="lbl">驗收</span>
+    <p>
+      <code>tgn --help</code> 有輸出，且那兩個二進位是 aarch64。這兩件事成立才往下走。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c14">
+  <h3><span class="n">14</span>建置核心</h3>
+
+  <p>
+    先想清楚<strong>你需不需要建核心</strong>。如果你的目標只是跑 agent，答案通常是<strong>不需要</strong> ——
+    執行期套件可以由 <code>tman</code> 從 registry 直接下載 arm64 版（第 15 章）。
+    只有以下情況要自己建：
+  </p>
+  <ul>
+    <li>你要改 C/C++ 執行期或語言綁定</li>
+    <li>你的發行版 glibc &lt; 2.38，官方二進位載不起來 —— 自己建就會連到你自己的 glibc</li>
+    <li>你要自己編 <code>tman</code></li>
+  </ul>
+
+  <h4>跟 CI 一致的建置（唯一在 arm64 上驗證過的組合）</h4>
+<pre><code>export PATH="$(pwd)/core/ten_gn:$PATH"
+
+tgn gen linux arm64 release -- \
+  is_clang=false log_level=1 enable_serialized_actions=true \
+  ten_enable_tests=false ten_rust_enable_tests=false \
+  ten_manager_enable_tests=false ten_enable_libwebsockets=false \
+  ten_enable_cargo_clean=true ten_enable_rust_incremental_build=false \
+  ten_manager_enable_frontend=false
+
+tgn build linux arm64 release</code></pre>
+
+  <p>產出在 <code>out/linux/arm64/</code>：</p>
+  <div class="tw"><table>
+    <thead><tr><th>路徑</th><th>內容</th></tr></thead>
+    <tbody>
+      <tr><td class="k"><code>out/linux/arm64/ten_packages/</code></td><td>建好的執行期與 extension 套件</td></tr>
+      <tr><td class="k"><code>out/linux/arm64/ten_manager/bin/tman</code></td><td>自建的 tman</td></tr>
+      <tr><td class="k"><code>out/linux/arm64/tests/</code></td><td>測試二進位（上面的 flag 關掉了測試，所以不會有）</td></tr>
+      <tr><td class="k"><code>out/linux/arm64/app/</code></td><td>範例 app</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="warn">
+    <span class="lbl">關於那些 flag</span>
+    <p>
+      <code>is_clang=false</code> 是用 gcc。<strong>GN 的預設值是 <code>is_clang=true</code></strong>
+      （<code>.gnfiles/build/BUILDCONFIG.gn</code>），但 arm64 CI 用 gcc，所以那是唯一驗證過的路徑。
+      要用 clang 就把這個 flag 去掉，但要有除錯的預期。
+    </p>
+    <p>
+      arm64 CI 相對 x64 <strong>關掉了</strong>：全部測試、<code>libwebsockets</code>、tman designer 前端；
+      而且<strong>沒有開</strong> <code>ten_enable_ffmpeg_extensions</code>（x64 有開）。這些組合在 arm64 上
+      沒有任何 CI 覆蓋，要開就預留除錯時間。
+    </p>
+  </div>
+
+  <h4>只想快速建 tman</h4>
+<pre><code>task gen-tman     <span class="cmt"># 只開 ten_rust + ten_manager，不含語言綁定</span>
+task build-tman</code></pre>
+
+  <h4>用 Taskfile 的簡寫</h4>
+  <p>根目錄的 Taskfile 會自動偵測主機架構，所以在 aarch64 上這樣就是建 arm64：</p>
+<pre><code>task gen
+task build
+task build BUILD_TYPE=release</code></pre>
+  <p style="font-size:var(--s--1);color:var(--ink-3)">
+    注意這條路用的是 Taskfile 的預設 flag，不是上面 CI 那組。要完全對齊 CI 就直接呼叫 <code>tgn</code>。
+  </p>
+
+  <div class="note">
+    <span class="lbl">已知的無關問題</span>
+    <p>
+      在較新版的 <code>task</code>（實測 3.53.1）上，repo <em>根目錄</em>的 <code>task --list</code> 會失敗，
+      訊息是 <em>"Included Taskfiles can't have dotenv declarations"</em>。這是既有問題（在未修改的
+      upstream 上也重現），因為根 Taskfile include 了帶 <code>dotenv:</code> 的
+      <code>ai_agents/Taskfile.yml</code>。<strong>在 <code>ai_agents/</code> 目錄裡跑 task 是正常的</strong>，
+      直接呼叫 <code>tgn</code> 也不受影響。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c15">
+  <h3><span class="n">15</span>建置與執行 agent</h3>
+
+  <p>
+    這一段<strong>不需要先建核心</strong>。<code>tman install</code> 會依主機平台從 registry 拉 arm64 的執行期套件。
+  </p>
+
+  <div class="danger">
+    <span class="lbl">先選對範例</span>
+    <p>
+      21 個範例裡有 19 個依賴 <code>agora_rtc</code>，而它<strong>沒有 arm64 版</strong>
+      （包裝層是預編 x86-64 且無原始碼）。在 arm64 上請用 <code>websocket-example</code> ——
+      它的原生依賴只有 TEN 自家那四個，傳輸層是純 Python 的 <code>websocket_server</code>。
+    </p>
+  </div>
+
+<pre><code>cd ai_agents
+cp .env.example .env
+<span class="cmt"># 編輯 .env 填入你的 provider 金鑰</span>
+
+<span class="cmt"># Fedora 必須設這個（第 11 章）</span>
+export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so
+
+cd agents/examples/websocket-example
+task install
+task run</code></pre>
+
+  <p><code>task install</code> 實際做四件事：</p>
+  <div class="flow">
+    <span class="node">tman install</span><span class="arr">→</span>
+    <span class="node">install_python_deps.py（uv）</span><span class="arr">→</span>
+    <span class="node">bun install（前端）</span><span class="arr">→</span>
+    <span class="node">go build -o bin/api</span>
+  </div>
+
+  <h4>確認你真的拿到 arm64 而不是別的</h4>
+<pre><code>file ai_agents/server/bin/api
+<span class="out"># 應該說 ELF 64-bit LSB ... ARM aarch64</span>
+
+find ai_agents/agents/examples/websocket-example/tenapp/ten_packages \
+  -name '*.so' | head -1 | xargs file
+<span class="out"># 應該說 ARM aarch64</span>
+
+cat ai_agents/agents/examples/websocket-example/tenapp/manifest-lock.json \
+  | grep -A2 supports
+<span class="out"># 應該看到 "arch": "arm64"</span></code></pre>
+
+  <div class="ok">
+    <span class="lbl">驗收</span>
+    <p>
+      <code>curl -s http://localhost:8080/health</code> 回 <code>{"code":"0","data":null,"msg":"ok"}</code>，
+      且 <code>curl -s http://localhost:8080/graphs</code> 列得出 graph 名稱。
+    </p>
+  </div>
+
+  <div class="note">
+    <span class="lbl">lockfile 會被改寫</span>
+    <p>
+      <code>task install</code> 會把 <code>tenapp/manifest-lock.json</code> 重寫成 arm64 條目。這是正確行為。
+      但那個檔案有進 git，commit 它會讓 x64 開發者下次 install 時平台被翻掉 —— 這是團隊要先講好的慣例。
+    </p>
+  </div>
+</section>
+
+<!-- ==================== PART IV ==================== -->
+<div class="parthead">
+  <p class="pl">第四部</p>
+  <h2>排查建置錯誤</h2>
+  <p>
+    這個框架的錯誤會出現在好幾個不同的地方，而且經常不在你執行指令的那個終端機裡。
+    知道去哪裡看，比知道錯誤內容更重要。
+  </p>
+</div>
+
+<section class="chap" id="c16">
+  <h3><span class="n">16</span>錯誤在哪裡看</h3>
+
+  <p>按建置階段對應到該看的地方：</p>
+
+  <div class="emap">
+    <div class="erow">
+      <span class="stage">submodule / tgn</span>
+      <span class="where">
+        直接在終端機。<code>tgn gen</code> 失敗通常是 <code>core/ten_gn</code> 沒初始化，或
+        <code>PATH</code> 沒包含它。訊息會提到找不到 <code>//.gnfiles/...</code>。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">GN 產生階段</span>
+      <span class="where">
+        終端機 + <code>out/linux/arm64/</code> 下的 <code>args.gn</code> 與 <code>build.ninja</code>。
+        用 <code>core/ten_gn/.gnfiles/bin/linux/arm64/gn args out/linux/arm64 --list</code> 看實際生效的 flag 值（很多「為什麼沒開」的問題在這裡解決）。注意 <code>gn</code> 不在 <code>PATH</code> 上，它是 <code>tgn</code> 自帶的。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">Ninja 編譯階段</span>
+      <span class="where">
+        終端機。加 <code>-v</code> 看完整編譯指令。<code>out/linux/arm64/.ninja_log</code> 有時間紀錄。
+        C/C++ 錯誤就是一般的 gcc/clang 輸出。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">Rust（ten_rust / tman）</span>
+      <span class="where">
+        cargo 的輸出會被 GN 包一層。訊息被截斷時直接進
+        <code>core/src/ten_rust</code> 或 <code>core/src/ten_manager</code> 跑 <code>cargo build</code>
+        取得完整診斷。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">tman install</span>
+      <span class="where">
+        終端機。加 <code>--verbose</code> 會印出實際查詢的 registry URL 與解析過程 ——
+        平台解析錯誤（拿到 x64 而不是 arm64）在這裡才看得出來。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">Python 依賴</span>
+      <span class="where">
+        終端機（<code>uv</code> 的輸出）。注意它會裝 tenapp 裡<strong>每一個</strong> extension 的
+        <code>requirements.txt</code>，不只是你 graph 用到的那些。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">Go server</span>
+      <span class="where">
+        終端機（<code>go build</code>）。<code>ai_agents/server/</code> 底下可單獨跑
+        <code>go build ./...</code> 和 <code>go test ./...</code>。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">執行期（agent 跑起來後）</span>
+      <span class="where">
+        <strong>這裡最容易漏。</strong>不在終端機，在 <code>/tmp/task_run.log</code>（若你用
+        <code>&gt; /tmp/task_run.log</code> 重導）。extension 的 log 全部走這裡。
+      </span>
+    </div>
+    <div class="erow">
+      <span class="stage">worker 崩潰</span>
+      <span class="where">
+        同上，但要找 <code>bin/worker</code> 相關訊息。設
+        <code>TEN_ENABLE_BACKTRACE_DUMP=true</code> 可取得 backtrace。
+      </span>
+    </div>
+  </div>
+
+  <h4>看執行期 log 的實用指令</h4>
+<pre><code>tail -f /tmp/task_run.log
+
+<span class="cmt"># 只看某個 extension</span>
+tail -f /tmp/task_run.log | grep --line-buffered "deepgram"
+
+<span class="cmt"># 只看關鍵生命週期事件與廠商狀態</span>
+tail -f /tmp/task_run.log | grep -E "KEYPOINT|LOG_CATEGORY_VENDOR|config:"
+
+<span class="cmt"># log 混了二進位導致 grep 抱怨時</span>
+strings /tmp/task_run.log | tail -n 100</code></pre>
+
+  <div class="note">
+    <span class="lbl">log 分類</span>
+    <p>
+      Extension 用 <code>ten_env.log_info()</code> 等方法輸出，並帶分類：
+      <code>LOG_CATEGORY_KEY_POINT</code>（生命週期事件）、<code>LOG_CATEGORY_VENDOR</code>（廠商狀態）。
+      設定內容的 log 一律用 <code>config:</code> 前綴，QA 自動化會比對這個。
+    </p>
+  </div>
+</section>
+
+<section class="chap" id="c17">
+  <h3><span class="n">17</span>常見失敗對照表</h3>
+
+  <h4>建置階段</h4>
+  <div class="tw"><table>
+    <thead><tr><th>症狀</th><th>原因</th><th>處理</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="k"><code>tgn: command not found</code></td>
+        <td>submodule 未初始化，或 <code>PATH</code> 沒含 <code>core/ten_gn</code></td>
+        <td><code>git submodule update --init --recursive --depth 1 core/ten_gn</code> 後 <code>export PATH=$(pwd)/core/ten_gn:$PATH</code></td>
+      </tr>
+      <tr>
+        <td class="k">GN 找不到 <code>//.gnfiles/build/options.gni</code></td>
+        <td>同上</td>
+        <td>同上。<code>.gnfiles</code> 是隱藏目錄，用 <code>ls -a core/ten_gn</code> 確認</td>
+      </tr>
+      <tr>
+        <td class="k"><code>task --list</code> 在根目錄報 dotenv 錯</td>
+        <td>既有問題，與你的環境無關</td>
+        <td>在 <code>ai_agents/</code> 裡跑 task，或直接用 <code>tgn</code></td>
+      </tr>
+      <tr>
+        <td class="k">C++ 標頭找不到（<code>&lt;coroutine&gt;</code> 等）</td>
+        <td>用了 clang 但沒裝 libcxx</td>
+        <td>加 <code>is_clang=false</code> 用 gcc（CI 驗證過的路徑），或裝 <code>libcxx-devel</code></td>
+      </tr>
+      <tr>
+        <td class="k">cargo 連結失敗 / 磁碟爆掉</td>
+        <td>Rust 平行連結吃掉大量磁碟</td>
+        <td><code>export CARGO_BUILD_JOBS=1</code>，並加 <code>ten_enable_cargo_clean=true</code></td>
+      </tr>
+      <tr>
+        <td class="k"><code>ten_enable_ffmpeg_extensions</code> 相關失敗</td>
+        <td>Fedora 的 ffmpeg-devel 要 RPM Fusion，且 arm64 無 CI 覆蓋</td>
+        <td>別開它。預設就是關的</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h4>套件解析階段</h4>
+  <div class="tw"><table>
+    <thead><tr><th>症狀</th><th>原因</th><th>處理</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="k">解析到 x64 套件而不是 arm64</td>
+        <td>lockfile 記著 x64，或平台偵測有誤</td>
+        <td><code>tman install --os linux --arch arm64</code>，或刪掉 <code>manifest-lock.json</code> 重解</td>
+      </tr>
+      <tr>
+        <td class="k"><code>agora_rtc</code> 找不到相容版本</td>
+        <td>它<strong>沒有</strong> arm64 版，這是預期的</td>
+        <td>改用 <code>websocket-example</code></td>
+      </tr>
+      <tr>
+        <td class="k"><code>bin/worker: No such file or directory</code></td>
+        <td>裸的 <code>tman install</code> 把它刪了</td>
+        <td>用 <code>task install</code> 重建，不要用裸 <code>tman install</code></td>
+      </tr>
+      <tr>
+        <td class="k"><code>ModuleNotFoundError: ten_packages.extension.X</code></td>
+        <td>symlink 斷掉（常見於 guarder）</td>
+        <td><code>ln -sf</code> 補回，或重跑 <code>tman install</code> 讓它重建連結</td>
+      </tr>
+      <tr>
+        <td class="k"><code>task check</code> 報一堆假的重新格式化</td>
+        <td>extension 目錄裡有殘留的 <code>.ten/</code></td>
+        <td><code>rm -rf &lt;ext&gt;/.ten</code></td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <h4>執行期（Fedora 特別容易撞的）</h4>
+  <div class="tw"><table>
+    <thead><tr><th>症狀</th><th>原因</th><th>處理</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="k"><code>[Python addon loader] Failed to load system libpython.</code></td>
+        <td>hardcode 的三個候選路徑都是 Debian 慣例，Fedora 用 <code>/usr/lib64</code></td>
+        <td><code>export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so</code></td>
+      </tr>
+      <tr>
+        <td class="k"><code>version `GLIBC_2.38' not found</code></td>
+        <td>Fedora 版本太舊，低於 arm64 套件的下限</td>
+        <td>升級到 Fedora 39+，或自己從原始碼建核心</td>
+      </tr>
+      <tr>
+        <td class="k">載入時 undefined symbol <code>_Py*</code></td>
+        <td>libpython 版本不是 3.12</td>
+        <td>裝 <code>python3.12</code> 並把 <code>TEN_PYTHON_LIB_PATH</code> 指向它</td>
+      </tr>
+      <tr>
+        <td class="k"><code>ValueError: signal only works in main thread</code></td>
+        <td>Extension 裡用了 signal handler 或 <code>atexit</code></td>
+        <td>改用 <code>on_stop()</code> 做清理</td>
+      </tr>
+      <tr>
+        <td class="k"><code>TypeError: '&gt;' not supported between 'float' and 'tuple'</code></td>
+        <td><code>get_property_*()</code> 回的是 <code>(value, error)</code> tuple</td>
+        <td>取 <code>[0]</code></td>
+      </tr>
+      <tr>
+        <td class="k">前端起不來 / port 3000 被佔</td>
+        <td><code>next-server</code> 是獨立行程，殺 node 和 bun 不夠</td>
+        <td>一併 <code>pkill -9 -f next-server</code>，並刪掉 <code>playground/.next/dev/lock</code></td>
+      </tr>
+      <tr>
+        <td class="k">graph 改了沒生效</td>
+        <td>新增／移除 graph 需要完整重啟；前端會快取 <code>/graphs</code></td>
+        <td>server 和前端都重啟</td>
+      </tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="chap" id="c18">
+  <h3><span class="n">18</span>驗證指令集</h3>
+
+  <p>照順序跑，第一個失敗的地方就是問題所在。</p>
+
+<pre><code><span class="cmt">### 0. 平台前提</span>
+uname -m                                          <span class="cmt"># aarch64</span>
+ldd --version | head -1                           <span class="cmt"># &gt;= 2.38</span>
+python3 --version                                 <span class="cmt"># 3.12（或另裝 3.12）</span>
+test -e "${TEN_PYTHON_LIB_PATH:-/usr/lib64/libpython3.12.so}" &amp;&amp; echo "libpython OK"
+
+<span class="cmt">### 1. 工具鏈</span>
+tgn --help | head -3
+tman --version
+task --version
+go version
+uv --version
+bun --version
+
+<span class="cmt">### 2. tman 的環境判定（注意它對 Python 的建議在 arm64 上是錯的）</span>
+tman check env
+
+<span class="cmt">### 3. submodule 與自帶工具鏈</span>
+git submodule status core/ten_gn                  <span class="cmt"># 開頭不該有 '-'</span>
+file core/ten_gn/.gnfiles/bin/linux/arm64/gn      <span class="cmt"># ARM aarch64</span>
+
+<span class="cmt">### 4. 核心建置產出（若有建）</span>
+ls out/linux/arm64/ten_packages/
+file out/linux/arm64/ten_packages/system/ten_runtime/lib/libten_runtime.so
+
+<span class="cmt">### 5. 生效的 GN flag</span>
+core/ten_gn/.gnfiles/bin/linux/arm64/gn args out/linux/arm64 --list \
+  | grep -E "is_clang|ten_enable_(tests|libwebsockets|ffmpeg)"
+
+<span class="cmt">### 6. agent 產出</span>
+file ai_agents/server/bin/api                     <span class="cmt"># ARM aarch64</span>
+grep -A2 supports ai_agents/agents/examples/websocket-example/tenapp/manifest-lock.json
+
+<span class="cmt">### 7. 服務存活</span>
+curl -s http://localhost:8080/health
+curl -s http://localhost:8080/graphs | jq -r '.data[].name'
+
+<span class="cmt">### 8. 執行期 log</span>
+tail -n 200 /tmp/task_run.log</code></pre>
+
+  <div class="note">
+    <span class="lbl">回報問題時該附上什麼</span>
+    <p>
+      <code>uname -m</code>、<code>cat /etc/fedora-release</code>、<code>ldd --version | head -1</code>、
+      <code>python3 --version</code>、<code>tman --version</code>、失敗指令的完整輸出，
+      以及 <code>/tmp/task_run.log</code> 的相關片段。前四項能立刻排除掉這份文件裡一半的可能原因。
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    第一、二、四部依據對本 repo 原始碼、CI 設定、與官方發佈二進位的實際檢查撰寫。
+    第三部的指令序列未在 Fedora aarch64 上執行過，dnf 套件名稱請以你機器上的
+    <code>dnf provides</code> 結果為準。
+  </p>
+  <p>
+    延伸閱讀：<code>docs/development/arm64_build.md</code>（ARM64 移植的完整發現與上游議題）、
+    <code>docs/ai/L1/</code>（八份結構化摘要）、<code>docs/ai/L1/L2/</code>（深入專題）。
+  </p>
+</footer>
+
+</main>
+</div>
+</body>
+</html>
