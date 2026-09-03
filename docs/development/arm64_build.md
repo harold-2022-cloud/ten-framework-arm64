@@ -552,6 +552,82 @@ working one.
 and asserts the glibc floor, the libpython redirect, the resolved lock platform
 and the ELF architecture.
 
+## Changing a vendor on the one working example
+
+This belongs here because arm64 removes the usual alternative. With 24 of the 26
+examples blocked on the missing `agora_rtc` build, `websocket-example` is the
+only place to work, so trying a different ASR or TTS provider means editing that
+example's graph rather than picking a different example.
+
+### Where the settings live
+
+A vendor's settings go in the node's `property.params`, flat. There is no
+wrapper naming the module or the vendor — nothing in this repo reads a
+`{"asr": {"vendor": ...}}` shape. Each extension's own test configs are the
+authority; `soniox_asr_python/tests/configs/property_en.json` is representative:
+
+```json
+{
+    "params": {
+        "api_key": "${env:SONIOX_ASR_API_KEY}",
+        "url": "wss://stt-rt.soniox.com/transcribe-websocket",
+        "model": "stt-rt-v4",
+        "language_hints": ["en"],
+        "sample_rate": 16000
+    }
+}
+```
+
+Swapping a provider means changing `addon` and replacing `params` on that node
+in `tenapp/property.json`. Leave `name` and `extension_group` alone — the
+`connections` block routes by node name, so renaming the node silently detaches
+it from the pipeline.
+
+### `${env:VAR}` has two failure modes, and they look nothing alike
+
+The runtime resolves these placeholders in
+`core/src/ten_utils/lib/sys/general/placeholder.c`, recursively through objects
+and arrays (`ten_extension_property_resolve_placeholders`,
+`core/src/ten_runtime/extension/internal/metadata.c`), so depth does not matter.
+What matters is whether the variable exists:
+
+| State | `getenv` | Result |
+| ----- | -------- | ------ |
+| Not set, no `\|` default | `NULL` | `exit(EXIT_FAILURE)` — the worker dies during property resolution |
+| Set but empty | `""` | Resolves to an empty string; the extension rejects it later in its own words |
+| Set, with a value | value | Normal |
+
+The `|` in a placeholder supplies a default and makes the variable optional.
+`"${env:OPENAI_PROXY_URL|}"` tolerates absence; `"${env:DEEPGRAM_API_KEY}"` does
+not. That asymmetry is deliberate: a required key that is simply missing should
+stop the process rather than let it run misconfigured.
+
+The empty case is the one that wastes time. Copying `.env.example` gives every
+key an empty value, so a key left unfilled is *present* rather than absent — it
+takes the middle row, not the first. The worker starts normally and the only
+symptom is a vendor error deep in the session log.
+
+### Nothing warns you about a nested key
+
+`ai_agents/server/internal/http_server.go` validates `${env:...}` before
+spawning a worker, but the loop reads only a node's top-level properties and
+skips any value that is not a string. Every vendor key in these examples lives
+under `params`, which is an object, so it is never examined. A missing or empty
+vendor key produces no `Environment variable not found` line anywhere.
+
+`verify_arm64_install.sh` covers that gap: it walks the graph for placeholders,
+resolves each against `ai_agents/.env`, and separates absent-and-required from
+present-but-empty. Run it before starting a session rather than diagnosing from
+logs afterwards.
+
+### What a change requires
+
+| Changed | Takes effect |
+| ------- | ------------ |
+| A value inside `params` (voice id, model, language) | Next session — the server re-reads `property.json` per worker |
+| `addon`, node set, or `connections` | Full restart of `task run` |
+| `.env` | Full restart — it is read once at startup |
+
 ## Arch selection in the Taskfiles
 
 `ai_agents/Taskfile.yml` detects the host arch and passes it to

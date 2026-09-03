@@ -443,6 +443,128 @@ for bin in "$TENAPP/bin/main" "$API_BIN"; do
   fi
 done
 
+# ---------------------------------------------------------------- env placeholders
+hdr "7b. Graph environment placeholders"
+# The runtime resolves ${env:VAR} in ten_utils placeholder.c. Two outcomes are
+# worth separating, because they fail very differently:
+#
+#   VAR absent, no |default  -> ten_placeholder_resolve calls exit(EXIT_FAILURE)
+#                               and the worker dies before serving anything.
+#   VAR present but empty    -> getenv returns "", which is not NULL, so the
+#                               value resolves to an empty string and the
+#                               extension fails later with its own message.
+#
+# The Go server validates only top-level string properties (http_server.go), so
+# a key nested under `params` -- where every vendor key in these examples lives
+# -- produces no warning either way. Check them here instead.
+#
+# The worker inherits its environment from the API server, which task populates
+# from ai_agents/.env, so that file is the authority rather than this shell.
+ENV_FILE="$AI_AGENTS/.env"
+if [ ! -f "$ENV_FILE" ]; then
+  bad "no .env at $ENV_FILE"
+  note "task loads it via its dotenv directive; without it no vendor key resolves"
+elif [ -z "$PY_ANY" ]; then
+  skip "no interpreter available to parse the graph"
+else
+  ENV_REPORT="$("$PY_ANY" - "$TENAPP/property.json" "$ENV_FILE" <<'PYEOF'
+import json, os, re, sys
+
+prop_path, env_path = sys.argv[1], sys.argv[2]
+
+# Parse the dotenv file the way task does: KEY=VALUE, ignoring comments and
+# blanks. Quotes are stripped because godotenv strips them.
+dotenv = {}
+try:
+    with open(env_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            dotenv[k.strip()] = v
+except OSError as e:
+    print("ERR|%s" % e)
+    raise SystemExit
+
+PATTERN = re.compile(r"\$\{env:([^}|]+)(\|[^}]*)?\}")
+
+# Walk every node's property subtree; placeholders are resolved recursively by
+# the runtime, so they can sit at any depth.
+found = {}
+def walk(node_name, value):
+    if isinstance(value, str):
+        for var, default in PATTERN.findall(value):
+            entry = found.setdefault(var, {"optional": bool(default), "nodes": set()})
+            entry["nodes"].add(node_name)
+            if default:
+                entry["optional"] = True
+    elif isinstance(value, dict):
+        for v in value.values():
+            walk(node_name, v)
+    elif isinstance(value, list):
+        for v in value:
+            walk(node_name, v)
+
+try:
+    doc = json.load(open(prop_path))
+except Exception as e:
+    print("ERR|%s" % e)
+    raise SystemExit
+
+for graph in doc.get("ten", {}).get("predefined_graphs", []):
+    body = graph.get("graph", graph)
+    for node in body.get("nodes", []):
+        walk(node.get("name", node.get("addon", "?")), node.get("property", {}))
+
+for var in sorted(found):
+    info = found[var]
+    where = ",".join(sorted(info["nodes"]))
+    in_dotenv = var in dotenv
+    val = dotenv.get(var, os.environ.get(var))
+    present = in_dotenv or var in os.environ
+    if present and val:
+        state = "SET"
+    elif present:
+        state = "EMPTY"
+    else:
+        state = "ABSENT"
+    print("%s|%s|%s|%s|%s" % (
+        state, var, "optional" if info["optional"] else "required", where,
+        "dotenv" if in_dotenv else ("environ" if var in os.environ else "-")))
+PYEOF
+)"
+
+  if printf '%s' "$ENV_REPORT" | grep -q '^ERR|'; then
+    bad "could not scan placeholders: ${ENV_REPORT#ERR|}"
+  elif [ -z "$ENV_REPORT" ]; then
+    skip "no \${env:...} placeholders found in the graph"
+  else
+    while IFS='|' read -r state var req where src; do
+      [ -n "$state" ] || continue
+      case "$state:$req" in
+        SET:*)
+          ok "$var set (via $src), used by: $where" ;;
+        EMPTY:required)
+          bad "$var is present but EMPTY -- used by: $where"
+          note "resolves to an empty string; the extension will reject it at runtime" ;;
+        EMPTY:optional)
+          skip "$var empty, but the placeholder carries a default -- used by: $where" ;;
+        ABSENT:required)
+          bad "$var is ABSENT and the placeholder has no default -- used by: $where"
+          note "the worker will exit(EXIT_FAILURE) during property resolution" ;;
+        ABSENT:optional)
+          skip "$var unset, placeholder has a default -- used by: $where" ;;
+      esac
+    done <<EOF
+$ENV_REPORT
+EOF
+  fi
+fi
+
 # ---------------------------------------------------------------- services
 hdr "8. Services"
 PORT_API="${SERVER_PORT:-8080}"
