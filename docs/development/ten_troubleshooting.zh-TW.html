@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEN Framework 逐步排查手冊</title>
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#EDF1F1;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1416; --card:#171E20; --sunk:#111819;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#111819;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:-apple-system,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  font-size:15px;line-height:1.7}
+.wrap{max-width:62rem;margin:0 auto;padding:2.5rem 1.25rem 6rem}
+h1{font-size:1.9rem;line-height:1.25;margin:0 0 .4rem;letter-spacing:-.01em}
+.sub{color:var(--ink-3);margin:0 0 2.5rem;font-size:.95rem}
+h2{font-size:1.3rem;margin:3rem 0 .3rem;padding-top:1.4rem;border-top:1px solid var(--rule)}
+h3{font-size:1.05rem;margin:2rem 0 .5rem;color:var(--accent)}
+h4{font-size:.95rem;margin:1.4rem 0 .4rem}
+p{margin:.7rem 0}
+code{background:var(--sunk);padding:.12em .38em;border-radius:3px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.1rem;border-radius:8px;
+  overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.83rem;line-height:1.6}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{background:var(--sunk);font-weight:600;white-space:nowrap}
+td code{white-space:nowrap}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.warn{border-left:3px solid var(--warn);background:var(--warn-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.bad{border-left:3px solid var(--danger);background:var(--danger-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.ok{border-left:3px solid var(--ok);background:var(--ok-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.src{color:var(--ink-3);font-size:.82rem;margin-top:.3rem}
+.tag{display:inline-block;font-size:.72rem;padding:.1rem .45rem;border-radius:3px;
+  background:var(--sunk);color:var(--ink-2);margin-right:.35rem;vertical-align:1px}
+.tag.v{background:var(--ok-soft);color:var(--ok)}
+.tag.u{background:var(--warn-soft);color:var(--warn)}
+nav.toc{background:var(--card);border:1px solid var(--rule);border-radius:8px;
+  padding:1rem 1.3rem;margin:0 0 2rem}
+nav.toc ol{margin:.3rem 0;padding-left:1.3rem}
+nav.toc a{color:var(--ink-2);text-decoration:none}
+nav.toc a:hover{color:var(--accent);text-decoration:underline}
+.flow{background:var(--card);border:1px solid var(--rule);border-radius:8px;
+  padding:1rem 1.2rem;margin:1rem 0;overflow-x:auto}
+.flow pre{background:none;color:var(--ink);padding:0;font-size:.82rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>TEN Framework 逐步排查手冊</h1>
+<p class="sub">
+  依 <code>websocket-example</code> 的實際鏈路整理。每一條症狀都對應一個確切的 log 字串和一個修法，
+  內容來自實際排查過的案例，不是通用建議。
+</p>
+
+<nav class="toc">
+  <strong>目錄</strong>
+  <ol>
+    <li><a href="#where">第一步：日誌在哪</a></li>
+    <li><a href="#triage">第二步：一條指令定位段落</a></li>
+    <li><a href="#svc">A · 服務起不來</a></li>
+    <li><a href="#worker">B · worker 起不來</a></li>
+    <li><a href="#ws">C · WebSocket 連不上</a></li>
+    <li><a href="#mic">D · 麥克風拿不到</a></li>
+    <li><a href="#asr">E · ASR 沒有結果</a></li>
+    <li><a href="#llm">F · LLM 沒有回應</a></li>
+    <li><a href="#tts">G · TTS 沒有聲音</a></li>
+    <li><a href="#quick">根因速查表</a></li>
+  </ol>
+</nav>
+
+<h2 id="where">1. 第一步：日誌在哪</h2>
+
+<p>找錯地方是最常浪費時間的一步。一共三個位置，取決於 <code>LOG_STDOUT</code>：</p>
+
+<table>
+<tr><th>位置</th><th>內容</th><th>條件</th></tr>
+<tr>
+  <td><code>/tmp/task_run.log</code></td>
+  <td>Next.js、tman designer、Go API server 的 stdout。<br><strong><code>LOG_STDOUT=true</code> 時 worker 的輸出也在這裡</strong></td>
+  <td>自己 <code>tee</code> 出來的</td>
+</tr>
+<tr>
+  <td><code>$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</code></td>
+  <td>每個 worker 一個檔</td>
+  <td><code>LOG_PATH</code> 預設 <code>/tmp/ten_agent</code></td>
+</tr>
+<tr>
+  <td><code>$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</code></td>
+  <td>該 session 實際使用的 graph 設定</td>
+  <td>同上</td>
+</tr>
+</table>
+
+<div class="warn">
+<code>LOG_STDOUT=true</code> 時 <code>/tmp/ten_agent/app-*.log</code> <strong>可能是空的或不存在</strong>，
+而 worker 明明在跑。先確認：
+<pre><code>grep -E '^LOG_PATH|^LOG_STDOUT' ~/ten-framework/ai_agents/.env</code></pre>
+</div>
+
+<p>後面所有指令都用這個開頭，它會自動選對檔案：</p>
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}</code></pre>
+
+<div class="note">
+測試的 log <strong>不在上面任何一處</strong>。兩種 test harness 的 <code>conftest.py</code>
+都設成 console/stdout、level debug，沒有 file emitter。要留檔就 <code>| tee</code>。
+</div>
+
+<h2 id="triage">2. 第二步：一條指令定位段落</h2>
+
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}
+grep -E 'key_point|_error:|connection_status_changed|Failed to|Traceback|Worker process failed' "$L" | tail -40</code></pre>
+
+<p>對照輸出判斷壞在哪一段，再跳到對應的章節：</p>
+
+<table>
+<tr><th>看到的</th><th>壞在</th><th>去看</th></tr>
+<tr><td>什麼都沒有、log 檔不存在</td><td>worker 沒起來</td><td>B</td></tr>
+<tr><td><code>Worker process failed</code></td><td>worker 啟動失敗</td><td>B</td></tr>
+<tr><td><code>proxy error ... ECONNREFUSED</code></td><td>WebSocket</td><td>C</td></tr>
+<tr><td>ASR 的 <code>connection_status_changed ... 'disconnected'</code></td><td>ASR</td><td>E</td></tr>
+<tr><td>有 <code>asr_result</code> 但沒有 <code>[llm]</code></td><td>graph 路由或 main_control</td><td>F</td></tr>
+<tr><td>有 <code>[llm]</code> 但沒有 TTS 音訊</td><td>TTS</td><td>G</td></tr>
+<tr><td><code>Failed to find destination of a ... message</code></td><td>graph 少一條 connection</td><td>速查表</td></tr>
+</table>
+
+<h2 id="svc">3. A · 服務起不來</h2>
+
+<h3>症狀：port 沒在聽，或 <code>curl localhost:8080/health</code> 沒反應</h3>
+
+<pre><code>ss -tlnp | grep -E '3000|8080|49483'</code></pre>
+
+<h4>A-1　背景執行被 SIGTTOU 停住</h4>
+<pre><code>ps -o pid,stat,cmd -p $(pgrep -f 'task run|bin/api|tman designer' | tr '\n' ',' | sed 's/,$//')</code></pre>
+<p><code>STAT</code> 出現 <code>T</code> 就是<strong>停住</strong>了。<code>nohup</code> 只擋 SIGHUP，
+擋不了服務做終端控制時收到的 SIGTTOU。</p>
+
+<div class="bad">
+停住的進程<strong>仍然持有 listening socket</strong>，所以 <code>ss</code> 看起來一切正常，
+但它不會 accept 任何連線。只看 port 是查不出來的。
+</div>
+
+<p>修法是給它一個真的終端：</p>
+<pre><code>kill -9 &lt;那些 pid&gt;
+sudo dnf -y install tmux
+tmux new -d -s ten 'cd ~/ten-framework/ai_agents/agents/examples/websocket-example && task run 2>&1 | tee /tmp/task_run.log'</code></pre>
+<p>看即時輸出用 <code>tmux attach -t ten</code>，離開按 <kbd>Ctrl+B</kbd> 再按 <kbd>D</kbd>
+（<strong>不要按 Ctrl+C</strong>，那會殺掉服務）。</p>
+
+<h4>A-2　port 3000 被別的東西佔了</h4>
+<pre><code>ss -tlnp | grep ':3000'
+docker ps --format '{{.Names}}\t{{.Ports}}' | grep 3000</code></pre>
+<p>實際案例：開發機的 WSL 裡有個舊的 <code>ten_agent_playground</code> 容器佔著 3000，
+而 WSL2 的 localhost 轉發讓 Windows 的 <code>localhost:3000</code> 打到那裡去，
+於是瀏覽器開出來是「另一個 TEN playground」。</p>
+
+<h4>A-3　Next.js 還在編譯</h4>
+<p>首次啟動要一到兩分鐘。<code>task_run.log</code> 出現 <code>Ready on http://localhost:3000</code> 才算好。</p>
+
+<h2 id="worker">4. B · worker 起不來</h2>
+
+<h3>症狀：<code>curl -s localhost:8080/list</code> 回 <code>"data":[]</code></h3>
+
+<p>worker 由 Go server 在 <code>POST /start</code> 時 spawn。它<strong>死得夠早的話連自己的 log 檔都不會產生</strong>，
+那時唯一看得到原因的是 <code>/tmp/task_run.log</code>：</p>
+
+<pre><code>grep -E 'handlerStart|Worker (start|stop|process)|placeholder' /tmp/task_run.log | tail -12</code></pre>
+
+<h3>B-1　<code>${env:}</code> 變數不存在 → 進程直接自殺</h3>
+
+<pre><code>E ten:runtime ten_placeholder_resolve@placeholder.c:195
+  Environment variable SONIOX_ASR_API_KEY is not found, neither default value is provided.
+ERROR Worker process failed err="exit status 1"</code></pre>
+
+<p>這是 <code>core/src/ten_utils/lib/sys/general/placeholder.c</code> 的設計行為：</p>
+
+<table>
+<tr><th>變數狀態</th><th><code>getenv</code></th><th>結果</th></tr>
+<tr><td><strong>不存在</strong>，且 placeholder 沒有 <code>|</code> 預設值</td><td><code>NULL</code></td><td><code>exit(EXIT_FAILURE)</code>，worker 立刻死</td></tr>
+<tr><td><strong>存在但是空字串</strong></td><td><code>""</code></td><td>解析成空字串，worker 正常跑，稍後由 extension 自己報錯</td></tr>
+<tr><td>有值</td><td>值</td><td>正常</td></tr>
+</table>
+
+<div class="bad">
+<strong>最常見的原因是：<code>.env</code> 填了，但 <code>task run</code> 是在填之前啟動的。</strong>
+<code>.env</code> 只在 <code>task</code> 啟動時讀一次，之後 spawn 的 worker 都繼承那個舊環境。
+</div>
+
+<p>一條指令就能確認：</p>
+<pre><code>stat -c '%y' ~/ten-framework/ai_agents/.env
+ps -o lstart= -p $(pgrep -f 'bin/api' | head -1)</code></pre>
+<p><strong><code>.env</code> 比進程新 → 一定要重啟</strong>，其他都別試。</p>
+
+<h3>B-2　key 存在但是空的</h3>
+<p>worker 會正常起來，錯誤要到 extension 層才出現。用驗證腳本一次看完：</p>
+<pre><code>./ai_agents/agents/scripts/verify_arm64_install.sh 2>&1 | grep 'used by:'</code></pre>
+
+<div class="warn">
+<strong>Go server 不會警告這件事。</strong>
+<code>ai_agents/server/internal/http_server.go</code> 確實會檢查 <code>${env:...}</code>，
+但那段迴圈只讀節點 <code>property</code> 的<strong>頂層</strong>而且只處理<strong>字串</strong>。
+各家 vendor 的 key 都埋在 <code>property.params</code> 裡，<code>params</code> 是物件，直接被跳過。
+</div>
+
+<h2 id="ws">5. C · WebSocket 連不上</h2>
+
+<h3>症狀：瀏覽器 <code>ws.onerror</code>，<code>websocket.ts:77</code></h3>
+
+<p>那個 handler 拿不到任何細節（瀏覽器的 WebSocket error 事件不帶原因），所以只能從伺服器端查。</p>
+
+<h4>先理解機制</h4>
+<div class="flow"><pre>瀏覽器  ws://localhost:3000/ws/{port}      port 由前端隨機產生（8000-9000），存 localStorage
+   ↓    frontend/server.js 代理
+        ws://127.0.0.1:{port}
+   ↓    Go server 把該 port 注入 graph（properties.websocket_server.port）
+        websocket_server extension 綁上它</pre></div>
+
+<p>連線動作發生在 <code>WebSocketClient.tsx</code>：<code>autoConnect: false</code>，
+只有 <code>handleStartAgent</code> 成功後<strong>延遲 2 秒</strong>才連，失敗則每 3 秒無限重試。</p>
+
+<h4>三條指令</h4>
+<pre><code>grep 'WebSocket upgrade' /tmp/task_run.log | tail -2          # 瀏覽器要哪個 port
+grep 'WebSocket proxy error' /tmp/task_run.log | tail -2      # 代理連不上
+L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}
+grep -o "\[websocket_server\] Loaded config: {[^}]*}" "$L"    # extension 綁哪個 port</code></pre>
+
+<table>
+<tr><th>現象</th><th>原因</th></tr>
+<tr><td>第三條沒有輸出</td><td>worker 沒起來 → 回 B</td></tr>
+<tr><td>第一、三條的 port <strong>不同</strong></td><td>port 注入失效</td></tr>
+<tr><td>port 相同、只有 <code>ECONNREFUSED</code> 一兩筆然後就好了</td><td><strong>正常</strong>。瀏覽器比 extension 早幾百毫秒敲門，重試會接上</td></tr>
+<tr><td>port 相同但一直 <code>ECONNREFUSED</code></td><td>worker 中途死了，看 B</td></tr>
+</table>
+
+<p>確認真的連上：</p>
+<pre><code>grep 'Client connected' "$L" | tail -2
+# [websocket_server] Client connected: 127.0.0.1:46830</code></pre>
+
+<h2 id="mic">6. D · 麥克風拿不到</h2>
+
+<h3>症狀：<code>Cannot read properties of undefined (reading 'getUserMedia')</code></h3>
+
+<p><code>audioUtils.ts:178</code> 呼叫 <code>navigator.mediaDevices.getUserMedia()</code>，
+而 <code>navigator.mediaDevices</code> 是 <code>undefined</code>。</p>
+
+<div class="bad">
+這不是權限被拒，是<strong>整個 API 不存在</strong>。瀏覽器只在 <strong>secure context</strong> 下提供它：
+HTTPS，或 <code>localhost</code>。<strong>用 IP 開一律沒有。</strong>
+</div>
+
+<p>在 Console 確認：</p>
+<pre><code>[location.href, window.isSecureContext, !!navigator.mediaDevices]</code></pre>
+
+<p>修法是 SSH 通道 —— 在<strong>開瀏覽器的那台機器</strong>上跑：</p>
+<pre><code>ssh -L 3000:localhost:3000 &lt;user&gt;@&lt;跑 TEN 的機器&gt;</code></pre>
+<p>然後開 <code>http://localhost:3000</code>，<strong>不是</strong> IP。若本機 3000 已被佔用，
+換一個 port 即可（<code>-L 3100:localhost:3000</code>），<code>localhost</code> 的任何 port 都算 secure context。</p>
+
+<p>另一個做法：直接在跑 TEN 的機器上開瀏覽器。</p>
+
+<h2 id="asr">7. E · ASR 沒有結果</h2>
+
+<h3>在哪看</h3>
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}
+grep -E '\[stt\]|asr_result|asr_error|connection_status_changed' "$L" | tail -25</code></pre>
+
+<p>graph 裡 ASR 節點的 <code>name</code> 是 <code>stt</code>，所有它的 log 都以 <code>[stt]</code> 開頭。
+<strong>換 vendor 不會改變這個前綴</strong>，因為它是節點名不是 addon 名。</p>
+
+<h3>要找的四行</h3>
+<table>
+<tr><th>log</th><th>意義</th></tr>
+<tr><td><code>[stt] config: {...'params': {...}}</code></td><td>extension 實際收到的設定。<strong>先看這行</strong>，<code>'api_key': ''</code> 就是 key 沒進去</td></tr>
+<tr><td><code>connection_status_changed ... 'current': 'connecting'</code></td><td>開始連 vendor</td></tr>
+<tr><td><code>connection_status_changed ... 'current': 'connected'</code></td><td><strong>連上了</strong></td></tr>
+<tr><td><code>send asr_error: {"code": -1000, "message": "..."}</code></td><td>vendor 或設定的錯，<code>message</code> 就是原因</td></tr>
+</table>
+
+<h3>E-1　key 是空字串</h3>
+<pre><code>[stt] config: {... 'params': {'key': '', 'api_key': '', 'model': 'nova-3', ...}}
+send asr_error: {"code": -1000, "message": "Deepgram API key is required but missing or empty"}
+connection_status_changed ... 'current': 'disconnected', 'code': -1000</code></pre>
+<p>回 B-1 檢查 <code>.env</code> 與服務的先後順序。</p>
+
+<h3>E-2　有連上但沒有辨識結果</h3>
+<pre><code>grep '_send_asr_metrics' "$L" | tail -3
+# metrics={'actual_send': 0, 'actual_send_delta': 0}</code></pre>
+<p><code>actual_send: 0</code> 代表<strong>一個 byte 的音訊都沒送出去</strong>。
+往上游查：麥克風（D）或 WebSocket（C）。</p>
+
+<h3>E-3　錯誤在 UI 上看不到</h3>
+<pre><code>W ten:runtime ten_env_send_msg_internal@send.c:163
+  Failed to send message: Failed to find destination of a 'data' message 'error' from graph.</code></pre>
+<div class="warn">
+ASR 送出了 <code>error</code> 資料訊息，但 <code>websocket-example</code> 的 graph 只路由
+<code>asr_result</code>、<code>metrics</code>、<code>tts_flush_end</code>，<strong>沒有 <code>error</code></strong>。
+所以錯誤到不了前端，瀏覽器只會顯示「沒反應」。
+<strong>看到「沒反應」時一定要看 log，不能相信 UI。</strong>
+</div>
+
+<h2 id="llm">8. F · LLM 沒有回應</h2>
+
+<h3>在哪看</h3>
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}
+grep -E '\[llm\]|asr_result|main_control' "$L" | tail -25</code></pre>
+
+<p>LLM 節點的 <code>name</code> 是 <code>llm</code>，前綴 <code>[llm]</code>。
+<code>main_control</code> 是中間的協調者：它收 <code>asr_result</code>，再驅動 <code>llm</code>。</p>
+
+<h3>先分辨是哪一段</h3>
+<table>
+<tr><th>看到的</th><th>壞在</th><th>下一步</th></tr>
+<tr><td>連 <code>asr_result</code> 都沒有</td><td>ASR</td><td>回 E</td></tr>
+<tr><td>有 <code>asr_result</code>，但完全沒有 <code>[llm]</code></td><td><code>main_control</code> 沒把文字交給 llm</td><td>F-1</td></tr>
+<tr><td>有 <code>[llm]</code>，接著出現 HTTP 狀態碼</td><td>vendor 端</td><td>F-2</td></tr>
+<tr><td>有 <code>[llm]</code> 但之後沒有下文</td><td>連不到 vendor</td><td>F-3</td></tr>
+</table>
+
+<h3>F-1　main_control 沒有收到 asr_result</h3>
+<p>檢查 graph 的 connections 有沒有這條：</p>
+<pre><code>python3 -c "
+import json
+d=json.load(open('tenapp/property.json'))
+for g in d['ten']['predefined_graphs']:
+    for c in g['graph'].get('connections',[]):
+        print(c.get('extension'), [i.get('name') for i in c.get('data',[])])
+"</code></pre>
+<p><code>main_control</code> 那一列必須包含 <code>asr_result</code>。</p>
+
+<h3>F-2　vendor 回錯誤</h3>
+<pre><code>grep -iE 'openai|401|403|404|429|invalid|quota|model' "$L" | tail -15</code></pre>
+<table>
+<tr><th>狀態碼</th><th>原因</th></tr>
+<tr><td>401</td><td><code>OPENAI_API_KEY</code> 無效</td></tr>
+<tr><td>404</td><td><code>OPENAI_MODEL</code> 這個模型名稱不存在</td></tr>
+<tr><td>429</td><td>額度或速率限制</td></tr>
+</table>
+<pre><code>grep -E '^OPENAI_MODEL|^OPENAI_API_BASE' ~/ten-framework/ai_agents/.env</code></pre>
+
+<h3>F-3　連不到 vendor</h3>
+<pre><code>curl -s -o /dev/null -w '%{http_code}\n' -m 10 https://api.openai.com/v1/models</code></pre>
+<p>逾時或 000 就是網路問題。<code>.env</code> 的 <code>OPENAI_PROXY_URL</code> 可以設 proxy，
+它預設是空的（placeholder 帶 <code>|</code>，所以空著不會讓 worker 死）。</p>
+
+<h3>F-4　改用本地模型</h3>
+<p>本地模型若提供 OpenAI 相容的 <code>/v1/chat/completions</code>，<strong>不用寫任何代碼</strong>，
+改 graph 裡 <code>llm</code> 節點的 <code>base_url</code> 即可：</p>
+<pre><code>"property": {
+  "base_url": "http://127.0.0.1:11434/v1",
+  "api_key": "not-needed",
+  "model": "qwen2.5:14b",
+  "max_tokens": 512,
+  "prompt": ""
+}</code></pre>
+<p><code>api_key</code> 不能省略也不能空 —— 多數本地伺服器不驗證它，但空字串會讓 extension 自己報錯。</p>
+
+<h2 id="tts">9. G · TTS 沒有聲音</h2>
+
+<h3>在哪看</h3>
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log 2>/dev/null | head -1); L=${L:-/tmp/task_run.log}
+grep -E '\[tts\]|tts_audio_start|tts_audio_end|tts_flush|pcm_frame' "$L" | tail -25</code></pre>
+
+<p>TTS 節點的 <code>name</code> 是 <code>tts</code>，前綴 <code>[tts]</code>。</p>
+
+<table>
+<tr><th>看到的</th><th>意義</th></tr>
+<tr><td><code>[tts] config: {...}</code></td><td>實際設定，先確認 <code>key</code> 不是空的</td></tr>
+<tr><td><code>[tts] on_start()</code></td><td>extension 啟動了</td></tr>
+<tr><td><code>tts_audio_start</code> / <code>tts_audio_end</code></td><td>一段合成的開始與結束</td></tr>
+<tr><td>沒有任何 <code>pcm_frame</code> 回流</td><td>音訊沒送回 <code>websocket_server</code></td></tr>
+</table>
+
+<h3>G-1　vendor 設定錯</h3>
+<p>ElevenLabs 的 <code>voice_id</code> 或 <code>model_id</code> 無效時會回錯。用 API 查你帳號實際能用的：</p>
+<pre><code>curl -s -H "xi-api-key: $ELEVENLABS_TTS_KEY" https://api.elevenlabs.io/v1/voices \
+  | jq -r '.voices[] | "\(.voice_id)  \(.name)"'</code></pre>
+
+<h3>G-2　<code>output_format</code> 被改過</h3>
+<div class="bad">
+<code>pcm_16000</code> 是整條 pipeline 講好的格式。改成 mp3 或其他取樣率，
+下游收到的就不是預期的 PCM16 —— <strong>音訊會壞掉而且不會有明顯的錯誤訊息</strong>。
+</div>
+
+<h2 id="quick">10. 根因速查表</h2>
+
+<table>
+<tr><th>log 或症狀</th><th>根因</th><th>修法</th></tr>
+<tr><td><code>Environment variable X is not found, neither default value is provided</code></td><td><code>.env</code> 沒有 X，或 <code>task run</code> 比 <code>.env</code> 舊</td><td>填值後<strong>重啟</strong></td></tr>
+<tr><td><code>config: {...'api_key': ''}</code></td><td>變數存在但值是空的</td><td>填真值後重啟</td></tr>
+<tr><td><code>STAT</code> 欄位是 <code>T</code></td><td>背景執行被 SIGTTOU 停住</td><td>改用 tmux</td></tr>
+<tr><td><code>Cannot read properties of undefined (reading 'getUserMedia')</code></td><td>非 secure context</td><td>SSH 通道 + <code>localhost</code></td></tr>
+<tr><td><code>proxy error ... ECONNREFUSED</code> 持續不斷</td><td>worker 沒起來</td><td>看 B</td></tr>
+<tr><td><code>Failed to find destination of a ... message</code></td><td>graph 少一條 connection</td><td>補 <code>connections</code></td></tr>
+<tr><td><code>actual_send: 0</code></td><td>沒有音訊送到 ASR</td><td>看 C、D</td></tr>
+<tr><td>UI 完全沒反應，log 卻有錯</td><td><code>error</code> 訊息沒有被路由</td><td><strong>永遠以 log 為準</strong></td></tr>
+<tr><td>換 vendor 後行為沒變</td><td>改了 <code>addon</code> 但沒重啟</td><td>改結構要完整重啟；只改 <code>property</code> 值才是下個 session 生效</td></tr>
+<tr><td>瀏覽器開出來是別的頁面</td><td>本機 3000 被其他服務或容器佔用</td><td><code>ss -tlnp \| grep 3000</code></td></tr>
+</table>
+
+<h3>三種改動、三種生效方式</h3>
+<table>
+<tr><th>改了什麼</th><th>何時生效</th></tr>
+<tr><td><code>property</code> 裡的值（voice_id、model、language）</td><td>下一個 session，不用重啟</td></tr>
+<tr><td><code>addon</code>、節點增刪、<code>connections</code></td><td>完整重啟 <code>task run</code></td></tr>
+<tr><td><code>.env</code></td><td>完整重啟（只在啟動時讀一次）</td></tr>
+</table>
+
+</div>
+</body>
+</html>
