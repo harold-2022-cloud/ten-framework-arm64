@@ -461,8 +461,12 @@ the tracked compose file. A host in permissive mode is unaffected.
 Verified with `ai_agents/agents/scripts/verify_arm64_install.sh --probe-worker`
 on the platform above: **31 checks passed, 0 failed, 2 skipped.**
 
-The two findings that decide whether the port works are the last two, and both
-are dynamic — no static check can reach them:
+Read that as a floor, not a verdict. It says one example installs and starts
+correctly for this architecture — a single graph, a single throwaway session,
+no conversation. The scope block the script prints lists what it leaves alone.
+
+Within that scope, the two findings that matter are the last two, and both are
+dynamic — no static check can reach them:
 
 ```
 8b. Worker probe
@@ -474,11 +478,12 @@ are dynamic — no static check can reach them:
   no ModuleNotFoundError in worker logs
 ```
 
-A clean worker log is the whole answer. It means `python_addon_loader` resolved
-`libpython3.12` through `TEN_PYTHON_LIB_PATH` instead of its built-in
-`libpython3.10.so`, and that the dependencies `uv` installed are visible to the
-interpreter the runtime actually embedded — the two failures the RPM path is
-prone to, neither of which surfaces until a worker spawns.
+A clean worker log settles the architecture question specifically. It means
+`python_addon_loader` resolved `libpython3.12` through `TEN_PYTHON_LIB_PATH`
+instead of its built-in `libpython3.10.so`, and that the dependencies `uv`
+installed are visible to the interpreter the runtime actually embedded — the two
+failures the RPM path is prone to, neither of which surfaces until a worker
+spawns. It says nothing about whether any particular graph does useful work.
 
 Everything below that is already established by the static sections: every
 shared object is aarch64, the Go binding links `libten_runtime.so` and compiles,

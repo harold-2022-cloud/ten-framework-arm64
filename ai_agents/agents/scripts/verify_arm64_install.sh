@@ -523,18 +523,26 @@ for graph in doc.get("ten", {}).get("predefined_graphs", []):
 for var in sorted(found):
     info = found[var]
     where = ",".join(sorted(info["nodes"]))
-    in_dotenv = var in dotenv
-    val = dotenv.get(var, os.environ.get(var))
-    present = in_dotenv or var in os.environ
-    if present and val:
-        state = "SET"
-    elif present:
-        state = "EMPTY"
+    dot_val = dotenv.get(var)
+    env_val = os.environ.get(var)
+    in_dotenv, in_environ = var in dotenv, var in os.environ
+
+    # The worker inherits its environment from the API server, which task starts
+    # after loading .env. Which side wins when both define a variable is
+    # task's precedence rule, not something this script can observe, so a
+    # disagreement is reported rather than resolved.
+    if in_dotenv and in_environ and bool(dot_val) != bool(env_val):
+        state, src = "CONFLICT", (
+            "dotenv empty, environ set" if not dot_val else "dotenv set, environ empty")
+    elif in_dotenv or in_environ:
+        val = dot_val if in_dotenv else env_val
+        state = "SET" if val else "EMPTY"
+        src = "dotenv" if in_dotenv else "environ"
     else:
-        state = "ABSENT"
+        state, src = "ABSENT", "-"
+
     print("%s|%s|%s|%s|%s" % (
-        state, var, "optional" if info["optional"] else "required", where,
-        "dotenv" if in_dotenv else ("environ" if var in os.environ else "-")))
+        state, var, "optional" if info["optional"] else "required", where, src))
 PYEOF
 )"
 
@@ -551,6 +559,10 @@ PYEOF
         EMPTY:required)
           bad "$var is present but EMPTY -- used by: $where"
           note "resolves to an empty string; the extension will reject it at runtime" ;;
+        CONFLICT:*)
+          skip "$var disagrees between sources ($src) -- used by: $where"
+          note "task's dotenv precedence decides which the worker sees; set both"
+          note "the same way, or unset the shell copy, to remove the ambiguity" ;;
         EMPTY:optional)
           skip "$var empty, but the placeholder carries a default -- used by: $where" ;;
         ABSENT:required)
@@ -676,14 +688,26 @@ fi
 # ---------------------------------------------------------------- summary
 hdr "Summary"
 printf '  passed  : %d\n  failed  : %d\n  skipped : %d\n' "$PASS" "$FAIL" "$SKIP"
-printf '\n  Not covered by this script:\n'
-printf '    - building the framework core from source (tgn gen / tgn build)\n'
+
+# State the scope plainly. A green result here means one example installed
+# correctly for this architecture -- it is a floor, not a verdict on the
+# framework, and reading it as the latter is the easy mistake to make.
+printf '\n  \033[1mScope\033[0m: a minimal install check for ONE example (%s). It covers what tman\n' "$EXAMPLE"
+printf '  installed, what task built, and -- with --probe-worker -- a single throwaway\n'
+printf '  session. It does not establish that the framework works.\n'
+
+printf '\n  Not verified here:\n'
+printf '    - a real conversation: vendor connectivity, audio round trip, transcripts\n'
+printf '    - the other examples, and any graph other than the one probed\n'
+printf '    - the framework core built from source (tgn gen / tgn build)\n'
 printf '    - C++ extension builds\n'
-printf '    - core unit/integration tests, guarder suites\n'
-printf '    - RTC examples: the agora_rtc extension has no aarch64 build\n\n'
+printf '    - core unit and integration tests, and the ASR/TTS guarder suites\n'
+printf '    - concurrent sessions, long-running stability, reconnect behaviour\n'
+printf '    - the container path (Dockerfile.dev, docker-compose)\n'
+printf '    - RTC examples: agora_rtc has no aarch64 build, so most cannot run\n\n'
 
 if [ "$FAIL" -eq 0 ]; then
-  printf '  \033[32mAll executed checks passed.\033[0m\n\n'
+  printf '  \033[32mAll executed checks passed\033[0m -- within the scope above.\n\n'
 else
   printf '  \033[31m%d check(s) failed.\033[0m\n\n' "$FAIL"
 fi
