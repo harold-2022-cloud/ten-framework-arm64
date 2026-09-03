@@ -239,6 +239,85 @@ Re-enable either only with time budgeted to debug it.
 Cross-compiling is not set up. CI only ever builds arm64 on native arm64
 runners; there is no sysroot or cross-toolchain configuration in this repo.
 
+## Component inventory, and what arm64 changes
+
+The build graph is easier to reason about than the package list it produces.
+`BUILD.gn` defines one group, `ten_framework_all`, and everything else hangs off
+it:
+
+| Target | Contents |
+| ------ | -------- |
+| `core/src/ten_runtime` | the C runtime |
+| `core/src/ten_runtime/binding` | the go, nodejs and python bindings |
+| `core/src/ten_rust` | Rust crates, gated on `ten_enable_ten_rust` |
+| `core/src/ten_manager` | `tman`, gated on `ten_enable_ten_manager` |
+| `third_party` | fourteen dependencies, all source |
+| `packages/core_addon_loaders` | `python_addon_loader`, `nodejs_addon_loader` |
+| `packages/core_apps` | `default_app_{cpp,go,nodejs,python}` |
+| `packages/core_extensions` | nine `default_*` templates (extension, async, asr, tts, llm, mllm) |
+| `packages/core_protocols` | `msgpack` |
+| `packages/core_systems` | `pytest_ten` |
+| `packages/example_apps` | `pprof_app_go`, `transcriber_demo` |
+| `packages/example_extensions` | eighteen, including the ffmpeg trio, `vosk_asr_cpp`, `webrtc_vad_cpp` |
+
+Twenty-two feature flags govern that graph, seven in `build/options.gni` and
+fifteen in `build/ten_runtime/options.gni`.
+
+### What is actually unavailable or disabled on arm64
+
+Only the first of these is a functional gap. The rest are worth knowing so they
+are not mistaken for one.
+
+| Item | Nature |
+| ---- | ------ |
+| The `agora_rtc` extension | The only real gap. No aarch64 artifact in the registry, no source in the tree, so it cannot be built locally either. |
+| Coverage instrumentation | Cannot be enabled at all. Six `assert(is_linux && target_cpu == "x64")` guard it — three in `build/ten_runtime/glob.gni`, two in `build/ten_runtime/ten.gni`, one in `build/ten_common/rust/rust.gni`. All are inside `if (enable_coverage)`, so the default build never reaches them. |
+| Tests | `linux_arm64.yml` sets `ten_enable_tests=false` along with the rust and manager test flags, so the arm64 CI job builds no test target at all. |
+| `ten_enable_libwebsockets=false` | Costs nothing. The flag is referenced in exactly three places, all under `tests/ten_runtime/`, and arm64 CI already disables tests. It gates no runtime code. |
+| `ten_manager_enable_frontend=false` | The tman designer's frontend is not built. |
+| `ten_enable_go_app_leak_check` | Defined as x64-only in `build/ten_runtime/options.gni`, and only meaningful under a sanitizer debug build. |
+| `rustup target add stable x86_64-unknown-linux-gnuasan` | Hardcoded in the build Dockerfile and meaningless on arm64. |
+| ffmpeg extensions | Off by default everywhere (`ten_enable_ffmpeg_extensions = false`), not an arm64 restriction. |
+
+The fourth row corrects a plausible misreading: turning `libwebsockets` off
+looks like dropping a transport, and is not.
+
+## Build dependencies, extracted from the Dockerfile
+
+`tools/docker_for_building/ubuntu/22.04/Dockerfile` is the only place the core
+build's dependencies are written down, and it is Ubuntu 22.04 and Debian
+tooling throughout. On any other distribution it has to be read as a manifest
+rather than run. Grouped by purpose:
+
+| Purpose | Packages (Ubuntu names) |
+| ------- | ----------------------- |
+| Compiler and build | `build-essential` `cmake` `make` `autoconf` `libtool` `pkg-config` |
+| Crypto and network | `libssl-dev` `libcurl4-gnutls-dev` `libcrypto++-dev` `libnss3-dev` |
+| Parsing and serialisation | `libexpat1-dev` `libmsgpack-dev` `zlib1g-dev` |
+| System | `uuid-dev` `libunwind-dev` `libffi-dev` `libreadline-dev` `libncurses5-dev` `libgdbm-dev` |
+| Audio | `libasound2` |
+| ffmpeg extensions only | `libavformat-dev` `libavfilter-dev` `libx264-dev` `libdrm-dev` `libxcomposite-dev` `libxdamage1` |
+| Sanitizer | `libasan5` |
+| Python | `python3` `python3-dev` `python3-pip` `python3-venv` |
+| Toolchains | Go 1.22.3 plus go1.20.12 for compatibility checks; Rust stable with `cbindgen`; clang-18 from apt.llvm.org |
+| Tools | `uv` `task` `jq` `git` `zip` `unzip` `p7zip-full` `tree` `cpulimit` `iwyu` |
+
+Two entries have no consumer anywhere in the GN graph — `libmysqlclient-dev`
+and `libmysqlcppconn-dev` — and the ffmpeg row is only needed with
+`ten_enable_ffmpeg_extensions=true`, which nothing sets.
+
+Three lines in that Dockerfile do not survive a move off Ubuntu x64:
+
+```dockerfile
+ln -sf /usr/bin/python3.10-config /usr/bin/python3-config   # hardcodes 3.10
+rustup target add stable x86_64-unknown-linux-gnuasan       # hardcodes x86_64
+add-apt-repository "deb http://apt.llvm.org/..."            # Debian-only, for clang-18
+```
+
+The Go install is the counter-example worth copying: it derives the archive name
+from `dpkg --print-architecture`, so it is already arch-correct — though `dpkg`
+itself has to be replaced on an RPM distribution.
+
 ## AI agents without Docker
 
 On Ubuntu 24.04 arm64. Adjust package names for other distributions.
@@ -632,6 +711,104 @@ logs afterwards.
 | A value inside `params` (voice id, model, language) | Next session — the server re-reads `property.json` per worker |
 | `addon`, node set, or `connections` | Full restart of `task run` |
 | `.env` | Full restart — it is read once at startup |
+
+## Testing an ASR, LLM or TTS extension
+
+There are two test harnesses with the same shape and opposite requirements. The
+distinction that matters is whether the vendor client is real, because it
+decides whether credentials and network are needed.
+
+| | Standalone | Guarder |
+| --- | ---------- | ------- |
+| Command | `task test-extension EXTENSION=agents/ten_packages/extension/<ext>` | `task asr-guarder-test EXTENSION=<ext>` / `tts-guarder-test` |
+| Lives in | `<ext>/tests/` | `agents/integration_tests/{asr,tts}_guarder/` |
+| Vendor client | **Mocked** — the client class is patched out | **Real** |
+| Credentials | None | The vendor key, from `.env` |
+| Network | None | Yes |
+| Answers | Does the extension behave correctly given vendor responses | Does the vendor integration actually work |
+
+Both run a real TEN app rather than a stub: each `conftest.py` starts a `FakeApp`
+subclass of `App` on its own thread and blocks the fixture until `on_init` fires,
+so the C runtime, the Python binding and the addon manager are all live for the
+duration. A standalone test is a unit test of the extension, not of a mock.
+
+### How a standalone run works
+
+`<ext>/tests/bin/start` is the entry point:
+
+```bash
+export PYTHONPATH=.ten/app:.ten/app/ten_packages/system/ten_runtime_python/lib:...
+export TEN_APP_BASE_DIR=.ten/app
+pytest -s tests/ "$@"
+```
+
+`.ten/app` is a throwaway app tree produced by `tman -y install --standalone`,
+which `task test-extension` runs first and deletes afterwards.
+`test-extension-no-install` skips both, which is the faster loop while iterating
+— and the reason a stale `.ten/` causes confusing failures later.
+
+The mock is per-extension and patches the vendor client where the extension
+imports it. For `soniox_asr_python` that is
+`soniox_asr_python.extension.SonioxWebsocketClient`, replaced by a `MagicMock`
+whose `connect`, `send_audio`, `finalize` and `stop` are `AsyncMock`s, plus
+`trigger_open`, `trigger_transcript`, `trigger_error`, `trigger_close` and
+`trigger_finished` helpers the test calls to drive the extension through states
+the real vendor would produce. Sixteen test files exercise finalize modes,
+reconnection, confidence, multilingual output, sentence termination, invalid
+params and vendor errors — none of which need a key.
+
+Anything after `--` goes to pytest, which is how a single test is run:
+
+```bash
+task test-extension-no-install EXTENSION=agents/ten_packages/extension/soniox_asr_python -- -k test_finalize -s -v
+```
+
+### How a guarder run works
+
+The guarder is one harness parameterised by extension name. It rewrites its own
+manifest first:
+
+```bash
+sed "s/{{extension_name}}/$EXT_NAME/g" manifest-tmpl.json > manifest.json
+./scripts/install_deps_and_build.sh <os> <arch>
+./tests/bin/start --extension_name <ext> --config_dir <ext>/tests/configs
+```
+
+`install_deps_and_build.sh` detects the host architecture when called without
+arguments, and the Taskfile passes it explicitly, so this path is arch-correct
+on arm64 — though CI has never exercised it there.
+
+`--config_dir` points at the extension's own `tests/configs/`, which is where
+the authoritative property shape for that vendor lives: `property_en.json`,
+`property_zh.json`, `property_invalid.json`. Those files carry real
+`${env:...}` placeholders, so the corresponding key must be set.
+
+Audio fixtures are 16 kHz PCM under `tests/test_data/`: `16k_en_us.pcm`,
+`16k_en_us_helloworld.pcm`, `16k_zh_cn.pcm`, `16k_es_es.pcm`.
+
+`tests/bin/start` excludes `test_long_duration_stream` by default. Pass `-k` to
+override. Do not run the ASR and TTS guarders concurrently in one container —
+their build scripts collide on shared temp paths.
+
+### Where the logs are
+
+Both harnesses configure logging in `conftest.py`, and both send everything to
+**stdout at debug level** with no file emitter:
+
+```json
+{"ten": {"log": {"handlers": [{"matchers": [{"level": "debug"}],
+  "emitter": {"type": "console", "config": {"stream": "stdout"}}}]}}}
+```
+
+So there is no log file to find; capture it if you want one:
+
+```bash
+task test-extension EXTENSION=agents/ten_packages/extension/soniox_asr_python 2>&1 | tee /tmp/ext_test.log
+```
+
+This is a different destination from a running agent, where the API server gives
+each worker its own file under `LOG_PATH` (`/tmp/ten_agent` by default). Test
+runs never write there.
 
 ## Arch selection in the Taskfiles
 
