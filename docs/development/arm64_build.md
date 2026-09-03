@@ -456,6 +456,40 @@ Relevant only to the container path. Under enforcing, the five bind mounts in
 add the labels through a local `docker-compose.override.yml` rather than editing
 the tracked compose file. A host in permissive mode is unaffected.
 
+### Verification result
+
+Verified with `ai_agents/agents/scripts/verify_arm64_install.sh --probe-worker`
+on the platform above: **31 checks passed, 0 failed, 2 skipped.**
+
+The two findings that decide whether the port works are the last two, and both
+are dynamic — no static check can reach them:
+
+```
+8b. Worker probe
+  POST /start accepted
+  worker for verify-<pid> is registered
+
+9. Worker logs
+  no libpython load failure in worker logs
+  no ModuleNotFoundError in worker logs
+```
+
+A clean worker log is the whole answer. It means `python_addon_loader` resolved
+`libpython3.12` through `TEN_PYTHON_LIB_PATH` instead of its built-in
+`libpython3.10.so`, and that the dependencies `uv` installed are visible to the
+interpreter the runtime actually embedded — the two failures the RPM path is
+prone to, neither of which surfaces until a worker spawns.
+
+Everything below that is already established by the static sections: every
+shared object is aarch64, the Go binding links `libten_runtime.so` and compiles,
+and `/graphs` returning the graph definitions proves `property.json` was parsed
+by the runtime rather than merely being valid JSON.
+
+Note what this does not cover. A conversation still needs vendor credentials,
+which is configuration rather than portability. The framework core was never
+built from source here — these are the published packages. And the RTC examples
+remain blocked on the missing aarch64 `agora_rtc` build.
+
 ## AI agents in a container
 
 The default image `ghcr.io/ten-framework/ten_agent_build:0.7.14` is a
@@ -487,11 +521,32 @@ case, and aborts with `FATAL: unsupported platform.`
 
 ### Verifying you really got arm64
 
+Spot checks:
+
 ```bash
 file ai_agents/server/bin/api                    # => ARM aarch64
 find ai_agents/agents/examples/websocket-example/tenapp/ten_packages \
   -name '*.so' | head -1 | xargs file            # => ARM aarch64
 ```
+
+For the whole picture, `ai_agents/agents/scripts/verify_arm64_install.sh` covers
+host provenance, the module and extension inventory with versions, the ELF
+architecture of every shared object rather than a sample, unresolved dynamic
+dependencies, the glibc version `libten_runtime.so` actually requires, the
+Python ABI wiring, the locally built Go artifacts, and the running services. It
+exits with the number of failed checks.
+
+```bash
+./ai_agents/agents/scripts/verify_arm64_install.sh                  # static only
+./ai_agents/agents/scripts/verify_arm64_install.sh --probe-worker   # also dynamic
+```
+
+`--probe-worker` starts a throwaway session through the API and stops it again.
+It needs no credentials: a worker that fails to authenticate has still loaded
+libpython and instantiated its extensions, which is what the log section reads.
+Without it, the check that matters most is reported as skipped rather than
+passed — deliberately, since an unexercised Python binding is not evidence of a
+working one.
 
 `.github/workflows/ai_agents_arm64.yml` runs this path on `ubuntu-24.04-arm`
 and asserts the glibc floor, the libpython redirect, the resolved lock platform
