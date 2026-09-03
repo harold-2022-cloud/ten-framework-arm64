@@ -87,7 +87,10 @@ command -v systemd-detect-virt >/dev/null 2>&1 &&
   { v="$(systemd-detect-virt -c 2>/dev/null)"; [ "$v" != "none" ] && CONTAINER="$v"; }
 kv "container"   "$CONTAINER"
 
-kv "cpu"         "$(awk -F': ' '/^(model name|Model|CPU implementer)/{print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+CPU_NAME="$(lscpu 2>/dev/null | awk -F': +' '/^(Model name|BIOS Model name)/{print $2; exit}')"
+[ -n "$CPU_NAME" ] || CPU_NAME="$(awk -F': ' '/^(model name|Model)/{print $2; exit}' /proc/cpuinfo 2>/dev/null)"
+[ -n "$CPU_NAME" ] || CPU_NAME="$(lscpu 2>/dev/null | awk -F': +' '/^Vendor ID/{print "implementer "$2; exit}')"
+kv "cpu"         "${CPU_NAME:-unknown}"
 kv "cores / mem" "$(nproc 2>/dev/null) cores, $(free -h 2>/dev/null | awk '/^Mem:/{print $2}')"
 
 # Every interpreter the runtime could plausibly bind against.
@@ -114,15 +117,35 @@ else
   note "prebuilt arm64 packages will not load; build the core from source"
 fi
 
+# ID_LIKE is optional, and an independent RPM distribution leaves it unset. Fall
+# back to the package database actually present -- evidence, not a declaration.
+FAMILY=""
 case " $OS_ID $OS_LIKE " in
-  *" fedora "*|*" rhel "*|*" centos "*)
-    ok "RPM family detected (ID=$OS_ID ID_LIKE=$OS_LIKE) -- dnf package names apply" ;;
-  *" debian "*|*" ubuntu "*)
-    ok "Debian family detected (ID=$OS_ID) -- apt package names apply" ;;
-  *)
-    skip "distribution family not recognised (ID=${OS_ID:-unset} ID_LIKE=${OS_LIKE:-unset})"
-    note "tooling that keys off os-release, such as NodeSource's installer, may refuse to run" ;;
+  *" fedora "*|*" rhel "*|*" centos "*) FAMILY="rpm";   FAMILY_SRC="os-release" ;;
+  *" debian "*|*" ubuntu "*)            FAMILY="debian"; FAMILY_SRC="os-release" ;;
 esac
+if [ -z "$FAMILY" ]; then
+  if command -v rpm >/dev/null 2>&1 && rpm -q --whatprovides system-release >/dev/null 2>&1; then
+    FAMILY="rpm"; FAMILY_SRC="rpm database"
+  elif command -v dpkg >/dev/null 2>&1; then
+    FAMILY="debian"; FAMILY_SRC="dpkg"
+  fi
+fi
+
+case "$FAMILY" in
+  rpm)    ok "RPM-based (via $FAMILY_SRC) -- dnf package names apply" ;;
+  debian) ok "Debian-based (via $FAMILY_SRC) -- apt package names apply" ;;
+  *)      bad "cannot determine the package family"
+          note "neither os-release nor a package database identified it" ;;
+esac
+
+# Third-party installers read ID/ID_LIKE directly and refuse to run when the
+# distribution is not one they enumerate, regardless of the package manager.
+if [ -z "${OS_LIKE:-}" ] && [ "$FAMILY" = "rpm" ] &&
+   ! printf '%s' " $OS_ID " | grep -q ' fedora \| rhel \| centos '; then
+  skip "ID=$OS_ID with ID_LIKE unset -- installers keyed on os-release will refuse"
+  note "NodeSource's setup script fails here; use the distribution's own nodejs"
+fi
 
 if [ ! -d "$TENAPP" ]; then
   bad "tenapp not found -- run 'task install' in agents/examples/$EXAMPLE first"

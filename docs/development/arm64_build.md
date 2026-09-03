@@ -75,6 +75,7 @@ the published packages — following it gives you a 3.10 interpreter against a
 | Debian 13 (trixie) | 2.41 | 3.13 | Needs a 3.12 libpython installed |
 | Fedora 39 / 40 | 2.38 / 2.39 | 3.12 | **Works** — `TEN_PYTHON_LIB_PATH` is under `/usr/lib64` |
 | Fedora 41+ | 2.40+ | 3.13 | **Works** — needs `python3.12` installed alongside; see the Fedora section |
+| Lychee 2025 (Fedora rebuild) | 2.41 | 3.13 | **Verified** — the platform the RPM section was written on |
 | Ubuntu 22.04 LTS | 2.35 | 3.10 | **No** — below the glibc floor |
 | Debian 12 (bookworm) | 2.36 | 3.11 | **No** |
 | RHEL / Rocky 9 | 2.34 | 3.9 | **No** |
@@ -309,12 +310,18 @@ arm64 block and is not one — the same versions are published for arm64.
 Nothing in this repo passes `tman install --locked`, so the lock is re-resolved
 and rewritten against the host on every install. Read the registry, not the lock.
 
-## AI agents on Fedora (bare metal)
+## AI agents on RPM-based distributions (bare metal)
 
-Verified end to end on Fedora 42 aarch64 — glibc 2.41, gcc 14.3.1 — as an
-ordinary non-root user, with no container anywhere. The preceding section is
-written for Ubuntu 24.04; what follows is only where Fedora diverges from it.
-None of the differences are in the framework: every one is environmental.
+Verified end to end on an aarch64 Fedora rebuild — Lychee 2025, glibc 2.41,
+gcc 14.3.1, dnf5 — as an ordinary non-root user, with no container anywhere.
+The preceding section is written for Ubuntu 24.04; what follows is only where
+the RPM side diverges from it. None of the differences are in the framework:
+every one is environmental.
+
+Everything below applies to stock Fedora, which shares the layout the
+differences are about: `/usr/lib64` rather than a multiarch directory, dnf
+package names, and parallel-installable Python versions. One item is specific to
+a rebuild rather than to Fedora and is marked as such.
 
 ### What carried over unchanged
 
@@ -406,12 +413,19 @@ interpreter finds what lands there.
 | `libgstreamer1.0-dev` | `gstreamer1-devel` |
 | `pkg-config` | `pkgconf-pkg-config` |
 
-### 6. NodeSource does not recognise Fedora 42
+### 6. Installers keyed on os-release (rebuilds only)
 
-`https://rpm.nodesource.com/setup_20.x` exits with `Error: This script is
-intended for RPM-based systems.` on Fedora 42, despite Fedora being exactly
-that. Use the distribution package — the playground runs under `bun`, not Node,
-so the Node major version is not load-bearing:
+This one does not apply to stock Fedora. `https://rpm.nodesource.com/setup_20.x`
+exits with `Error: This script is intended for RPM-based systems.` on a rebuild
+whose `/etc/os-release` carries its own `ID` and leaves `ID_LIKE` unset — the
+script enumerates distributions by that field and never looks at whether `rpm`
+is present. Lychee 2025 reports `ID=lychee` with no `ID_LIKE`, so it is refused
+despite being an RPM distribution with `dnf5`.
+
+Anything else that reads `ID`/`ID_LIKE` to pick a repository will behave the
+same way. The distribution's own package avoids the question entirely, and the
+playground runs under `bun` rather than Node, so the Node major version is not
+load-bearing:
 
 ```bash
 sudo dnf -y install nodejs npm
