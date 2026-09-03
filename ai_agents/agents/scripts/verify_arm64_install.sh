@@ -150,37 +150,87 @@ fi
 
 # ---------------------------------------------------------------- python ABI
 hdr "6. Python ABI"
+SYS_DIR="$TENAPP/ten_packages/system"
+
 LOADER="$(find "$TENAPP/ten_packages" -name 'libpython_addon_loader.so' 2>/dev/null | head -1)"
 if [ -n "$LOADER" ]; then
   WANT="$(strings "$LOADER" 2>/dev/null | grep -oE 'libpython3\.[0-9]+\.so' | sort -u | head -1)"
-  note "loader's built-in default: ${WANT:-unknown}"
-  if [ -n "${TEN_PYTHON_LIB_PATH:-}" ] && [ -n "$WANT" ] && [ "$(basename "$TEN_PYTHON_LIB_PATH")" != "$WANT" ]; then
-    ok "TEN_PYTHON_LIB_PATH overrides the built-in default (expected on arm64)"
+  note "addon loader's built-in dlopen target: ${WANT:-unknown}"
+  if [ -n "${TEN_PYTHON_LIB_PATH:-}" ] && [ -n "$WANT" ] &&
+     [ "$(basename "$TEN_PYTHON_LIB_PATH")" != "$WANT" ]; then
+    ok "TEN_PYTHON_LIB_PATH overrides that default (required on arm64)"
   fi
 else
   skip "libpython_addon_loader.so not found"
 fi
 
-if [ -n "$PY_BIN" ]; then
+if [ -z "$PY_BIN" ]; then
+  skip "no interpreter resolved; import checks not run"
+else
   if "$PY_BIN" -c 'import pydantic, aiohttp, websockets' 2>/dev/null; then
-    ok "core third-party deps import under $PY_BIN"
+    ok "third-party deps (pydantic, aiohttp, websockets) import under $PY_BIN"
   else
-    bad "pydantic / aiohttp / websockets do not import under $PY_BIN"
-    note "dependencies were installed into a different interpreter — check UV_PYTHON"
+    bad "third-party deps do not import under $PY_BIN"
+    note "they were installed into a different interpreter -- check UV_PYTHON"
   fi
 
-  AI_BASE_IF="$TENAPP/ten_packages/system/ten_ai_base/interface"
-  if [ -d "$AI_BASE_IF" ]; then
-    if PYTHONPATH="$AI_BASE_IF" "$PY_BIN" -c 'import ten_ai_base' 2>/dev/null; then
-      ok "ten_ai_base imports"
-    else
-      bad "ten_ai_base does not import"
-    fi
-  else
-    skip "ten_ai_base/interface not present"
-  fi
-else
-  skip "no interpreter resolved; import checks not run"
+  # Reproduce the path layout the runtime itself uses: every system package's
+  # interface/ on PYTHONPATH and every lib/ on the loader path, discovered
+  # rather than hardcoded so a changed package set cannot silently skew this.
+  PYPATH=""; LDPATH=""
+  for d in "$SYS_DIR"/*/interface; do [ -d "$d" ] && PYPATH="$PYPATH:$d"; done
+  for d in "$SYS_DIR"/*/lib;       do [ -d "$d" ] && LDPATH="$LDPATH:$d"; done
+  PYPATH="${PYPATH#:}"; LDPATH="${LDPATH#:}"
+
+  # Probe the binding layer and the base-class layer separately, and report the
+  # exception verbatim. ten_ai_base sits on top of ten_runtime, so attributing a
+  # failure to the layer that actually broke matters more than a bare verdict.
+  probe() {
+    PYTHONPATH="$PYPATH" \
+    LD_LIBRARY_PATH="$LDPATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      "$PY_BIN" -c "
+import sys
+try:
+    import $1
+except BaseException as e:
+    sys.stdout.write('FAIL|%s: %s' % (type(e).__name__, e))
+else:
+    sys.stdout.write('OK|%s' % getattr($1, '__file__', '<namespace>'))
+" 2>/dev/null
+  }
+
+  RT_RES="$(probe ten_runtime)"
+  AB_RES="$(probe ten_ai_base)"
+
+  case "$RT_RES" in
+    OK\|*)
+      ok "ten_runtime imports standalone" ;;
+    *)
+      skip "ten_runtime does not import standalone"
+      note "${RT_RES#FAIL|}"
+      note "the binding is normally loaded by the runtime process, so a failure"
+      note "here is not conclusive -- section 9 is the authoritative check" ;;
+  esac
+
+  case "$AB_RES" in
+    OK\|*)
+      ok "ten_ai_base imports" ;;
+    *)
+      case "$RT_RES" in
+        OK\|*)
+          bad "ten_ai_base does not import while ten_runtime does"
+          note "${AB_RES#FAIL|}" ;;
+        *)
+          skip "ten_ai_base not importable, explained by ten_runtime above"
+          note "${AB_RES#FAIL|}" ;;
+      esac ;;
+  esac
+
+  # Structural presence is checkable regardless of whether import works.
+  for want in "$SYS_DIR/ten_ai_base/manifest.json" "$SYS_DIR/ten_ai_base/interface"; do
+    if [ -e "$want" ]; then ok "present: ${want#$TENAPP/}"
+    else bad "missing: ${want#$TENAPP/}"; fi
+  done
 fi
 
 # ---------------------------------------------------------------- built here
