@@ -36,25 +36,96 @@ skip() { printf '  \033[33m—\033[0m  %s\n' "$1"; SKIP=$((SKIP+1)); }
 note() { printf '       %s\n' "$1"; }
 
 # ---------------------------------------------------------------- host
+# Provenance first, verdicts second. Distribution-specific behaviour in this
+# repo keys off the RPM/Debian family and the Python the binding was built
+# against, and vendor rebuilds carry their own PRETTY_NAME, so record what the
+# machine actually reports rather than inferring the distribution from glibc.
 hdr "0. Host"
-ARCH="$(uname -m)"
-[ -r /etc/os-release ] && . /etc/os-release
-printf '  arch   : %s\n  distro : %s\n' "$ARCH" "${PRETTY_NAME:-unknown}"
-printf '  tenapp : %s\n' "$TENAPP"
 
+ARCH="$(uname -m)"
+kv() { printf '  %-16s %s\n' "$1" "$2"; }
+
+kv "arch"        "$ARCH"
+kv "kernel"      "$(uname -r)"
+
+if [ -r /etc/os-release ]; then
+  # Read in a subshell so the sourced file cannot clobber this script's vars.
+  OS_ID="$(. /etc/os-release; echo "${ID:-}")"
+  OS_LIKE="$(. /etc/os-release; echo "${ID_LIKE:-}")"
+  OS_VER="$(. /etc/os-release; echo "${VERSION_ID:-}")"
+  OS_NAME="$(. /etc/os-release; echo "${PRETTY_NAME:-}")"
+  OS_VARIANT="$(. /etc/os-release; echo "${VARIANT:-}")"
+  kv "distro ID"   "${OS_ID:-unset}"
+  kv "ID_LIKE"     "${OS_LIKE:-unset}"
+  kv "VERSION_ID"  "${OS_VER:-unset}"
+  kv "PRETTY_NAME" "${OS_NAME:-unset}"
+  [ -n "$OS_VARIANT" ] && kv "VARIANT" "$OS_VARIANT"
+else
+  OS_ID=""; OS_LIKE=""; OS_VER=""; OS_NAME=""
+  kv "os-release" "absent"
+fi
+
+# A vendor rebuild often keeps the upstream release package, which names the
+# base distribution and version more reliably than PRETTY_NAME does.
+if command -v rpm >/dev/null 2>&1; then
+  REL_PKG="$(rpm -q --whatprovides system-release 2>/dev/null | head -2 | tr '\n' ' ')"
+  kv "release pkg" "${REL_PKG:-none}"
+fi
+for f in /etc/fedora-release /etc/redhat-release /etc/system-release /etc/debian_version; do
+  [ -r "$f" ] && kv "$(basename "$f")" "$(head -1 "$f")"
+done
+
+GLIBC="$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
+kv "glibc"       "${GLIBC:-unreadable}"
+kv "gcc"         "$(gcc -dumpfullversion 2>/dev/null || echo absent)"
+kv "pkg manager" "$(for c in dnf5 dnf yum apt-get; do command -v $c >/dev/null && { echo $c; break; }; done)"
+kv "SELinux"     "$(getenforce 2>/dev/null || echo 'n/a')"
+
+CONTAINER="no"
+if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then CONTAINER="yes"; fi
+command -v systemd-detect-virt >/dev/null 2>&1 &&
+  { v="$(systemd-detect-virt -c 2>/dev/null)"; [ "$v" != "none" ] && CONTAINER="$v"; }
+kv "container"   "$CONTAINER"
+
+kv "cpu"         "$(awk -F': ' '/^(model name|Model|CPU implementer)/{print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+kv "cores / mem" "$(nproc 2>/dev/null) cores, $(free -h 2>/dev/null | awk '/^Mem:/{print $2}')"
+
+# Every interpreter the runtime could plausibly bind against.
+PY_FOUND=""
+for v in 3.10 3.11 3.12 3.13 3.14; do
+  command -v "python$v" >/dev/null 2>&1 && PY_FOUND="$PY_FOUND python$v"
+done
+PY_FOUND="${PY_FOUND# }"
+kv "python3"     "$(python3 -V 2>&1 | awk '{print $2}') ($(command -v python3))"
+kv "python 3.x"  "${PY_FOUND:-none besides python3}"
+LIBPY="$(ls /usr/lib64/libpython3*.so* /usr/lib/*/libpython3*.so* 2>/dev/null | tr '\n' ' ')"
+kv "libpython"   "${LIBPY:-none}"
+
+kv "tenapp"      "$TENAPP"
+
+printf '\n'
 if [ "$ARCH" = "aarch64" ]; then ok "host is aarch64"
 else bad "host is $ARCH, not aarch64"; fi
 
-GLIBC="$(ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
 if [ -n "$GLIBC" ] && [ "$(printf '2.38\n%s\n' "$GLIBC" | sort -V | head -1)" = "2.38" ]; then
-  ok "glibc $GLIBC (floor for prebuilt arm64 packages is 2.38)"
+  ok "glibc $GLIBC meets the 2.38 floor for prebuilt arm64 packages"
 else
   bad "glibc ${GLIBC:-unreadable} is below the 2.38 floor"
   note "prebuilt arm64 packages will not load; build the core from source"
 fi
 
+case " $OS_ID $OS_LIKE " in
+  *" fedora "*|*" rhel "*|*" centos "*)
+    ok "RPM family detected (ID=$OS_ID ID_LIKE=$OS_LIKE) -- dnf package names apply" ;;
+  *" debian "*|*" ubuntu "*)
+    ok "Debian family detected (ID=$OS_ID) -- apt package names apply" ;;
+  *)
+    skip "distribution family not recognised (ID=${OS_ID:-unset} ID_LIKE=${OS_LIKE:-unset})"
+    note "tooling that keys off os-release, such as NodeSource's installer, may refuse to run" ;;
+esac
+
 if [ ! -d "$TENAPP" ]; then
-  bad "tenapp not found — run 'task install' in agents/examples/$EXAMPLE first"
+  bad "tenapp not found -- run 'task install' in agents/examples/$EXAMPLE first"
   printf '\nAborting: nothing to check.\n'
   exit $FAIL
 fi
