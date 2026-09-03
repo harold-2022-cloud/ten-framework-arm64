@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEN Framework：元件、依賴與 arm64 移植</title>
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#EDF1F1;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1416; --card:#171E20; --sunk:#111819;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#111819;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:-apple-system,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  font-size:15px;line-height:1.7}
+.wrap{max-width:62rem;margin:0 auto;padding:2.5rem 1.25rem 6rem}
+h1{font-size:1.9rem;line-height:1.25;margin:0 0 .4rem;letter-spacing:-.01em}
+.sub{color:var(--ink-3);margin:0 0 2.5rem;font-size:.95rem}
+h2{font-size:1.3rem;margin:3rem 0 .3rem;padding-top:1.4rem;border-top:1px solid var(--rule)}
+h3{font-size:1.05rem;margin:2rem 0 .5rem;color:var(--accent)}
+h4{font-size:.95rem;margin:1.4rem 0 .4rem}
+p{margin:.7rem 0}
+code{background:var(--sunk);padding:.12em .38em;border-radius:3px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.1rem;border-radius:8px;
+  overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.83rem;line-height:1.6}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{background:var(--sunk);font-weight:600;white-space:nowrap}
+td code{white-space:nowrap}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.warn{border-left:3px solid var(--warn);background:var(--warn-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.bad{border-left:3px solid var(--danger);background:var(--danger-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.ok{border-left:3px solid var(--ok);background:var(--ok-soft);
+  padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 6px 6px 0}
+.src{color:var(--ink-3);font-size:.82rem;margin-top:.3rem}
+.tag{display:inline-block;font-size:.72rem;padding:.1rem .45rem;border-radius:3px;
+  background:var(--sunk);color:var(--ink-2);margin-right:.35rem;vertical-align:1px}
+.tag.v{background:var(--ok-soft);color:var(--ok)}
+.tag.u{background:var(--warn-soft);color:var(--warn)}
+nav.toc{background:var(--card);border:1px solid var(--rule);border-radius:8px;
+  padding:1rem 1.3rem;margin:0 0 2rem}
+nav.toc ol{margin:.3rem 0;padding-left:1.3rem}
+nav.toc a{color:var(--ink-2);text-decoration:none}
+nav.toc a:hover{color:var(--accent);text-decoration:underline}
+.flow{background:var(--card);border:1px solid var(--rule);border-radius:8px;
+  padding:1rem 1.2rem;margin:1rem 0;overflow-x:auto}
+.flow pre{background:none;color:var(--ink);padding:0;font-size:.82rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>TEN Framework：元件、依賴與 arm64 移植</h1>
+<p class="sub">
+  對照 <code>feat/arm64-native-build</code> 分支的源碼與建置腳本整理。
+  <span class="tag v">實測</span> 表示在 aarch64 機器上驗證過；
+  <span class="tag u">代碼</span> 表示從源碼讀出但未執行驗證。
+  無法確認的地方直接寫「本文無法確認」，不做推測。
+</p>
+
+<nav class="toc">
+  <strong>目錄</strong>
+  <ol>
+    <li><a href="#map">功能與 .so 的對應</a></li>
+    <li><a href="#load">runtime 怎麼載入這些 .so</a></li>
+    <li><a href="#missing">缺的是什麼：誰用、誰編、誰連結</a></li>
+    <li><a href="#test">arm64 上怎麼單元測試</a></li>
+    <li><a href="#msg">訊息機制與路由</a></li>
+    <li><a href="#rpc">RPC：cmd 與 CmdResult</a></li>
+    <li><a href="#rtc">RTC 鏈路 vs WebSocket 鏈路</a></li>
+    <li><a href="#llm">串接本地大模型</a></li>
+    <li><a href="#verify">分段驗證與日誌位置</a></li>
+  </ol>
+</nav>
+
+<h2 id="map">1. 功能與 .so 的對應</h2>
+
+<p>這張表是全篇的基礎。每一列回答四個問題：<strong>這個 .so 提供什麼功能、誰產出它、誰載入或連結它、arm64 有沒有</strong>。</p>
+
+<table>
+<tr>
+  <th>.so</th><th>提供的功能</th><th>由誰產出</th><th>誰載入 / 連結</th><th>arm64</th>
+</tr>
+<tr>
+  <td><code>libten_utils.so</code></td>
+  <td>基礎設施：字串、容器、log、backtrace、原子操作、<code>${env:}</code> 佔位符解析</td>
+  <td><code>core/src/ten_utils/BUILD.gn</code><br><code>shared_library("ten_utils_shared")</code></td>
+  <td>被 <code>libten_runtime.so</code> 連結</td>
+  <td><span class="tag v">實測</span></td>
+</tr>
+<tr>
+  <td><code>libten_runtime.so</code></td>
+  <td>C runtime 本體：graph 解析、extension 生命週期、<strong>訊息路由</strong>、addon 載入</td>
+  <td><code>core/src/ten_runtime/BUILD.gn</code><br><code>output_name = "ten_runtime"</code>、<code>type = "shared_library"</code></td>
+  <td>worker 進程載入；所有 binding 連結它</td>
+  <td><span class="tag v">實測</span></td>
+</tr>
+<tr>
+  <td><code>libten_runtime_python.so</code></td>
+  <td>Python binding：把 C runtime 的 API 暴露成 Python 模組</td>
+  <td><code>binding/python/native/BUILD.gn</code><br><code>ten_shared_library("ten_runtime_python")</code></td>
+  <td>Python 端 <code>import ten_runtime</code> 時載入</td>
+  <td><span class="tag v">實測</span></td>
+</tr>
+<tr>
+  <td><code>libpython_addon_loader.so</code></td>
+  <td>在 worker 進程裡啟動 Python 直譯器，<code>dlopen</code> libpython</td>
+  <td><code>packages/core_addon_loaders/python_addon_loader/BUILD.gn</code><br><code>ten_package("python_addon_loader")</code></td>
+  <td>runtime 掃 <code>addon_loader/*/lib/</code> 時 <code>dlopen</code></td>
+  <td><span class="tag v">實測</span></td>
+</tr>
+<tr>
+  <td><code>libten_runtime_go.so</code></td>
+  <td>Go binding</td>
+  <td><code>binding/go/BUILD.gn</code><br><code>ten_package("ten_go_binding_system_package")</code></td>
+  <td>Go app 透過 CGO <code>-lten_runtime_go</code> 連結</td>
+  <td><span class="tag v">實測</span></td>
+</tr>
+<tr>
+  <td><code>libten_runtime_nodejs.so</code></td>
+  <td>Node.js binding</td>
+  <td><code>binding/nodejs/native/BUILD.gn</code><br><code>ten_shared_library("ten_runtime_nodejs")</code></td>
+  <td><code>nodejs_addon_loader</code></td>
+  <td>建置系統支援</td>
+</tr>
+<tr>
+  <td><code>libagora_rtc.so</code></td>
+  <td><strong>RTC 傳輸</strong>：實作 TEN 的 extension 介面，內部呼叫 Agora SDK</td>
+  <td><strong>不在此 repo</strong>，由 Agora / TEN 維護者編譯後發佈</td>
+  <td>runtime 掃 <code>extension/agora_rtc/lib/</code> 時 <code>dlopen</code></td>
+  <td><span class="tag u">無</span></td>
+</tr>
+<tr>
+  <td><code>liblinux_audio_hy_extension.so</code></td>
+  <td>與上者同一套件，隨之載入</td>
+  <td>同上</td>
+  <td>同上</td>
+  <td><span class="tag u">無</span></td>
+</tr>
+<tr>
+  <td><code>libagora_rtc_sdk.so</code><br><code>libaosl.so</code><br><code>libagora-fdkaac.so</code></td>
+  <td>Agora 的 SDK 本體</td>
+  <td>Agora</td>
+  <td>被 <code>libagora_rtc.so</code> 連結</td>
+  <td>上游有，registry 無</td>
+</tr>
+</table>
+
+<h3>1.1 唯一的 prebuilt</h3>
+<p>整個建置系統只有一個二進位依賴不是源碼編的：</p>
+<pre><code>third_party/node/BUILD.gn
+  ten_prebuilt_library("prebuilt_node_shared")
+    node-shared-linux-arm64-gcc.zip / node-shared-linux-arm64-clang.zip</code></pre>
+<p><strong>它有 arm64。</strong> 其餘 third_party（curl、zlib、mbedtls、msgpack、libuv、libwebsockets、
+yyjson、nlohmann_json、googletest、ffmpeg）全部源碼編。</p>
+
+<h2 id="load">2. runtime 怎麼載入這些 .so</h2>
+
+<p class="src">來源：<code>core/src/ten_runtime/addon/addon_autoload.c</code></p>
+
+<p>一個 addon 套件就是一個目錄。runtime 會<strong>掃描它的 <code>lib/</code> 子目錄，把裡面每一個 <code>.so</code> 都 <code>dlopen</code></strong>：</p>
+
+<pre><code>// addon_autoload.c:440
+// Load the library from the 'lib/' directory.
+success = load_all_dynamic_libraries_under_path(
+    ten_string_get_raw_str(&addon_lib_folder_path));</code></pre>
+
+<div class="flow"><pre>tenapp/
+└── ten_packages/
+    ├── system/
+    │   ├── ten_runtime/lib/          libten_runtime.so, libten_utils.so
+    │   ├── ten_runtime_python/lib/   libten_runtime_python.so
+    │   └── ten_runtime_go/lib/       libten_runtime_go.so
+    ├── addon_loader/
+    │   └── python_addon_loader/lib/  libpython_addon_loader.so   ← runtime 掃這裡
+    └── extension/
+        ├── agora_rtc/lib/            libagora_rtc.so             ← RTC 例子掃這裡
+        │                             liblinux_audio_hy_extension.so
+        └── soniox_asr_python/        （純 Python，沒有 lib/）</pre></div>
+
+<p>所以一個「有二進位的 extension」= <code>manifest.json</code> + <code>property.json</code> + <code>lib/*.so</code>。
+純 Python 的 extension 沒有 <code>lib/</code>，走的是 <code>python_addon_loader</code> 那條路。</p>
+
+<div class="note">
+<strong>這解釋了為什麼架構不對就完全不能用。</strong>
+<code>dlopen</code> 一個 x86-64 的 <code>.so</code> 到 aarch64 的進程裡會直接失敗 ——
+不是功能降級，是那個 extension 根本不存在。
+</div>
+
+<h2 id="missing">3. 缺的是什麼：誰用、誰編、誰連結</h2>
+
+<h3>3.1 兩層，別搞混</h3>
+
+<div class="flow"><pre>TEN runtime (libten_runtime.so)
+    │
+    │ ① dlopen —— runtime 掃 extension/agora_rtc/lib/ 載入
+    ↓
+libagora_rtc.so                    ← TEN 的 wrapper（膠水層）
+    │
+    │ ② 呼叫 createAgoraService()
+    ↓
+libagora_rtc_sdk.so                ← Agora 的 SDK
+    │
+    │ ③ 連結
+    ↓
+libaosl.so, libagora-fdkaac.so, libagora-ffmpeg.so, libagora-soundtouch.so</pre></div>
+
+<table>
+<tr><th></th><th>誰在用它</th><th>誰編譯它</th><th>誰連結它</th><th>aarch64</th></tr>
+<tr>
+  <td><code>libagora_rtc.so</code></td>
+  <td>TEN runtime，透過 <code>dlopen</code></td>
+  <td><strong>Agora / TEN 維護者</strong>（源碼不公開）</td>
+  <td>它連結 Agora SDK</td>
+  <td><strong>缺</strong></td>
+</tr>
+<tr>
+  <td><code>libagora_rtc_sdk.so</code></td>
+  <td><code>libagora_rtc.so</code></td>
+  <td>Agora</td>
+  <td>被 wrapper 連結</td>
+  <td>上游有</td>
+</tr>
+</table>
+
+<div class="bad">
+<strong>缺的不是 SDK，是橋。</strong>
+Agora 的 SDK 有 aarch64 版，但 SDK 完全不知道 TEN 存在 —— 它只是一套 C++ 函式庫。
+把 TEN 的 extension 生命週期接到那套函式庫上的是 <code>libagora_rtc.so</code>，
+而 TEN 真正 <code>dlopen</code> 的也是它。沒有這座橋，SDK 有 aarch64 也沒有東西會去呼叫。
+</div>
+
+<h3>3.2 為什麼不能自己編</h3>
+<p>編出 aarch64 的 <code>libagora_rtc.so</code> 需要它的 C++ 源碼。實際查證結果：</p>
+
+<table>
+<tr><th>搜尋目標</th><th>結果（<code>third_party/</code> 以外）</th></tr>
+<tr><td><code>createAgoraService</code></td><td>無</td></tr>
+<tr><td><code>IAgoraService</code></td><td>無</td></tr>
+<tr><td><code>IAgoraRtcEngine</code></td><td>無</td></tr>
+<tr><td><code>NGIAgoraRtcConnection</code></td><td>無</td></tr>
+<tr><td><code>agora::rtc</code></td><td>無</td></tr>
+<tr><td>名為 <code>agora_rtc*</code> 的源碼目錄</td><td>不存在</td></tr>
+</table>
+
+<p><strong>推論的依據</strong>：wrapper 若在這個 repo 裡，必然會呼叫 <code>createAgoraService()</code> ——
+那是它跟 SDK 溝通的唯一入口。整個 repo 一次都沒出現。
+而發佈的 <code>agora_rtc</code> 套件只有四個檔：兩個 JSON 加兩個已編譯的 <code>.so</code>，
+沒有 <code>.cpp</code>、沒有 <code>BUILD.gn</code>。</p>
+
+<h3>3.3 要 Agora 提供的最小集合</h3>
+<table>
+<tr><th>檔案</th><th>理由</th></tr>
+<tr><td><code>libagora_rtc.so</code> (aarch64)</td><td>runtime <code>dlopen</code> 的對象</td></tr>
+<tr><td><code>liblinux_audio_hy_extension.so</code> (aarch64)</td><td>同套件內，一起被載入</td></tr>
+<tr><td><code>libagora-ffmpeg.so</code> (aarch64)</td><td>x64 wrapper 的 <code>NEEDED</code>；aarch64 SDK tarball 沒有</td></tr>
+<tr><td><code>libagora-soundtouch.so</code> (aarch64)</td><td>同上</td></tr>
+</table>
+<p><code>libagora_stt_ag_extension.so</code>、<code>libagora_stt_ms_extension.so</code>、
+<code>libagora_mcc_ysd_extension.so</code> 是否需要，<strong>本文無法確認</strong> ——
+需要對 x64 的 <code>libagora_rtc.so</code> 執行 <code>readelf -d</code> 看 <code>NEEDED</code> 才能定案。</p>
+
+<h2 id="test">4. arm64 上怎麼單元測試</h2>
+
+<p>三種測試，能不能在 arm64 跑取決於它需要什麼。</p>
+
+<table>
+<tr><th></th><th>extension 單元測試</th><th>guarder 整合測試</th><th>framework core 測試</th></tr>
+<tr><td>指令</td><td><code>task test-extension</code></td><td><code>task asr-guarder-test</code></td><td><code>tgn build</code> 後跑 <code>out/linux/arm64/tests/</code></td></tr>
+<tr><td>vendor client</td><td><strong>mock 掉</strong></td><td>真的</td><td>不適用</td></tr>
+<tr><td>需要 API key</td><td><strong>不需要</strong></td><td>需要</td><td>不需要</td></tr>
+<tr><td>需要連網</td><td>不需要</td><td>需要</td><td>不需要</td></tr>
+<tr><td>arm64</td><td><span class="tag v">可跑</span>只依賴 arm64 的 runtime .so</td><td>建置腳本會偵測架構，<strong>CI 未驗證</strong></td><td><strong>arm64 CI 完全不建</strong></td></tr>
+</table>
+
+<h3>4.1 extension 單元測試 —— arm64 上可直接跑</h3>
+
+<pre><code>task test-extension EXTENSION=agents/ten_packages/extension/soniox_asr_python</code></pre>
+
+<p>能跑的原因：測試需要的東西 arm64 全都有 ——
+<code>libten_runtime.so</code>、<code>libten_runtime_python.so</code>、<code>libpython_addon_loader.so</code>
+都是官方 arm64 build，extension 本身是純 Python，vendor client 被 mock 掉所以不碰網路。</p>
+
+<p><code>&lt;ext&gt;/tests/bin/start</code> 做兩件事：</p>
+<pre><code>export TEN_APP_BASE_DIR=.ten/app
+export PYTHONPATH=.ten/app:.ten/app/ten_packages/system/ten_runtime_python/lib:...
+pytest -s tests/ "$@"</code></pre>
+
+<p><code>.ten/app</code> 是 <code>tman -y install --standalone</code> 產生的拋棄式 app tree，
+<code>task test-extension</code> 會先裝、跑完刪掉。快速迭代用 <code>test-extension-no-install</code> 跳過這兩步。</p>
+
+<div class="warn">
+殘留的 <code>.ten/</code> 會讓下一次 <code>task check</code> 報幻影格式問題、並讓 standalone 安裝失敗。
+症狀奇怪時先 <code>rm -rf &lt;ext&gt;/.ten</code>。
+</div>
+
+<h4>測試不是在測 mock</h4>
+<p><code>conftest.py</code> 會起一個真的 TEN app：<code>FakeApp(App)</code> 跑在自己的執行緒上，
+fixture 一直阻塞到 <code>on_init</code> 被呼叫為止。所以 <strong>C runtime、Python binding、addon manager
+在測試期間全是活的</strong>，被換掉的只有 vendor 的 WebSocket client。</p>
+
+<p>以 <code>soniox_asr_python</code> 為例，被 patch 的是
+<code>soniox_asr_python.extension.SonioxWebsocketClient</code>，換成一個 <code>MagicMock</code>，
+其 <code>connect</code> / <code>send_audio</code> / <code>finalize</code> / <code>stop</code> 是 <code>AsyncMock</code>，
+另外提供 <code>trigger_open</code>、<code>trigger_transcript</code>、<code>trigger_error</code>、
+<code>trigger_close</code>、<code>trigger_finished</code> 讓測試主動驅動狀態。
+16 個測試檔涵蓋 finalize 模式、重連、信心值、多語言、句尾判定、無效參數、vendor 錯誤。</p>
+
+<h4>跑單一測試</h4>
+<pre><code>task test-extension-no-install \
+  EXTENSION=agents/ten_packages/extension/soniox_asr_python \
+  -- -k test_finalize -s -v</code></pre>
+<p><code>--</code> 之後的參數原樣轉給 pytest。</p>
+
+<h3>4.2 guarder 整合測試</h3>
+<pre><code>task asr-guarder-test EXTENSION=soniox_asr_python
+task tts-guarder-test EXTENSION=elevenlabs_tts2_python</code></pre>
+
+<p>流程是：把 <code>manifest-tmpl.json</code> 的 <code>{{extension_name}}</code> 用 sed 換成實際名稱產生
+<code>manifest.json</code>，跑 <code>install_deps_and_build.sh &lt;os&gt; &lt;arch&gt;</code>，
+再以 <code>--extension_name</code> 和 <code>--config_dir</code> 啟動。</p>
+
+<p><code>--config_dir</code> 指向該 extension 自己的 <code>tests/configs/</code> ——
+那裡的 <code>property_en.json</code> / <code>property_zh.json</code> 是<strong>該 vendor 設定形狀的權威來源</strong>，
+裡面帶真的 <code>${env:...}</code>，所以對應的 key 必須設。</p>
+
+<p>音訊素材：<code>agents/integration_tests/asr_guarder/tests/test_data/</code> 下的
+<code>16k_en_us.pcm</code>、<code>16k_en_us_helloworld.pcm</code>、<code>16k_zh_cn.pcm</code>、<code>16k_es_es.pcm</code>。</p>
+
+<div class="warn">
+<code>tests/bin/start</code> 預設排除 <code>test_long_duration_stream</code>。
+另外 <strong>ASR 和 TTS 的 guarder 不能在同一個容器裡並行</strong> —— 兩者的建置腳本會搶同一個暫存路徑。
+</div>
+
+<p><code>install_deps_and_build.sh</code> 在不帶參數時會自己偵測架構，Taskfile 也會明確傳入，
+所以這條路在 arm64 上是架構正確的。<strong>但 CI 從來沒有在 arm64 上跑過 guarder。</strong></p>
+
+<h3>4.3 framework core 的測試</h3>
+<p>arm64 CI 的 <code>tgn gen</code> 帶了 <code>ten_enable_tests=false</code>、
+<code>ten_rust_enable_tests=false</code>、<code>ten_manager_enable_tests=false</code>，
+所以<strong>官方從來沒有在 arm64 上建過任何測試目標</strong>。</p>
+<p>要自己跑的話得先從源碼建 core：</p>
+<pre><code>git submodule update --init --recursive --depth 1 core/ten_gn
+export PATH=$(pwd)/core/ten_gn:$PATH
+tgn gen linux arm64 release
+tgn build linux arm64 release
+# 產物在 out/linux/arm64/tests/</code></pre>
+<p>注意 <code>enable_coverage</code> 在 arm64 上<strong>不能開</strong> —— 建置系統有六處
+<code>assert(is_linux &amp;&amp; target_cpu == "x64")</code> 擋著。</p>
+
+<h2 id="msg">5. 訊息機制與路由</h2>
+
+<p>TEN 的 extension 之間<strong>不直接互相呼叫</strong>。所有互動都是訊息，由 graph 的
+<code>connections</code> 決定誰收得到。這是「改 JSON 就能換掉一個 vendor」的原因，
+也是「名字打錯就靜默失效」的原因。</p>
+
+<h3>5.1 五種訊息型別</h3>
+<p class="src">來源：<code>core/include/ten_runtime/msg/msg.h</code></p>
+
+<table>
+<tr><th>型別</th><th>語意</th><th>典型用途</th></tr>
+<tr><td><code>cmd</code></td><td><strong>有回覆</strong>，送出後會拿到 <code>CmdResult</code></td><td><code>tool_register</code>、<code>on_user_joined</code>、工具呼叫</td></tr>
+<tr><td><code>cmd_result</code></td><td>上面那個的回覆，由 runtime 配對</td><td>不需手動路由</td></tr>
+<tr><td><code>data</code></td><td><strong>單向</strong>，結構化資料</td><td><code>asr_result</code>、<code>metrics</code>、<code>tts_flush_end</code></td></tr>
+<tr><td><code>audio_frame</code></td><td>單向，音訊<strong>零複製</strong>緩衝</td><td><code>pcm_frame</code></td></tr>
+<tr><td><code>video_frame</code></td><td>單向，視訊緩衝</td><td>視覺類 extension</td></tr>
+</table>
+
+<p>另外有幾個 runtime 內建的 cmd：<code>TEN_MSG_TYPE_CMD_START_GRAPH</code>、
+<code>CMD_STOP_GRAPH</code>、<code>CMD_CLOSE_APP</code>、<code>CMD_TIMER</code>、
+<code>CMD_TIMEOUT</code>、<code>CMD_TRIGGER_LIFE_CYCLE</code>，由框架自己用。</p>
+
+<h3>5.2 connections 的結構</h3>
+
+<p>路由寫在 <code>tenapp/property.json</code> 的 <code>predefined_graphs[].graph.connections</code>。
+每個區塊掛在一個節點上（<code>extension</code> 欄位是<strong>節點的 <code>name</code></strong>，不是 addon 名），
+底下按訊息型別分組：</p>
+
+<pre><code>{
+  "extension": "main_control",        // 這個區塊在描述 main_control
+  "cmd":  [ { "names": ["tool_register"], "source": [{"extension": "weatherapi_tool_python"}] } ],
+  "data": [ { "name": "asr_result",       "source": [{"extension": "stt"}] } ]
+}</code></pre>
+
+<div class="note">
+<strong>方向由 <code>source</code> / <code>dest</code> 決定，兩個都可以用：</strong>
+<ul>
+<li><code>source</code> —— 「這些節點送給<em>我</em>」（訂閱）</li>
+<li><code>dest</code> —— 「<em>我</em>送給這些節點」（發佈）</li>
+</ul>
+同一條鏈路寫在哪一端都成立，所以讀 graph 時兩邊都要看。
+</div>
+
+<p><code>cmd</code> 用 <code>names</code>（陣列，可一次綁多個），<code>data</code> / <code>audio_frame</code>
+用 <code>name</code>（單數）。這個不一致是實際的寫法，照抄就好。</p>
+
+<h3>5.3 三個名字必須一致</h3>
+<div class="bad">
+一個 extension 要被 graph 實例化，這三處必須完全相同，否則<strong>載入時靜默失敗</strong>：
+<ol>
+<li><code>addon.py</code> 的 <code>@register_addon_as_extension("x")</code></li>
+<li>該 extension <code>manifest.json</code> 的 <code>name</code></li>
+<li>graph 節點的 <code>addon</code> 欄位</li>
+</ol>
+節點的 <code>name</code> 則是另一回事 —— 它是<strong>這個實例在 graph 裡的代號</strong>，
+<code>connections</code> 靠它接線。所以換 vendor 時改 <code>addon</code>、<strong>不要改 <code>name</code></strong>。
+</div>
+
+<h3>5.4 沒有路由的訊息會被丟棄</h3>
+<p>送出一個 graph 裡沒有對應 connection 的訊息，runtime 會警告然後丟掉：</p>
+<pre><code>W ten:runtime ten_env_send_msg_internal@send.c:163
+  Failed to send message: Failed to find destination of a 'data' message 'error' from graph.</code></pre>
+<p>這是真實案例：ASR extension 送出 <code>error</code> 資料訊息，但 <code>websocket-example</code> 的
+graph 只路由了 <code>asr_result</code>、<code>metrics</code>、<code>tts_flush_end</code>，
+所以「API key 缺失」這個錯誤永遠到不了 UI，只留在 log 裡。
+<strong>debug 時看到「沒反應」，先 grep 這行。</strong></p>
+
+<h2 id="rpc">6. RPC：cmd 與 CmdResult</h2>
+
+<p class="src">來源：<code>core/src/ten_runtime/binding/python/interface/ten_runtime/async_ten_env.py</code></p>
+
+<p><code>cmd</code> 就是 TEN 的 RPC —— 送出後可以等回覆。Python 端有兩種型態：</p>
+
+<h4>單次回覆</h4>
+<pre><code>result, err = await ten_env.send_cmd(cmd)
+# result 是 CmdResult；runtime 保證 result.is_completed()</code></pre>
+
+<h4>串流回覆</h4>
+<pre><code>async for result, err in ten_env.send_cmd_ex(cmd):
+    if err: break
+    ...
+    if result.is_completed(): break   # 最後一筆</code></pre>
+<p><code>send_cmd_ex</code> 內部用 <code>maxsize=10</code> 的 queue，可以收多筆中間結果，
+最後一筆帶 <code>is_completed()</code>。LLM 的逐字輸出就是走這條。</p>
+
+<h4>回覆方</h4>
+<pre><code>await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))</code></pre>
+
+<h3>6.1 單向訊息</h3>
+<pre><code>await ten_env.send_data(data)                    # fire-and-forget
+await ten_env.send_audio_frame(frame)
+await ten_env.send_video_frame(frame)</code></pre>
+<p>三個都接受一個可選的 <code>SendOptions</code>：預設是射後不理，
+帶 <code>wait_for_result=True</code> 則會等到 runtime 確認送達（拿到的是錯誤與否，不是回覆內容）。</p>
+
+<div class="warn">
+<strong>兩個很花時間的陷阱：</strong>
+<ul>
+<li><code>ten_env.get_property_*()</code> 回傳的是 <code>(value, error)</code> <strong>tuple</strong>，不是值本身。永遠取 <code>[0]</code>。</li>
+<li>extension 跑在非主執行緒，<strong>不能裝 signal handler 或 <code>atexit</code></strong>。清理寫在 <code>on_stop()</code>。</li>
+</ul>
+</div>
+
+<h2 id="rtc">7. RTC 鏈路 vs WebSocket 鏈路</h2>
+
+<p class="src">兩張圖都是從各自 <code>tenapp/property.json</code> 的 <code>connections</code> 直接讀出來的，不是示意圖。</p>
+
+<h3>7.1 RTC 鏈路（voice-assistant）</h3>
+
+<p>節點共 8 個：<code>agora_rtc</code>、<code>stt</code>、<code>llm</code>、<code>tts</code>、<code>main_control</code>、
+<code>message_collector</code>、<code>weatherapi_tool_python</code>、<code>streamid_adapter</code>。</p>
+
+<div class="flow"><pre>瀏覽器 (agora-rtc-sdk-ng)
+    │
+    ╰──── Agora 頻道 "ten_agent_test" ────╮
+                                          │
+                                     agora_rtc                    ← 伺服器端也是頻道參與者
+                                          │
+   上行   audio_frame:pcm_frame  ─────────┤
+                                          ↓
+                                  streamid_adapter                ← 轉換 stream id
+                                          │ audio_frame:pcm_frame
+                                          ↓
+                                         stt
+                                          │ data:asr_result
+                                          ↓
+                                    main_control ←── cmd:on_user_joined / on_user_left ── agora_rtc
+                                          │      ←── cmd:tool_register ── weatherapi_tool_python
+                                          │      ←── data:tts_audio_start / tts_audio_end ── tts
+                                          ↓
+                                         llm
+                                          ↓
+                                         tts
+                                          │ audio_frame:pcm_frame
+   下行                                   ↓
+                                     agora_rtc  ←── data:data ── message_collector   ← 逐字稿走 RTC data channel
+                                          │
+    ╭──── Agora 頻道 ─────────────────────╯
+    ↓
+瀏覽器</pre></div>
+
+<p><strong>RTC 專屬的三件事：</strong></p>
+<table>
+<tr><th>元素</th><th>作用</th></tr>
+<tr><td><code>streamid_adapter</code></td><td>夾在 <code>agora_rtc</code> 和 <code>stt</code> 之間，處理 RTC 的 stream id 對應</td></tr>
+<tr><td><code>message_collector</code></td><td>把逐字稿等文字訊息彙整成 <code>data</code>，交給 <code>agora_rtc</code> 走 RTC 的 data channel 送回瀏覽器</td></tr>
+<tr><td><code>on_user_joined</code> / <code>on_user_left</code></td><td><code>agora_rtc</code> 發給 <code>main_control</code> 的 cmd —— 有人進出頻道的事件</td></tr>
+</table>
+
+<h3>7.2 WebSocket 鏈路（websocket-example）</h3>
+
+<p>節點 6 個：<code>websocket_server</code>、<code>stt</code>、<code>llm</code>、<code>tts</code>、<code>main_control</code>、<code>weatherapi_tool_python</code>。</p>
+
+<div class="flow"><pre>瀏覽器 (getUserMedia → PCM16)
+    │  ws://localhost:3000/ws/{port}
+    ↓  （Next.js server.js 代理 → ws://127.0.0.1:{port}）
+websocket_server                          ← 純 Python，綁 127.0.0.1:{port}
+    │ audio_frame:pcm_frame
+    ↓
+   stt
+    │ data:asr_result / data:metrics
+    ↓
+main_control  ←── cmd:tool_register ── weatherapi_tool_python
+    │         ←── data:tts_flush_end ── tts
+    ↓
+   llm
+    ↓
+   tts
+    │ audio_frame:pcm_frame
+    ↓
+websocket_server
+    ↓
+瀏覽器</pre></div>
+
+<h3>7.3 兩者的差異</h3>
+<table>
+<tr><th></th><th>RTC</th><th>WebSocket</th></tr>
+<tr><td>瀏覽器與 agent 的關係</td><td>同一頻道的<strong>兩個參與者</strong></td><td><strong>直連</strong></td></tr>
+<tr><td>媒體路徑</td><td>經過 Agora 網路</td><td>不經第三方</td></tr>
+<tr><td>前端</td><td>共用 <code>ai_agents/playground</code></td><td>自己的 <code>frontend/</code></td></tr>
+<tr><td>逐字稿回傳</td><td>RTC data channel（<code>message_collector</code>）</td><td>同一條 WebSocket</td></tr>
+<tr><td>使用者進出事件</td><td>有（<code>on_user_joined</code>）</td><td>無</td></tr>
+<tr><td>NAT 穿透 / 抖動緩衝 / 回音消除</td><td>有</td><td>無</td></tr>
+<tr><td>需要 Agora 帳號</td><td>要 <code>AGORA_APP_ID</code></td><td>不用</td></tr>
+<tr><td>arm64</td><td><strong>不可用</strong></td><td>可用</td></tr>
+</table>
+
+<p>ws port 不是固定的：前端 <code>src/lib/portManager.ts</code> 在 8000–9000 之間隨機取一個存進
+<code>localStorage</code>，透過 <code>POST /start</code> 的
+<code>properties.websocket_server.port</code> 注入 graph，
+<code>websocket_server</code> 才綁那個 port。所以每個瀏覽器 origin 會有自己的 port。</p>
+
+<h2 id="llm">8. 串接本地大模型</h2>
+
+<h3>8.1 先確認一件事：多數情況不需要寫 extension</h3>
+
+<p><code>openai_llm2_python</code> 的 <code>property.json</code> 第一個欄位就是 <code>base_url</code>：</p>
+<pre><code>{
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "${env:OPENAI_API_KEY}",
+    "model": "${env:OPENAI_MODEL}",
+    "max_tokens": 512,
+    "prompt": "",
+    "proxy_url": "${env:OPENAI_PROXY_URL|}"
+}</code></pre>
+
+<div class="ok">
+<strong>本地模型只要提供 OpenAI 相容的 <code>/v1/chat/completions</code>，改一個欄位就好，不用寫任何代碼。</strong>
+vLLM、Ollama（<code>/v1</code> 相容層）、llama.cpp 的 <code>llama-server</code>、LM Studio、Xinference 都提供這個介面。
+</div>
+
+<p>graph 裡的 <code>llm</code> 節點改成：</p>
+<pre><code>{
+  "type": "extension",
+  "name": "llm",
+  "addon": "openai_llm2_python",
+  "extension_group": "chatgpt",
+  "property": {
+    "base_url": "http://192.168.0.14:11434/v1",
+    "api_key": "not-needed",
+    "model": "qwen2.5:14b",
+    "max_tokens": 512,
+    "prompt": ""
+  }
+}</code></pre>
+
+<div class="warn">
+<code>api_key</code> 不能省略也不能給空字串 —— 它在 manifest 的 property schema 裡是 <code>string</code>，
+而多數本地伺服器不驗證這個值，隨便填一個非空字串即可。
+若寫成 <code>"${env:XXX}"</code> 而該變數不存在，worker 會在 property 解析階段
+<code>exit(EXIT_FAILURE)</code>（<code>ten_utils/lib/sys/general/placeholder.c</code>）。
+</div>
+
+<p>改 <code>property</code> 內的值，下一個 session 生效；改 <code>addon</code> 或節點結構，要完整重啟 <code>task run</code>。</p>
+
+<h3>8.2 真的要寫一個新的 LLM extension</h3>
+
+<p>介面不相容時（自有協定、gRPC、特殊串流格式）才需要。骨架在
+<code>packages/core_extensions/default_llm_extension_python/</code>，全文只有 28 行：</p>
+
+<pre><code>from typing_extensions import AsyncGenerator, override
+from pydantic import BaseModel
+from ten_ai_base.llm2 import AsyncLLM2BaseExtension
+from ten_ai_base.struct import LLMRequest, LLMResponse
+from ten_runtime import AsyncTenEnv
+
+
+class DefaultLLMConfig(BaseModel):
+    pass
+
+
+class DefaultLLMExtension(AsyncLLM2BaseExtension):
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.config: DefaultLLMConfig | None = None
+
+    @override
+    async def on_call_chat_completion(
+        self, ten_env: AsyncTenEnv, input: LLMRequest
+    ) -> AsyncGenerator[LLMResponse, None]:
+        raise NotImplementedError(...)</code></pre>
+
+<p><strong>唯一必須實作的是 <code>on_call_chat_completion</code></strong>，回傳一個
+<code>AsyncGenerator[LLMResponse, None]</code> —— 逐段 yield 就是串流輸出。
+基底類別負責訊息收發、工具呼叫協定、與 <code>main_control</code> 的往來，你不用碰。</p>
+
+<h4>一個 extension 需要的四個檔案</h4>
+<table>
+<tr><th>檔案</th><th>內容</th></tr>
+<tr><td><code>addon.py</code></td><td><code>@register_addon_as_extension("my_local_llm")</code> + <code>on_create_instance</code></td></tr>
+<tr><td><code>extension.py</code></td><td>繼承 <code>AsyncLLM2BaseExtension</code>，實作 <code>on_call_chat_completion</code></td></tr>
+<tr><td><code>manifest.json</code></td><td><code>name</code>（要跟 addon 裝飾器一致）、<code>api.interface</code> 匯入 llm-interface、property schema</td></tr>
+<tr><td><code>property.json</code></td><td>預設值</td></tr>
+</table>
+
+<p><code>manifest.json</code> 的介面宣告照抄 <code>openai_llm2_python</code>：</p>
+<pre><code>{
+  "name": "my_local_llm",
+  "api": {
+    "interface": [
+      { "import_uri": "../../system/ten_ai_base/api/llm-interface.json" }
+    ],
+    "property": {
+      "properties": {
+        "base_url": { "type": "string" },
+        "model":    { "type": "string" }
+      }
+    }
+  }
+}</code></pre>
+
+<p>可以覆寫的其他鉤子（參考 <code>openai_llm2_python/extension.py</code>）：
+<code>on_init</code>、<code>on_start</code>、<code>on_stop</code>、<code>on_deinit</code>、
+<code>on_retrieve_prompt</code>。生命週期方法記得呼叫 <code>await super().on_xxx()</code>。</p>
+
+<h4>放進 graph</h4>
+<p>把目錄放在 <code>ai_agents/agents/ten_packages/extension/my_local_llm/</code>，
+在 example 的 <code>tenapp/manifest.json</code> 加一筆 path 依賴：</p>
+<pre><code>{ "path": "../../../ten_packages/extension/my_local_llm" }</code></pre>
+<p>然後把 graph 的 <code>llm</code> 節點 <code>addon</code> 改成 <code>my_local_llm</code>，重啟。</p>
+
+<div class="bad">
+<strong>三個名字必須一致</strong>：<code>@register_addon_as_extension("my_local_llm")</code>、
+<code>manifest.json</code> 的 <code>"name"</code>、graph 節點的 <code>"addon"</code>。
+不一致的話 graph 載入時<strong>不會報錯，只是那個 extension 不存在</strong>。
+</div>
+
+<h3>8.3 現成參考</h3>
+<table>
+<tr><th>位置</th><th>用途</th></tr>
+<tr><td><code>packages/core_extensions/default_llm_extension_python/</code></td><td>最小骨架</td></tr>
+<tr><td><code>packages/example_extensions/ollama_python/</code></td><td>Ollama 的既有範例</td></tr>
+<tr><td><code>ai_agents/agents/ten_packages/extension/openai_llm2_python/</code></td><td>完整實作，含串流與工具呼叫</td></tr>
+</table>
+
+<h2 id="verify">9. 分段驗證與日誌位置</h2>
+
+<p>一條 pipeline 壞掉時，先確定壞在哪一段。每一段有各自的驗證方式和各自的日誌，
+<strong>混在一起看是找不到的</strong>。</p>
+
+<h3>9.1 日誌一共只有三個地方</h3>
+<table>
+<tr><th>位置</th><th>誰寫的</th><th>什麼時候看</th></tr>
+<tr><td><code>/tmp/task_run.log</code><br><span class="src">（自己 tee 出來的）</span></td><td>三個服務的 stdout：Next.js、tman designer、Go API server</td><td>服務起不來、<code>/start</code> 失敗、WebSocket 代理錯誤</td></tr>
+<tr><td><code>$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</code><br><span class="src">預設 <code>/tmp/ten_agent/</code></span></td><td>每個 worker 一個檔，由 Go server 指派</td><td><strong>對話行為不對 —— 九成的問題在這裡</strong></td></tr>
+<tr><td><code>$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</code></td><td>Go server 為該 session 產生的 graph 設定</td><td>想確認注入的值（ws port、channel）</td></tr>
+</table>
+
+<div class="note">
+<strong>測試的日誌不在上面任何一處。</strong> 兩種測試 harness 的 <code>conftest.py</code> 都把 log
+設成 <code>{"emitter": {"type": "console", "config": {"stream": "stdout"}}}</code>、level <code>debug</code>，
+<strong>沒有 file emitter</strong>。要留檔就自己 <code>| tee</code>。
+</div>
+
+<h3>9.2 六段驗證</h3>
+
+<h4>第 1 段 · 環境與安裝</h4>
+<pre><code>./ai_agents/agents/scripts/verify_arm64_install.sh --probe-worker</code></pre>
+<p>涵蓋架構、glibc、套件清單、每個 <code>.so</code> 的 ELF 架構、動態連結、Python ABI、
+graph 的 <code>${env:}</code> 佔位符、服務 port。<strong>日誌：stdout。</strong></p>
+
+<h4>第 2 段 · 設定值有沒有真的進到 extension</h4>
+<pre><code>grep -o "\[stt\] config: {.*" $(ls -t /tmp/ten_agent/app-*.log | head -1) | head -1</code></pre>
+<p>把 <code>stt</code> 換成 <code>tts</code> / <code>llm</code>。看到 <code>'api_key': ''</code> 就是 key 沒進去。
+<strong>日誌：worker log。</strong></p>
+
+<h4>第 3 段 · extension 單元測試（不需要 key、不連網）</h4>
+<pre><code>task test-extension EXTENSION=agents/ten_packages/extension/soniox_asr_python</code></pre>
+<p>vendor 的 client 被 mock 掉（<code>patch</code> 掉 client 類別），測的是 extension 自己的行為。
+<code>tests/bin/start</code> 設 <code>TEN_APP_BASE_DIR=.ten/app</code> 後跑 <code>pytest -s tests/</code>。
+單跑一個測試：</p>
+<pre><code>task test-extension-no-install EXTENSION=... -- -k test_finalize -s -v</code></pre>
+<p><strong>日誌：stdout。</strong></p>
+
+<h4>第 4 段 · vendor 整合測試（需要真 key、會連網）</h4>
+<pre><code>task asr-guarder-test EXTENSION=soniox_asr_python
+task tts-guarder-test EXTENSION=elevenlabs_tts2_python</code></pre>
+<p>用真的 vendor client，設定取自該 extension 的 <code>tests/configs/property_{en,zh}.json</code>，
+音訊素材是 <code>agents/integration_tests/asr_guarder/tests/test_data/16k_{en_us,zh_cn,es_es}.pcm</code>。
+預設跳過 <code>test_long_duration_stream</code>。<strong>不要和 TTS guarder 同時跑</strong> —— 兩者的建置腳本會搶同一個暫存路徑。
+<strong>日誌：stdout。</strong></p>
+
+<h4>第 5 段 · worker 起不起得來</h4>
+<pre><code>curl -s localhost:8080/list</code></pre>
+<p><code>data</code> 是空陣列就是沒有 worker。原因看：</p>
+<pre><code>grep -E 'handlerStart|Worker (start|stop|process)|placeholder' /tmp/task_run.log | tail -12</code></pre>
+<p>worker 死得夠早的話<strong>連自己的 log 檔都不會產生</strong>，那時只有 <code>task_run.log</code> 看得到原因。
+<strong>日誌：task_run.log。</strong></p>
+
+<h4>第 6 段 · pipeline 逐段</h4>
+<pre><code>L=$(ls -t /tmp/ten_agent/app-*.log | head -1)
+grep -E 'key_point|_error:|connection_status_changed|Failed to|Traceback' "$L" | tail -40</code></pre>
+<table>
+<tr><th>要找的</th><th>意義</th></tr>
+<tr><td><code>connection_status_changed ... 'current': 'connected'</code></td><td>該 vendor 連上了</td></tr>
+<tr><td><code>send asr_error / send tts_error</code></td><td>vendor 回報的錯，含 <code>code</code> 和 <code>message</code></td></tr>
+<tr><td><code>Failed to find destination of a ... message</code></td><td>graph 少了一條 connection，訊息被丟棄</td></tr>
+<tr><td><code>Traceback</code></td><td>extension 的 Python 例外</td></tr>
+</table>
+<p><code>key_point</code> 是 extension 標記關鍵事件用的 log category（<code>const.py</code> 的
+<code>LOG_CATEGORY_KEY_POINT</code>），抓它等於拿到 pipeline 骨架。</p>
+
+<h3>9.3 一個代碼層的盲區</h3>
+<div class="warn">
+<code>ai_agents/server/internal/http_server.go</code> 會在 spawn worker 前檢查 <code>${env:...}</code>，
+但那段迴圈只讀節點 <code>property</code> 的<strong>頂層</strong>、而且只處理<strong>字串</strong>值。
+各家 vendor 的 key 都埋在 <code>property.params</code> 裡，<code>params</code> 是物件，
+直接被跳過 —— <strong>key 缺失或為空，這裡一句話都不會說</strong>。
+<code>verify_arm64_install.sh</code> 的第 7b 段就是補這個洞。
+</div>
+
+</div>
+</body>
+</html>
