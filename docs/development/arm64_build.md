@@ -10,7 +10,7 @@ containerised setup.
 | ---- | ------------ |
 | Framework core (`core/`, `packages/`, `third_party/`) | Supported. `linux_arm64.yml` builds it natively; all third-party deps are source-built. |
 | AI agents — non-RTC examples | Supported, on a distro that meets the ABI baseline below. |
-| AI agents — RTC examples (19 of 21) | **Blocked**, but narrowly — see "The Agora gap" below. The SDK has an aarch64 build; the TEN extension wrapper does not. |
+| AI agents — RTC examples (24 of 26) | **Blocked**, but narrowly — see "The Agora gap" below. The SDK has an aarch64 build; the TEN extension wrapper does not. |
 
 `tman`'s own environment check lists `linux/aarch64` as a first-class supported
 platform, alongside `linux/x86_64`, `macos/x86_64`, `macos/aarch64` and
@@ -73,7 +73,8 @@ the published packages — following it gives you a 3.10 interpreter against a
 | Ubuntu 24.04 LTS | 2.39 | 3.12 | **Works** — set `TEN_PYTHON_LIB_PATH` |
 | Ubuntu 24.10 / 25.04 | 2.40+ | 3.12+ | Works if libpython matches 3.12 |
 | Debian 13 (trixie) | 2.41 | 3.13 | Needs a 3.12 libpython installed |
-| Fedora 39+ | 2.38+ | 3.12 | Works |
+| Fedora 39 / 40 | 2.38 / 2.39 | 3.12 | **Works** — `TEN_PYTHON_LIB_PATH` is under `/usr/lib64` |
+| Fedora 41+ | 2.40+ | 3.13 | **Works** — needs `python3.12` installed alongside; see the Fedora section |
 | Ubuntu 22.04 LTS | 2.35 | 3.10 | **No** — below the glibc floor |
 | Debian 12 (bookworm) | 2.36 | 3.11 | **No** |
 | RHEL / Rocky 9 | 2.34 | 3.9 | **No** |
@@ -308,6 +309,139 @@ arm64 block and is not one — the same versions are published for arm64.
 Nothing in this repo passes `tman install --locked`, so the lock is re-resolved
 and rewritten against the host on every install. Read the registry, not the lock.
 
+## AI agents on Fedora (bare metal)
+
+Verified end to end on Fedora 42 aarch64 — glibc 2.41, gcc 14.3.1 — as an
+ordinary non-root user, with no container anywhere. The preceding section is
+written for Ubuntu 24.04; what follows is only where Fedora diverges from it.
+None of the differences are in the framework: every one is environmental.
+
+### What carried over unchanged
+
+The parts that looked riskiest turned out to be portable. `tman install`
+resolved the arm64 packages straight from the registry with no special handling.
+The Go binding linked against the arm64 `libten_runtime.so` and `libten_utils.so`
+and built clean (`GOARCH=arm64`, `GOARM64=v8.0`, toolchain
+`/usr/local/go/pkg/tool/linux_arm64`). And every Python dependency resolved to an
+aarch64 wheel — `pydantic_core`, `aiohttp`, `awscrt` and the rest arrived as
+`manylinux_*_aarch64`, with nothing falling back to a source build.
+
+### 1. libpython lives in /usr/lib64
+
+Fedora does not use Debian's multiarch layout, so the path given in the ABI
+baseline section does not exist here:
+
+```bash
+export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so
+```
+
+The symlink comes from `python3.12-devel`; `python3.12-libs` supplies the
+`libpython3.12.so.1.0` it points at.
+
+### 2. Fedora 41+ ships Python 3.13, not 3.12
+
+Ubuntu 24.04 happens to ship exactly the 3.12 the arm64 binding was compiled
+against, which is why the Ubuntu path needs no version work at all. Fedora 41
+and later default to 3.13, so 3.12 has to be installed alongside it:
+
+```bash
+sudo dnf -y install python3.12 python3.12-devel
+```
+
+Fedora keeps parallel Python versions installable, so this leaves the system
+interpreter alone.
+
+### 3. UV_PYTHON must be pinned
+
+This is the failure with the least helpful symptom, and it does not exist on
+Ubuntu. Both dependency installers hardcode `uv pip install --system` —
+`install_python_deps.py` in the tenapp, and `PIP_INSTALL_CMD` in
+`install_deps_and_build.sh` — and `--system` selects the *default* interpreter,
+which on Fedora 42 is 3.13. The dependencies land in 3.13's site-packages while
+the runtime loads 3.12 through `TEN_PYTHON_LIB_PATH`. Nothing fails at install
+time; it surfaces much later as `ModuleNotFoundError` inside an extension.
+
+```bash
+export UV_PYTHON=/usr/bin/python3.12
+```
+
+### 4. `uv pip install --system` needs root
+
+`--system` writes to `/usr/local/lib/python3.12/site-packages` and its `lib64`
+sibling. Inside the container this is invisible, because the container runs as
+root. On bare metal as an ordinary user, `task install` fails three retries deep
+on every extension with `Permission denied (os error 13)`.
+
+Elevate only that one step. Do not `sudo task install` — that would run
+`bun install` and `go build` as root too, leaving root-owned artifacts in the
+user's home:
+
+```bash
+cd ai_agents/agents/examples/<example>/tenapp
+sudo env "PATH=$PATH" UV_PYTHON=/usr/bin/python3.12 python3 scripts/install_python_deps.py
+```
+
+`task install` aborts at that step, so the two after it have to be finished by
+hand as the normal user:
+
+```bash
+(cd ai_agents/agents/examples/<example>/frontend && bun install)
+(cd ai_agents/server && go mod tidy && go mod download && go build -o bin/api main.go)
+```
+
+Both `/usr/local/lib/python3.12/site-packages` and `/usr/local/lib64/...` are on
+`/usr/bin/python3.12`'s default `sys.path` on Fedora, so the embedded
+interpreter finds what lands there.
+
+### 5. Package names
+
+| Ubuntu | Fedora |
+| ------ | ------ |
+| `build-essential` | `dnf group install "Development Tools"` |
+| `python3-dev` | `python3.12-devel` |
+| `libasound2t64` | `alsa-lib-devel` |
+| `libunwind-dev` | `libunwind-devel` |
+| `libssl-dev` | `openssl-devel` |
+| `libc++1` | `libcxx` |
+| `libgstreamer1.0-dev` | `gstreamer1-devel` |
+| `pkg-config` | `pkgconf-pkg-config` |
+
+### 6. NodeSource does not recognise Fedora 42
+
+`https://rpm.nodesource.com/setup_20.x` exits with `Error: This script is
+intended for RPM-based systems.` on Fedora 42, despite Fedora being exactly
+that. Use the distribution package — the playground runs under `bun`, not Node,
+so the Node major version is not load-bearing:
+
+```bash
+sudo dnf -y install nodejs npm
+```
+
+### Reading `tman check env` on Fedora
+
+Two of its findings are expected here, and neither blocks an agents build:
+
+| Report | Reality |
+| ------ | ------- |
+| `⚠️ python3 3.13.9 … only supports Python 3.10` | It inspects `python3`, i.e. the system 3.13. The interpreter that actually runs extensions is the 3.12 behind `TEN_PYTHON_LIB_PATH`. Taking its `pyenv install 3.10.18` advice breaks the build — see the ABI baseline section. |
+| `❌ tgn Not installed` | `tgn` is only needed to build the framework core or a C++ extension. `websocket-example`'s `task install` runs `tman install`, `install_python_deps.py`, `bun install` and `go build`, and none of them invoke `tgn`. |
+
+### Firewall
+
+Fedora runs firewalld by default. Browsing from the machine itself is
+unaffected; reaching the services from elsewhere needs the ports opened:
+
+```bash
+sudo firewall-cmd --add-port=3000/tcp --add-port=8080/tcp --add-port=49483/tcp
+```
+
+### SELinux
+
+Relevant only to the container path. Under enforcing, the five bind mounts in
+`docker-compose.yml` carry no `:z` label and the container cannot read `/app`;
+add the labels through a local `docker-compose.override.yml` rather than editing
+the tracked compose file. A host in permissive mode is unaffected.
+
 ## AI agents in a container
 
 The default image `ghcr.io/ten-framework/ten_agent_build:0.7.14` is a
@@ -364,8 +498,8 @@ task tts-guarder-test EXTENSION=deepgram_tts ARCH=arm64
 ## Worth fixing upstream
 
 - **An aarch64 `agora_rtc` extension build.** Agora already ships an aarch64
-  RTSA SDK, so only the TEN wrapper is missing. This one change unblocks 19 of
-  the 21 examples.
+  RTSA SDK, so only the TEN wrapper is missing. This one change unblocks 24 of
+  the 26 examples.
 
 - **arm64 glibc floor.** Building `linux_arm64.yml` on `ubuntu-22.04-arm`, or
   against an older sysroot, would drop the requirement from 2.38 back to ~2.34
@@ -380,6 +514,19 @@ task tts-guarder-test EXTENSION=deepgram_tts ARCH=arm64
   `Dockerfile.dev` entirely.
 - **`rustup target add stable x86_64-unknown-linux-gnuasan`** is hardcoded in
   the multi-arch builder Dockerfile and has no meaning on arm64.
+- **`uv pip install --system` is hardcoded, so a bare-metal install needs root.**
+  `install_python_deps.py` builds the command literally
+  (`["uv", "pip", "install", "--system"]`) with no env override, and `--system`
+  targets `/usr/local/lib*/python3.x/site-packages`. Inside the container this
+  is free — it runs as root — but as an ordinary user every extension fails
+  with `Permission denied`. Honouring `PIP_INSTALL_CMD` the way
+  `install_deps_and_build.sh` already does would be enough.
+- **Nothing pins the interpreter for dependency installs.** `--system` resolves
+  to whatever `python3` is, which on any distribution shipping 3.13+ is not the
+  3.12 the arm64 binding was built against. The mismatch is silent until an
+  extension raises `ModuleNotFoundError` at runtime. Selecting the interpreter
+  from `TEN_PYTHON_LIB_PATH` — the version is already stated there — would close
+  the gap without a new setting.
 
 ## Known remaining gaps
 
