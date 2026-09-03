@@ -10,13 +10,29 @@
 # out at the end.
 #
 # Usage:
-#   ./verify_arm64_install.sh [example-name]     # default: websocket-example
+#   ./verify_arm64_install.sh [example-name]          # default: websocket-example
+#   ./verify_arm64_install.sh --probe-worker          # also start a throwaway
+#       session, so the Python binding is actually exercised rather than skipped
 #
 # Exit code is the number of failed checks, so it is usable in CI.
 
 set -uo pipefail
 
-EXAMPLE="${1:-websocket-example}"
+PROBE_WORKER=0
+EXAMPLE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --probe-worker) PROBE_WORKER=1 ;;
+    -h|--help)
+      sed -n '2,20p' "$0" | sed 's/^# \?//'
+      exit 0 ;;
+    -*) printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
+    *)  EXAMPLE="$1" ;;
+  esac
+  shift
+done
+EXAMPLE="${EXAMPLE:-websocket-example}"
+PY_ANY="$(command -v python3 || command -v python)"
 
 # Repo root: two levels above agents/, resolved from this script's location so
 # the script works from any cwd.
@@ -184,15 +200,80 @@ fi
 note "interpreter used for import checks: ${PY_BIN:-none found}"
 
 # ---------------------------------------------------------------- stack
-hdr "2. Module stack"
+hdr "2. Module inventory"
+SYS_DIR="$TENAPP/ten_packages/system"
+EXT_DIR="$TENAPP/ten_packages/extension"
+
+# manifest.json is the authority for a package's name and version; read it
+# rather than inferring anything from the directory name.
+mfield() { "$PY_ANY" -c "
+import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print('?'); raise SystemExit
+print(d.get(sys.argv[2], '?'))
+" "$1" "$2" 2>/dev/null; }
+
+printf '  \033[4msystem packages\033[0m\n'
+if [ -d "$SYS_DIR" ]; then
+  for d in "$SYS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    n="$(basename "$d")"
+    printf '    %-24s %-10s %s\n' "$n" "$(mfield "$d/manifest.json" version)" \
+      "$(ls "$d/lib"/*.so 2>/dev/null | wc -l | sed 's/^/native libs: /')"
+  done
+fi
 for pkg in ten_runtime ten_runtime_python ten_runtime_go ten_ai_base; do
-  if [ -d "$TENAPP/ten_packages/system/$pkg" ]; then ok "system package: $pkg"
+  if [ -d "$SYS_DIR/$pkg" ]; then ok "system package present: $pkg"
   else bad "system package missing: $pkg"; fi
 done
 
-EXT_COUNT=$(find "$TENAPP/ten_packages/extension" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-if [ "$EXT_COUNT" -gt 0 ]; then ok "extensions installed: $EXT_COUNT"
+# Which addons the predefined graphs actually instantiate. An extension that is
+# installed but absent here is inert; one referenced here but not installed
+# fails at graph load.
+GRAPH_ADDONS="$("$PY_ANY" -c "
+import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit
+for g in d.get('ten', {}).get('predefined_graphs', []):
+    nodes = g.get('graph', {}).get('nodes', g.get('nodes', []))
+    for n in nodes:
+        a = n.get('addon')
+        if a:
+            print(a)
+" "$TENAPP/property.json" 2>/dev/null | sort -u)"
+
+printf '\n  \033[4mextensions installed (* = used by a predefined graph)\033[0m\n'
+EXT_N=0
+for d in "$EXT_DIR"/*/; do
+  [ -d "$d" ] || continue
+  n="$(basename "$d")"
+  EXT_N=$((EXT_N+1))
+  mark=" "
+  printf '%s\n' "$GRAPH_ADDONS" | grep -qx "$n" && mark="*"
+  lang="python"
+  [ -f "$d/go.mod" ] && lang="go"
+  ls "$d/lib"/*.so >/dev/null 2>&1 && lang="native"
+  printf '  %s %-38s %-10s %s\n' "$mark" "$n" "$(mfield "$d/manifest.json" version)" "$lang"
+done
+printf '\n'
+if [ "$EXT_N" -gt 0 ]; then ok "extensions installed: $EXT_N"
 else bad "no extensions found under ten_packages/extension"; fi
+
+# Every addon a graph names must exist on disk, or the graph fails at load.
+MISSING_ADDON=0
+for a in $GRAPH_ADDONS; do
+  [ -d "$EXT_DIR/$a" ] && continue
+  bad "graph references addon '$a' but it is not installed"
+  MISSING_ADDON=$((MISSING_ADDON+1))
+done
+GRAPH_N=$(printf '%s\n' "$GRAPH_ADDONS" | grep -c . || true)
+if [ "$MISSING_ADDON" -eq 0 ] && [ "$GRAPH_N" -gt 0 ]; then
+  ok "all $GRAPH_N addons referenced by the graphs are installed"
+fi
 
 # ---------------------------------------------------------------- ELF arch
 hdr "3. Native library architecture"
@@ -269,7 +350,6 @@ fi
 
 # ---------------------------------------------------------------- python ABI
 hdr "6. Python ABI"
-SYS_DIR="$TENAPP/ten_packages/system"
 
 LOADER="$(find "$TENAPP/ten_packages" -name 'libpython_addon_loader.so' 2>/dev/null | head -1)"
 if [ -n "$LOADER" ]; then
@@ -388,6 +468,64 @@ if command -v curl >/dev/null && ss -tln 2>/dev/null | grep -q ":$PORT_API "; th
     ok "GET /graphs returns graph definitions (property.json parsed)"
   else
     bad "GET /graphs returned nothing usable"
+  fi
+fi
+
+# ---------------------------------------------------------------- worker probe
+# The Python binding is only exercised when the server spawns a worker, so
+# static checks cannot reach it. With --probe-worker the script starts a
+# throwaway session itself, which needs no API keys: a worker that fails to
+# authenticate has still loaded libpython and instantiated its extensions, which
+# is exactly what the log section then reads.
+if [ "$PROBE_WORKER" = "1" ]; then
+  hdr "8b. Worker probe"
+  if ! ss -tln 2>/dev/null | grep -q ":$PORT_API "; then
+    skip "API server not listening on $PORT_API; cannot probe"
+  else
+    GRAPH="$(curl -sf -m 5 "localhost:$PORT_API/graphs" 2>/dev/null |
+      "$PY_ANY" -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+items = d.get('data') or d.get('graphs') or d
+if isinstance(items, dict):
+    items = items.get('data', [])
+for g in items if isinstance(items, list) else []:
+    n = g.get('name') if isinstance(g, dict) else None
+    if n:
+        print(n); break
+" 2>/dev/null)"
+
+    if [ -z "$GRAPH" ]; then
+      bad "could not read a graph name from /graphs"
+    else
+      CH="verify-$$"
+      note "starting session: graph=$GRAPH channel=$CH"
+      START_OUT="$(curl -sf -m 10 -X POST "localhost:$PORT_API/start" \
+        -H 'Content-Type: application/json' \
+        -d "{\"request_id\":\"verify\",\"channel_name\":\"$CH\",\"graph_name\":\"$GRAPH\",\"user_uid\":1234}" 2>&1)"
+      if [ $? -eq 0 ]; then
+        ok "POST /start accepted"
+      else
+        bad "POST /start failed: $START_OUT"
+      fi
+
+      # Give the worker time to load libpython and instantiate its extensions.
+      sleep 10
+
+      if curl -sf -m 5 "localhost:$PORT_API/list" 2>/dev/null | grep -q "$CH"; then
+        ok "worker for $CH is registered"
+      else
+        note "worker no longer listed -- it may have exited; the log section will say why"
+      fi
+
+      curl -sf -m 10 -X POST "localhost:$PORT_API/stop" \
+        -H 'Content-Type: application/json' \
+        -d "{\"request_id\":\"verify\",\"channel_name\":\"$CH\"}" >/dev/null 2>&1
+      note "session stopped"
+    fi
   fi
 fi
 
