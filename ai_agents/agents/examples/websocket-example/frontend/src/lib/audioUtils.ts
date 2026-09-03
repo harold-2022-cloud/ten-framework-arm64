@@ -94,6 +94,20 @@ export class AudioPlayer {
       await this.initialize();
     }
 
+    // The player's AudioContext is created on mount, before any user gesture,
+    // so browsers hand it back suspended. Calling start() on a buffer source
+    // then produces no sound and raises nothing -- and because onended never
+    // fires, playQueue stalls on the first buffer. Resume before every chunk;
+    // it is a no-op once the context is running. AudioRecorder.start() already
+    // does the same for the capture side.
+    if (this.audioContext && this.audioContext.state === "suspended") {
+      try {
+        await this.audioContext.resume();
+      } catch (err) {
+        console.warn("AudioContext resume failed:", err);
+      }
+    }
+
     const int16 = base64ToInt16(base64Audio);
     const float32 = int16ToFloat32(int16);
 
