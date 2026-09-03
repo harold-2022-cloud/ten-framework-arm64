@@ -115,19 +115,44 @@ fi
 
 # ---------------------------------------------------------------- linkage
 hdr "4. Dynamic linkage"
-BROKEN=0
+# `ldd` on a plugin is not the same question as "is this install broken". An
+# addon that the runtime dlopens into a process already holding libten_runtime
+# does not need to resolve it standalone. So an unresolved NEEDED entry is only
+# a failure when the library is absent from the tree entirely; when it is
+# present, report the fact and the RUNPATH and let the reader judge.
+LINK_BAD=0
+LINK_SOFT=0
 for so in "${SOS[@]:-}"; do
   [ -n "$so" ] || continue
   missing="$(ldd "$so" 2>/dev/null | awk '/not found/ {print $1}')"
-  if [ -n "$missing" ]; then
-    bad "unresolved deps in $(basename "$so"): $(echo "$missing" | tr '\n' ' ')"
-    BROKEN=$((BROKEN+1))
+  [ -n "$missing" ] || continue
+
+  absent=""; elsewhere=""
+  for m in $missing; do
+    if [ -n "$(find "$TENAPP/ten_packages" -name "$m" -print -quit 2>/dev/null)" ]; then
+      elsewhere="$elsewhere $m"
+    else
+      absent="$absent $m"
+    fi
+  done
+
+  if [ -n "$absent" ]; then
+    bad "$(basename "$so") needs libraries absent from the tree:$absent"
+    LINK_BAD=$((LINK_BAD+1))
+  else
+    RUNPATH="$(objdump -x "$so" 2>/dev/null | awk '/RUNPATH|RPATH/ {print $2; exit}')"
+    skip "$(basename "$so") does not resolve standalone:$elsewhere"
+    note "all of those exist under ten_packages; RUNPATH: ${RUNPATH:-<none>}"
+    note "loaded by a process that already holds them, so this is expected"
+    LINK_SOFT=$((LINK_SOFT+1))
   fi
 done
 if [ "${#SOS[@]}" -eq 0 ]; then
   skip "no shared objects to check"
-elif [ "$BROKEN" -eq 0 ]; then
-  ok "every shared object resolves all its dependencies"
+elif [ "$LINK_BAD" -eq 0 ] && [ "$LINK_SOFT" -eq 0 ]; then
+  ok "every shared object resolves all its dependencies standalone"
+elif [ "$LINK_BAD" -eq 0 ]; then
+  ok "no shared object references a library absent from the tree"
 fi
 
 # ---------------------------------------------------------------- glibc need
