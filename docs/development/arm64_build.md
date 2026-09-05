@@ -10,7 +10,7 @@ containerised setup.
 | ---- | ------------ |
 | Framework core (`core/`, `packages/`, `third_party/`) | Supported. `linux_arm64.yml` builds it natively; all third-party deps are source-built. |
 | AI agents — non-RTC examples | Supported, on a distro that meets the ABI baseline below. |
-| AI agents — RTC examples (24 of 26) | **Blocked**, but narrowly — see "The Agora gap" below. The SDK has an aarch64 build; the TEN extension wrapper does not. |
+| AI agents — RTC examples (24 of 26) | Supported, once the `agora_rtc` extension is built from source for aarch64. See "Building agora_rtc for aarch64" below; the published package is x64-only, but the source builds unmodified. |
 
 `tman`'s own environment check lists `linux/aarch64` as a first-class supported
 platform, alongside `linux/x86_64`, `macos/x86_64`, `macos/aarch64` and
@@ -91,13 +91,15 @@ own Python, which sidesteps both constraints.
 
 ## The Agora gap
 
-RTC support is split across two TEN packages, and only one of them is missing for
-arm64.
+RTC support is split across two TEN packages. Neither is published for arm64, and
+both can be produced locally — see "Building agora_rtc for aarch64" for the
+worked sequence. This section explains what the two packages are and why the
+aarch64 SDK, which looks like a different product, is the right one.
 
 | Package | Contents | aarch64 |
 | ------- | -------- | ------- |
-| `agora_rtc_sdk` (system) | Agora's own SDK: `libagora_rtc_sdk.so`, `libaosl.so`, codec libs, headers | **Available**, outside the TEN store |
-| `agora_rtc` (extension) | `libagora_rtc.so` — the wrapper implementing TEN's extension interface on top of the SDK | **Missing, and unbuildable locally** |
+| `agora_rtc_sdk` (system) | Agora's own SDK: `libagora_rtc_sdk.so`, `libaosl.so`, codec libs, headers | **Available** from Agora, outside the TEN store; repackage with `package_agora_rtc_sdk_arm64.sh` |
+| `agora_rtc` (extension) | `libagora_rtc.so` — the wrapper implementing TEN's extension interface on top of the SDK | **Not published**; build from source, which Agora supplies on request |
 
 Agora publishes an aarch64 Linux RTSA SDK build, e.g.
 `Agora-RTC-aarch64-linux-gnu-v4.4.32-20250425_150503-675674.tgz` from
@@ -105,13 +107,15 @@ Agora publishes an aarch64 Linux RTSA SDK build, e.g.
 needs only `GLIBC_2.18`, `libaosl.so` and `libagora-fdkaac.so` only `GLIBC_2.17`,
 which is *lower* than TEN's own arm64 packages require.
 
-The blocker is the other package. The published `agora_rtc` extension contains
-exactly four files — `manifest.json`, `property.json`,
-`lib/libagora_rtc.so` and `lib/liblinux_audio_hy_extension.so` — with no source.
-There is no Agora SDK consumer anywhere in this repo (`IAgoraRtcEngine`,
-`NGIAgoraRtcConnection`, `createAgoraService` return nothing outside
-`third_party`), no `agora_rtc` source directory, and nothing in git history. Only
-Agora or the TEN maintainers can produce the arm64 build.
+The other package ships as binaries only. The published `agora_rtc` extension
+contains exactly four files — `manifest.json`, `property.json`,
+`lib/libagora_rtc.so` and `lib/liblinux_audio_hy_extension.so`. Its source is not
+in this repository either: `IAgoraRtcEngine`, `NGIAgoraRtcConnection` and
+`createAgoraService` return nothing outside `third_party`, there is no
+`agora_rtc` source directory, and nothing in git history.
+
+That makes it look unbuildable, and it is not. Agora supplies the source on
+request, and it compiles for aarch64 without touching its logic.
 
 ### The aarch64 SDK is the right SDK
 
@@ -197,6 +201,129 @@ entry reading `{"os": "linux", "arch": "arm64"}`. Note that `--os` and `--arch`
 let you resolve for a target platform from a different host, which is useful for
 staging an arm64 tenapp on an x86 machine.
 
+## Building agora_rtc for aarch64
+
+The published `agora_rtc` extension is a linux/x64 package, which is what blocks
+24 of the 26 examples on arm64. The extension is not open source, but Agora will
+supply the source on request, and it builds for aarch64 with **no change to its
+logic** — three environmental edits and the ordinary build command.
+
+Verified end to end: the built extension connects to Agora, publishes an audio
+track and opens a data stream on an aarch64 host.
+
+### What has to match
+
+Two versions are pinned against each other, and getting the pairing wrong costs
+more time than anything else here.
+
+| wrapper | requires SDK |
+| ------- | ------------ |
+| `0.23.9-t1` (the version the examples pin) | `=4.4.32-141` |
+| `0.26.0-rc14` (master at the time of writing) | `=4.4.32-175` |
+
+The pin is exact for a reason. `0.26` calls `setTotalExtraSendMs` and overrides
+`onCustomUserInfoUpdated`, neither of which exists in the 141 headers; building
+it against 141 fails at compile time. Editing the pin does not help — a version
+number is not what is missing.
+
+Ask Agora for the wrapper source **and** the SDK build that its manifest pins,
+and check the pairing before building:
+
+```bash
+python3 -c "import json;m=json.load(open('manifest.json'));print(m['version'],
+  [d['version'] for d in m['dependencies'] if d['name']=='agora_rtc_sdk'])"
+strings <sdk>/agora_sdk/libagora_rtc_sdk.so | grep -oE '4\.4\.32\.[0-9]+' | sort -u
+```
+
+### The three edits
+
+None of them touch the extension's behaviour.
+
+**1. Declare arm64.** The manifest ships `supports` as x64 only, so tman will
+not install the result on arm64. Add the entry, keeping x64:
+
+```json
+"supports": [
+  { "os": "linux", "arch": "x64" },
+  { "os": "linux", "arch": "arm64" }
+]
+```
+
+**2. Drop the x86-64 object from `resources`.** `BUILD.gn` packages
+`lib/liblinux_audio_hy_extension.so`, which ships as x86-64 only. The runtime
+dlopens every `.so` under an addon's `lib/` directory, so an object of the wrong
+architecture fails the load rather than being skipped. Remove that line for an
+arm64 build; restore it for x64.
+
+**3. Add `#include <cstdint>`.** GCC 13 stopped including `<cstdint>`
+transitively, and the source relies on it in 27 files (`0.23.9-t1`) or 29
+(`0.26.0-rc14`). This is not an arm64 issue — the same build fails on x64 with
+GCC 14 — and is worth reporting upstream. To find them:
+
+```bash
+for f in $(find src -name '*.h' -o -name '*.cc'); do
+  grep -qE '\b(u?int(8|16|32|64)_t|uintptr_t|intptr_t)\b' "$f" &&
+  ! grep -qE '#include\s*<c?stdint\.?h?>' "$f" && echo "$f"
+done
+```
+
+### The scripts
+
+Three scripts under `ai_agents/agents/scripts/` cover the sequence. Each verifies
+its own output and stops rather than passing a broken artefact along.
+
+| Script | Does |
+| ------ | ---- |
+| `package_agora_rtc_sdk_arm64.sh` | Converts Agora's aarch64 tarball into a TEN `agora_rtc_sdk` system package: checks the libraries really are aarch64, re-lays the flat `include/` onto the `include/rtc/low_level_api/include/` layout `BUILD.gn` expects, stamps `supports: linux/arm64`, and writes a `PROVENANCE.md`. |
+| `build_agora_rtc_arm64.sh` | Installs the wrapper's dependencies, unpacks the SDK into the standalone app, runs `tgn gen linux arm64 release -- is_clang=false` and `tgn build`, then reports the ELF architecture, the `NEEDED` list and any unresolved symbols. |
+| `install_agora_rtc_arm64.sh` | Places the built extension and the SDK into an example's tenapp, then verifies no x86-64 object reached `ten_packages/` and that every symbol resolves. |
+| `finish_example_install_arm64.sh` | The rest of `task install`: builds `tenapp/bin/main`, installs each extension's Python requirements, and installs the shared playground. |
+
+The build command differs from Agora's own Taskfile by one word — `arm64` in
+place of `x64`. Nothing else about the build is arm64-specific.
+
+### Two traps worth naming
+
+**tman consults only the registry named `default`.** A local `file://` registry
+therefore cannot coexist with the official one, which rules out publishing the
+SDK package locally and installing normally: `ten_runtime` and the rest would
+stop resolving. The scripts install everything else through tman and place the
+SDK by hand.
+
+**`tman install` re-resolves and rewrites the lock.** Running it on
+`voice-assistant` upgraded 58 packages, `ten_runtime` among them. That is
+expected — no example passes `--locked` — but it means the runtime the extension
+loads against may not be the one it was compiled against. Step 6 of
+`install_agora_rtc_arm64.sh` resolves symbols against the tenapp's actual
+`ten_runtime` for exactly this reason.
+
+### Verifying the result
+
+The extension loading is not the same as the extension working. A session that
+reaches Agora logs this sequence:
+
+```
+[agora_rtc] on_start() done
+onConnecting:  channelId <channel>, state 2
+onConnected:   localUserId <uid>, state 3, reason 1
+               sid(<session id>)
+custom audio_track created
+audio track published
+onAudioTrackPublishSuccess
+```
+
+The `sid` comes from Agora's servers, so its presence distinguishes a real
+connection from local initialisation that has not reached the network.
+
+```bash
+curl -s -X POST localhost:8080/start -H 'Content-Type: application/json' \
+  -d '{"request_id":"t1","channel_name":"probe","graph_name":"voice_assistant","user_uid":1234}'
+sleep 10 && curl -s localhost:8080/list
+```
+
+A worker in `/list` means the addon loaded. Nothing there, and the reason is in
+the worker's own output — see the troubleshooting manual for where that lands.
+
 ## Framework core from source
 
 `core/ten_gn` is a submodule and supplies `tgn` itself, so initialize it first.
@@ -270,7 +397,7 @@ are not mistaken for one.
 
 | Item | Nature |
 | ---- | ------ |
-| The `agora_rtc` extension | The only real gap. No aarch64 artifact in the registry, no source in the tree, so it cannot be built locally either. |
+| The `agora_rtc` extension | No aarch64 artifact in the registry. The source is not in this tree, but Agora will supply it, and it builds for aarch64 with no change to its logic. See "Building agora_rtc for aarch64". |
 | Coverage instrumentation | Cannot be enabled at all. Six `assert(is_linux && target_cpu == "x64")` guard it — three in `build/ten_runtime/glob.gni`, two in `build/ten_runtime/ten.gni`, one in `build/ten_common/rust/rust.gni`. All are inside `if (enable_coverage)`, so the default build never reaches them. |
 | Tests | `linux_arm64.yml` sets `ten_enable_tests=false` along with the rust and manager test flags, so the arm64 CI job builds no test target at all. |
 | `ten_enable_libwebsockets=false` | Costs nothing. The flag is referenced in exactly three places, all under `tests/ten_runtime/`, and arm64 CI already disables tests. It gates no runtime code. |
@@ -824,9 +951,13 @@ task tts-guarder-test EXTENSION=deepgram_tts ARCH=arm64
 
 ## Worth fixing upstream
 
-- **An aarch64 `agora_rtc` extension build.** Agora already ships an aarch64
-  RTSA SDK, so only the TEN wrapper is missing. This one change unblocks 24 of
-  the 26 examples.
+- **Publish `agora_rtc` and `agora_rtc_sdk` for arm64.** Both build for aarch64
+  today — the wrapper needs no change to its logic — but neither is in the
+  registry, so every consumer has to build and place them by hand. Publishing
+  them unblocks 24 of the 26 examples with no work on the consumer's side.
+- **`#include <cstdint>` in the `agora_rtc` source.** GCC 13 stopped including
+  it transitively and the source relies on it in 27 files. This breaks the x64
+  build on a current toolchain too, so it is not an arm64 concern.
 
 - **arm64 glibc floor.** Building `linux_arm64.yml` on `ubuntu-22.04-arm`, or
   against an older sysroot, would drop the requirement from 2.38 back to ~2.34
