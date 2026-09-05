@@ -143,3 +143,7 @@ ai_agents/*.log
 ai_agents/*.pcm
 ai_agents/*.pem
 /.trae
+
+# Agora SDK tarballs and the agora_rtc wrapper source. Large binaries and
+# vendor source that are fetched separately, not carried in this repo.
+/agora/
