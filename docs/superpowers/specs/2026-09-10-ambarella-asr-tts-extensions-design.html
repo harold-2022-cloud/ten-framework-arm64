@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambarella ASR/TTS Extensions — Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#E8EDED;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --rule-2:#B7C3C5;
+  --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+  --measure:74ch;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+.shell{display:grid; grid-template-columns:17rem minmax(0,1fr); max-width:86rem; margin:0 auto}
+@media(max-width:64rem){.shell{grid-template-columns:1fr}}
+
+nav.toc{
+  position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto;
+  padding:2rem 1rem 3rem 1.5rem; border-right:1px solid var(--rule);
+  font-size:.84rem; line-height:1.5;
+}
+@media(max-width:64rem){nav.toc{position:static; max-height:none; border-right:0; border-bottom:1px solid var(--rule)}}
+nav.toc .brand{font-weight:700; font-size:.95rem; margin-bottom:.15rem; color:var(--ink)}
+nav.toc .brandsub{color:var(--ink-3); font-size:.78rem; margin-bottom:1.4rem}
+nav.toc .part{
+  margin:1.1rem 0 .3rem; font-size:.7rem; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-3); font-weight:600;
+}
+nav.toc a{display:block; color:var(--ink-2); text-decoration:none; padding:.16rem 0 .16rem .55rem;
+  border-left:2px solid transparent}
+nav.toc a:hover{color:var(--accent); border-left-color:var(--accent)}
+nav.toc a .n{color:var(--ink-3); display:inline-block; min-width:1.5rem}
+
+main{padding:2.5rem 3rem 6rem; min-width:0}
+@media(max-width:64rem){main{padding:2rem 1.25rem 4rem}}
+main > *{max-width:var(--measure)}
+main > figure, main > .wide{max-width:none}
+
+h1{font-size:2.1rem; line-height:1.2; margin:0 0 .5rem; letter-spacing:-.02em}
+.lede{font-size:1.05rem; color:var(--ink-2); margin:0 0 2rem; max-width:66ch}
+h2{font-size:1.6rem; margin:3.5rem 0 .2rem; padding-top:2rem; border-top:2px solid var(--rule-2);
+   letter-spacing:-.01em}
+h2 .pnum{display:block; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+   color:var(--ink-3); font-weight:600; margin-bottom:.35rem}
+h3{font-size:1.18rem; margin:2.4rem 0 .4rem; letter-spacing:-.005em}
+h4{font-size:1rem; margin:1.6rem 0 .35rem; color:var(--accent)}
+p{margin:.75rem 0}
+strong{font-weight:600}
+a{color:var(--accent)}
+
+code{background:var(--sunk); padding:.1em .36em; border-radius:3px; font-size:.87em}
+pre{background:var(--code-bg); color:var(--code-ink); padding:1rem 1.15rem; border-radius:8px;
+  overflow-x:auto; font-size:.82rem; line-height:1.6; margin:1rem 0}
+pre code{background:none; padding:0; color:inherit; font-size:inherit}
+
+table{border-collapse:collapse; margin:1.1rem 0; font-size:.88rem; width:100%;
+  display:block; overflow-x:auto}
+th,td{text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--rule); vertical-align:top}
+th{background:var(--sunk); font-weight:600; white-space:nowrap}
+td code{white-space:nowrap}
+
+ul,ol{margin:.75rem 0; padding-left:1.4rem}
+li{margin:.3rem 0}
+
+.note,.warn,.bad,.ok{border-left:3px solid; padding:.8rem 1rem; margin:1.2rem 0; border-radius:0 6px 6px 0}
+.note{border-color:var(--accent); background:var(--accent-soft)}
+.warn{border-color:var(--warn);   background:var(--warn-soft)}
+.bad {border-color:var(--danger); background:var(--danger-soft)}
+.ok  {border-color:var(--ok);     background:var(--ok-soft)}
+.note > :first-child,.warn > :first-child,.bad > :first-child,.ok > :first-child{margin-top:0}
+.note > :last-child,.warn > :last-child,.bad > :last-child,.ok > :last-child{margin-bottom:0}
+
+.src{color:var(--ink-3); font-size:.82rem; margin:.3rem 0 .8rem}
+.src code{background:none; padding:0; color:var(--ink-3)}
+
+figure{margin:1.8rem 0; padding:1.2rem 1.2rem .9rem; background:var(--card);
+  border:1px solid var(--rule); border-radius:10px; max-width:none}
+figure svg{display:block; margin:0 auto; max-width:100%; height:auto; color:var(--ink)}
+figcaption{margin-top:.9rem; padding-top:.7rem; border-top:1px solid var(--rule);
+  font-size:.84rem; color:var(--ink-2); line-height:1.55}
+figcaption b{color:var(--ink)}
+
+.d-label{font:600 12px "IBM Plex Sans",sans-serif; fill:currentColor}
+.d-sub{font:400 10.5px "IBM Plex Mono",monospace; fill:currentColor; fill-opacity:.62}
+.d-edge{font:400 10.5px "IBM Plex Mono",monospace; fill:currentColor; fill-opacity:.75}
+.d-box{fill:none; stroke:currentColor; stroke-width:1.25}
+.d-box-soft{fill:currentColor; fill-opacity:.045; stroke:currentColor; stroke-width:1.25}
+.d-line{stroke:currentColor; stroke-width:1.25; fill:none}
+.d-dash{stroke:currentColor; stroke-width:1.25; fill:none; stroke-dasharray:4 3; opacity:.55}
+.d-hot{stroke:#C2410C; stroke-width:1.9; fill:none}
+.d-hot-t{fill:#C2410C; font:600 11px "IBM Plex Sans",sans-serif}
+.d-hot-b{fill:#C2410C; fill-opacity:.09; stroke:#C2410C; stroke-width:1.6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .d-hot{stroke:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-t{fill:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}}
+:root[data-theme="dark"] .d-hot{stroke:#F59E6B}
+:root[data-theme="dark"] .d-hot-t{fill:#F59E6B}
+:root[data-theme="dark"] .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">Ambarella ASR/TTS extensions</div>
+  <div class="brandsub">Design spec · <code>feat/arm64-native-build</code></div>
+
+  <a href="#top"><span class="n">—</span>Front matter</a>
+
+  <div class="part">Context</div>
+  <a href="#s1"><span class="n">1</span>Purpose and scope</a>
+  <a href="#s2"><span class="n">2</span>What the daemons are</a>
+
+  <div class="part">Design</div>
+  <a href="#s3"><span class="n">3</span>One daemon per extension</a>
+  <a href="#s4"><span class="n">4</span>Package layout</a>
+  <a href="#s5"><span class="n">5</span><code>daemon.py</code></a>
+  <a href="#s6"><span class="n">6</span><code>ambarella_asr_python</code></a>
+  <a href="#s7"><span class="n">7</span><code>ambarella_tts_python</code></a>
+  <a href="#s8"><span class="n">8</span>Errors and recovery</a>
+
+  <div class="part">Delivery</div>
+  <a href="#s9"><span class="n">9</span>Risks and unknowns</a>
+  <a href="#s10"><span class="n">10</span>Testing strategy</a>
+  <a href="#s11"><span class="n">11</span>Example graph</a>
+  <a href="#s12"><span class="n">12</span>Verification log</a>
+
+  <div class="part">Figures</div>
+  <a href="#fig1"><span class="n">1</span>Daemon lifecycle</a>
+  <a href="#fig2"><span class="n">2</span>ASR data flow</a>
+  <a href="#fig3"><span class="n">3</span>The 16 kHz chain</a>
+</nav>
+
+<main id="top">
+
+<h1>Ambarella ASR/TTS extensions</h1>
+<p class="lede">Two TEN extensions wrapping the resident speech daemons shipped in
+the Ambarella AI Developer Kit, plus the example graph that puts them on a board
+with the existing LLM provider.</p>
+
+<p>Written against <code>feat/arm64-native-build</code>, 2026-09-10. Every claim
+about the daemons was checked against the binaries themselves — decoded at
+instruction level where the vendor documentation is silent. Claims that could
+not be verified say so rather than guessing; <a href="#s9">§9</a> lists them, and
+<a href="#s12">§12</a> records how each was checked.</p>
+
+<div class="note">
+<p>The same text in Markdown is alongside this file at
+<a href="2026-09-10-ambarella-asr-tts-extensions-design.md"><code>2026-09-10-ambarella-asr-tts-extensions-design.md</code></a>.
+This edition adds three figures for the mechanisms that are hard to hold in
+prose: the daemon lifecycle, the ASR buffering and trigger path, and the
+16 kHz chain either side of the extensions.</p>
+</div>
+
+<h2 id="s1"><span class="pnum">Section 1</span>Purpose and scope</h2>
+
+<p><code>ambarella_ai_developer_kit_doc/asr_tts_20260907/app_demo/</code> ships two
+aarch64 binaries — <code>asr_d</code> (Whisper tiny) and <code>tts_d</code>
+(OpenVoice) — that hold a model resident in Vector Processor memory and answer
+single-shot inference commands over a line protocol on stdin/stdout. This design
+wraps each as a TEN extension so a voice agent can run entirely on an N1-655
+board.</p>
+
+<h4>In scope</h4>
+<ul>
+<li><code>ambarella_asr_python</code> — an <code>AsyncASRBaseExtension</code> provider over <code>asr_d</code>.</li>
+<li><code>ambarella_tts_python</code> — an <code>AsyncTTS2HttpExtension</code> provider over <code>tts_d</code>.</li>
+<li>One example graph wiring both to the existing <code>ambarella_llm2_python</code>.</li>
+</ul>
+
+<h4>Out of scope</h4>
+<ul>
+<li><code>ambarella_llm2_python</code> already exists and talks to a different board
+subsystem (the <code>run_llm_demo.sh</code> HTTP server). It is untouched here.</li>
+<li>Microphone and speaker extensions, board provisioning, model installation.</li>
+<li>The <code>asr_chinese_20260909/openvoice_n1-655.zip</code> package — a separate,
+differently-shaped release (<code>bin/openvoice</code> plus prepared input tensors)
+that does not speak this protocol.</li>
+</ul>
+
+<h4>Settled by prior decision</h4>
+<table>
+<thead><tr><th>Question</th><th>Decision</th></tr></thead>
+<tbody>
+<tr><td>Where the agent runs</td><td>Natively on the board (Lychee OS, aarch64)</td></tr>
+<tr><td>ASR audio source</td><td>The TEN pipeline, via <code>INFER &lt;wav&gt;</code> — not the daemon's own ALSA capture</td></tr>
+<tr><td>Utterance boundary</td><td><code>ten_vad</code> in the graph drives <code>finalize()</code></td></tr>
+<tr><td>Deliverable</td><td>Both extensions plus one example graph</td></tr>
+</tbody>
+</table>
+
+<h2 id="s2"><span class="pnum">Section 2</span>What the daemons actually are</h2>
+
+<h3>2.1 Line protocol</h3>
+
+<p>One command per line on stdin; one terminal line per command on stdout. Both
+daemons print a readiness token once the model is resident, and release VP memory
+only on <code>QUIT</code>.</p>
+
+<figure id="fig1">
+<svg viewBox="0 0 880 200" role="img" aria-label="Daemon lifecycle from spawn through resident inference loop to clean exit">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <rect class="d-box" x="8" y="52" width="112" height="50" rx="6"/>
+  <text class="d-label" x="64" y="74" text-anchor="middle">spawn</text>
+  <text class="d-sub" x="64" y="90" text-anchor="middle">subprocess_exec</text>
+
+  <rect class="d-box-soft" x="150" y="52" width="164" height="50" rx="6"/>
+  <text class="d-label" x="232" y="74" text-anchor="middle">load model to VP</text>
+  <text class="d-sub" x="232" y="90" text-anchor="middle">ea_env_open</text>
+
+  <rect class="d-box" x="344" y="52" width="126" height="50" rx="6"/>
+  <text class="d-label" x="407" y="74" text-anchor="middle">READY</text>
+  <text class="d-sub" x="407" y="90" text-anchor="middle">asr | tts</text>
+
+  <rect class="d-hot-b" x="500" y="52" width="188" height="50" rx="6"/>
+  <text class="d-hot-t" x="594" y="74" text-anchor="middle">INFER → OK</text>
+  <text class="d-sub" x="594" y="90" text-anchor="middle">repeatable, model stays</text>
+
+  <rect class="d-box" x="718" y="52" width="154" height="50" rx="6"/>
+  <text class="d-label" x="795" y="74" text-anchor="middle">QUIT</text>
+  <text class="d-sub" x="795" y="90" text-anchor="middle">ea_env_close</text>
+
+  <line class="d-line" x1="120" y1="77" x2="146" y2="77" marker-end="url(#a1)"/>
+  <line class="d-line" x1="314" y1="77" x2="340" y2="77" marker-end="url(#a1)"/>
+  <line class="d-line" x1="470" y1="77" x2="496" y2="77" marker-end="url(#a1)"/>
+  <line class="d-line" x1="688" y1="77" x2="714" y2="77" marker-end="url(#a1)"/>
+
+  <path class="d-hot" d="M 560 52 C 560 24, 628 24, 628 52" marker-end="url(#a1)"/>
+  <text class="d-hot-t" x="594" y="20" text-anchor="middle">every turn</text>
+
+  <text class="d-edge" x="232" y="128" text-anchor="middle">tens of seconds, once</text>
+  <text class="d-edge" x="594" y="128" text-anchor="middle">≈ 0.30 s per inference</text>
+  <text class="d-edge" x="795" y="128" text-anchor="middle">VP freed only here</text>
+
+  <line class="d-dash" x1="150" y1="140" x2="314" y2="140"/>
+  <line class="d-dash" x1="500" y1="140" x2="688" y2="140"/>
+  <line class="d-dash" x1="718" y1="140" x2="872" y2="140"/>
+
+  <text class="d-sub" x="8" y="176">The whole cost is in the second box. Everything after READY is cheap — which is why the process is kept, and why barge-in must never kill it.</text>
+</svg>
+<figcaption><b>Figure 1 — Daemon lifecycle.</b> The model load is paid once and
+dominates; each subsequent inference is ~0.3 s. Two consequences drive the
+design: the load must not block <code>on_start</code>
+(<a href="#s5">§5</a>), and <code>cancel()</code> must not kill the process
+(<a href="#s7">§7</a>), because either mistake pays the first box again.</figcaption>
+</figure>
+
+<h4><code>asr_d</code></h4>
+<table>
+<thead><tr><th>stdin</th><th>stdout</th></tr></thead>
+<tbody>
+<tr><td><em>(startup)</em></td><td><code>READY asr</code></td></tr>
+<tr><td><code>INFER &lt;wav_path&gt;</code></td><td><code>OK language=&lt;lang&gt; text=&lt;text&gt;</code></td></tr>
+<tr><td><code>INFER_MIC &lt;duration_ms&gt;</code></td><td><code>OK recording &lt;ms&gt; ms from &lt;dev&gt;</code>, then <code>OK language=… text=…</code></td></tr>
+<tr><td><code>QUIT</code></td><td><code>OK bye</code></td></tr>
+</tbody>
+</table>
+
+<p>Error lines, verbatim from the binary: <code>ERR no_mic pass --cap_dev
+&lt;alsa_device&gt;</code>, <code>ERR duration_ms range 100-30000</code>,
+<code>ERR wav_format</code>, <code>ERR audio_too_short</code>,
+<code>ERR no_audio</code>, <code>ERR capture</code>, <code>ERR no speech.</code>,
+<code>ERR oom</code>, <code>ERR infer</code>, <code>ERR init</code>,
+<code>ERR cannot_read %s</code>, <code>ERR unknown_cmd</code>.</p>
+
+<h4><code>tts_d</code></h4>
+<table>
+<thead><tr><th>stdin</th><th>stdout</th></tr></thead>
+<tbody>
+<tr><td><em>(startup)</em></td><td><code>READY tts</code></td></tr>
+<tr><td><code>INFER &lt;text&gt; &lt;out.wav&gt;</code></td><td><code>OK wav=&lt;path&gt; frames=&lt;n&gt;</code></td></tr>
+<tr><td><code>QUIT</code></td><td><code>OK bye</code></td></tr>
+</tbody>
+</table>
+
+<p>Errors: <code>ERR usage INFER &lt;text&gt; &lt;out.wav&gt;</code>,
+<code>ERR sndfile %s</code>, <code>ERR init</code>, <code>ERR unknown_cmd</code>.</p>
+
+<div class="warn">
+<p><code>INFER</code> for TTS splits on whitespace and takes the <b>last token</b>
+as the output path. The text may therefore contain spaces but must not contain a
+newline — see <a href="#s7">§7</a>.</p>
+</div>
+
+<h3>2.2 Startup flags</h3>
+
+<p>Flags take effect for the life of the process. There is no per-request
+parameter on either daemon.</p>
+
+<table>
+<thead><tr><th><code>asr_d</code></th><th>Default</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>--cavalry_dir &lt;dir&gt;</code></td><td><em>required</em></td><td>Whisper model directory</td></tr>
+<tr><td><code>--type &lt;size&gt;</code></td><td>—</td><td><code>tiny</code> for the shipped model set</td></tr>
+<tr><td><code>--language &lt;lang&gt;</code></td><td><code>chinese</code></td><td>Full words: <code>chinese</code>, <code>english</code>, <code>auto</code></td></tr>
+<tr><td><code>--beam_size &lt;n&gt;</code></td><td><code>5</code></td><td>1–20</td></tr>
+<tr><td><code>--no_speech_thres &lt;f&gt;</code></td><td><code>0.6</code></td><td>0.0–1.0; lower is more sensitive</td></tr>
+<tr><td><code>--cap_dev &lt;dev&gt;</code></td><td><em>unset</em></td><td>Enables <code>INFER_MIC</code>; unused by this design</td></tr>
+<tr><td><code>--log &lt;0-4&gt;</code></td><td><code>2</code></td><td>0 None, 1 Error, 2 Notice, 3 Debug, 4 Verbose</td></tr>
+</tbody>
+</table>
+
+<table>
+<thead><tr><th><code>tts_d</code></th><th>Default</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>--model_dir &lt;dir&gt;</code></td><td><em>required</em></td><td>OpenVoice model directory</td></tr>
+<tr><td><code>--speaker_id &lt;0-9&gt;</code></td><td><code>0</code></td><td>Voice selected from <code>embed.bin</code></td></tr>
+<tr><td><code>--rand_seed &lt;n&gt;</code></td><td><code>-1</code></td><td><code>-1</code> randomises per synthesis</td></tr>
+<tr><td><code>--log &lt;0-4&gt;</code></td><td><code>2</code></td><td>As above</td></tr>
+</tbody>
+</table>
+
+<h3>2.3 Audio formats — decoded, not documented</h3>
+
+<p>The vendor README states the rates in prose. Because the extension must
+declare a rate to the pipeline and a wrong value fails silently (audio plays at
+the wrong pitch with no error), both were confirmed at instruction level.
+<code>objdump</code> in the dev environment has no aarch64 backend, so
+<code>.text</code> was scanned for <code>MOVZ</code>/<code>MOVK</code> immediates
+directly.</p>
+
+<p><code>tts_d</code>, at <code>.text</code> offset <code>0x21c0</code>, builds
+<code>SF_INFO</code> for <code>sf_open</code>:</p>
+
+<pre><code>movz x6, #22050          samplerate = 22050
+movk x6, #1, lsl #32     channels   = 1
+str  x6, [sp, #56]       → SF_INFO.samplerate, SF_INFO.channels
+movz w4, #2              SF_FORMAT_PCM_16
+movk w4, #1, lsl #16     | SF_FORMAT_WAV   → 0x010002
+str  w4, [sp, #64]       → SF_INFO.format</code></pre>
+
+<p><code>asr_d</code> carries the symmetric constant at <code>0x2984</code>:
+<code>movz w3, #16000</code>.</p>
+
+<table>
+<thead><tr><th></th><th><code>asr_d</code></th><th><code>tts_d</code></th></tr></thead>
+<tbody>
+<tr><td>Sample rate</td><td>16000</td><td>22050</td></tr>
+<tr><td>Channels</td><td>1</td><td>1</td></tr>
+<tr><td>Sample format</td><td>PCM S16</td><td>PCM S16 (<code>SF_FORMAT_WAV|SF_FORMAT_PCM_16</code>)</td></tr>
+<tr><td>Container</td><td>bare WAV in</td><td>WAV out</td></tr>
+<tr><td>Configurable</td><td><b>No</b> — one occurrence in <code>.text</code></td><td><b>No</b> — one occurrence in <code>.text</code></td></tr>
+</tbody>
+</table>
+
+<p>Each constant appears exactly once in <code>.text</code>, and no flag reaches
+it. The rates are fixed properties of the binaries. <code>tts_d</code> calls
+<code>sf_write_float</code>, so the model emits float and libsndfile narrows to
+PCM16 on write.</p>
+
+<h3>2.4 Runtime dependencies</h3>
+
+<p>Both link the board's EazyAI runtime:
+<code>libamba-eazyai-n1_655.so.0</code>, <code>-inf-</code>, <code>-io-</code>,
+<code>-utils-</code>, <code>-postprocess-</code>.</p>
+
+<div class="bad">
+<p><b><code>tts_d</code> additionally needs <code>libsndfile.so.1</code>;
+<code>asr_d</code> does not.</b> The vendor README lists it under shared
+prerequisites, which is misleading — do not treat that list as authoritative for
+<code>asr_d</code>.</p>
+</div>
+
+<p>Cavalry firmware must be loaded before either starts:</p>
+
+<pre><code>cavalry_load -f /lib/firmware/cavalry.bin -r</code></pre>
+
+<h2 id="s3"><span class="pnum">Section 3</span>Decision: one daemon per extension</h2>
+
+<p><b>Chosen.</b> <code>ambarella_asr_python</code> owns an <code>asr_d</code>
+child process; <code>ambarella_tts_python</code> owns a <code>tts_d</code> child
+process. Each spawns via <code>asyncio.create_subprocess_exec</code> and binds
+the daemon's lifetime to its own. The protocol client lives in a per-package
+<code>daemon.py</code> of roughly 120 lines.</p>
+
+<p>This matches TEN's one-extension-one-provider model: each package imports its
+own interface JSON, installs standalone, and is testable on its own with
+<code>task test-extension</code>. <code>app_demo/test_alternate.py</code> already
+demonstrates both daemons resident simultaneously, so no coordination between
+them is required at startup.</p>
+
+<p>The cost is that <code>daemon.py</code> is duplicated across two packages.
+That is the house pattern — <code>deepgram_asr_python</code> and
+<code>deepgram_tts</code> each carry their own client for the same vendor — and
+TEN extensions are deliberately self-contained units with their own
+<code>pyproject.toml</code> and <code>requirements.txt</code>.</p>
+
+<h4>Rejected: a shared system package</h4>
+<p>Putting the protocol client in <code>ten_packages/system/ambarella_ea/</code>
+removes the duplication, but <code>ten_packages/system/</code> in this repo holds
+no local source at all: it is entirely registry dependencies materialised by
+<code>tman install</code> (<code>ten_ai_base</code> arrives that way). A local
+system package would need publishing and version management to save 120 lines.</p>
+
+<h4>Rejected: one extension owning both daemons</h4>
+<p>A single extension can import only one interface. <code>asr_result</code>
+leaving and <code>tts_text_input</code> arriving belong to different graph nodes,
+and the flush/barge-in semantics of the two differ. This fights the runtime's
+message routing rather than using it.</p>
+
+<h2 id="s4"><span class="pnum">Section 4</span>Package layout</h2>
+
+<pre><code>ai_agents/agents/ten_packages/extension/
+├── ambarella_asr_python/
+│   ├── addon.py            @register_addon_as_extension("ambarella_asr_python")
+│   ├── extension.py        AsyncASRBaseExtension
+│   ├── daemon.py           line-protocol client
+│   ├── config.py           pydantic config, params pass-through
+│   ├── const.py
+│   ├── manifest.json       imports asr-interface.json
+│   ├── property.json
+│   ├── pyproject.toml  requirements.txt  README.md
+│   └── tests/              stub daemon + state-machine tests
+└── ambarella_tts_python/
+    ├── addon.py            @register_addon_as_extension("ambarella_tts_python")
+    ├── extension.py        AsyncTTS2HttpExtension
+    ├── ambarella_tts.py    AsyncTTS2HttpClient subclass
+    ├── daemon.py           same shape as above
+    └── …                   (as above, imports tts-interface.json)</code></pre>
+
+<p>Startup flags follow the repo's <code>params</code> pass-through convention, as
+<code>whisper_stt_python</code> does: a <code>params</code> dict is expanded to
+<code>--key value</code> pairs, so
+<code>{"language": "chinese", "beam_size": 5, "log": 1}</code> becomes
+<code>--language chinese --beam_size 5 --log 1</code>. <code>bin_path</code> and
+<code>model_dir</code> are separate top-level properties because they point
+outside the tenapp, at <code>/home/lychee/asr_tts_demo/…</code>.</p>
+
+<h3>Property defaults</h3>
+
+<p>Stated explicitly so the implementer does not have to choose them. Every
+timeout and cap below is a property, not a constant.</p>
+
+<table>
+<thead><tr><th>Property</th><th>ASR</th><th>TTS</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>bin_path</code></td><td><em>required</em></td><td><em>required</em></td><td>Absolute path to <code>asr_d</code> / <code>tts_d</code></td></tr>
+<tr><td><code>model_dir</code></td><td><em>required</em></td><td><em>required</em></td><td>Becomes <code>--cavalry_dir</code> / <code>--model_dir</code></td></tr>
+<tr><td><code>load_timeout_s</code></td><td><code>180.0</code></td><td><code>180.0</code></td><td>Matches the vendor demo scripts</td></tr>
+<tr><td><code>infer_timeout_s</code></td><td><code>30.0</code></td><td><code>30.0</code></td><td>~100x the observed 0.3 s; a breach means the daemon is wedged</td></tr>
+<tr><td><code>quit_timeout_s</code></td><td><code>5.0</code></td><td><code>5.0</code></td><td>Then <code>kill()</code>, accepting the VP leak</td></tr>
+<tr><td><code>restart_max_attempts</code></td><td><code>3</code></td><td><code>3</code></td><td>Each attempt pays a full model load</td></tr>
+<tr><td><code>min_audio_ms</code></td><td><code>200</code></td><td>—</td><td>The real floor is unverified — <a href="#s9">§9</a></td></tr>
+<tr><td><code>max_chars</code></td><td>—</td><td><code>200</code></td><td>Punctuation-split guard for one long sentence</td></tr>
+<tr><td><code>output_sample_rate</code></td><td>—</td><td><code>16000</code></td><td>Declared to the pipeline; ratio derived from the WAV header</td></tr>
+<tr><td><code>tmp_dir</code></td><td><code>/tmp</code></td><td><code>/tmp</code></td><td>Holds the reused WAV</td></tr>
+<tr><td><code>params</code></td><td><code>{language: chinese, beam_size: 5, no_speech_thres: 0.6, log: 1}</code></td><td><code>{speaker_id: 0, rand_seed: -1, log: 1}</code></td><td>Expanded to <code>--key value</code></td></tr>
+</tbody>
+</table>
+
+<div class="warn">
+<p>Three names must match exactly or the graph fails to load silently: the
+<code>@register_addon_as_extension</code> argument, the <code>name</code> field in
+<code>manifest.json</code>, and the <code>addon</code> field of the graph node.</p>
+</div>
+
+<h2 id="s5"><span class="pnum">Section 5</span><code>daemon.py</code> — the protocol client</h2>
+
+<table>
+<thead><tr><th>Method</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td><code>start()</code></td><td><code>create_subprocess_exec(bin_path, *flags, stdin=PIPE, stdout=PIPE, stderr=STDOUT)</code>; read lines until the readiness token; raise on <code>ERR</code> or timeout</td></tr>
+<tr><td><code>request(line, timeout)</code></td><td>Under an <code>asyncio.Lock</code>: write the line, <code>drain()</code>, then read until the first line starting <code>OK </code> or <code>ERR</code></td></tr>
+<tr><td><code>stop()</code></td><td>Send <code>QUIT</code>, await <code>OK bye</code>, <code>await proc.wait()</code>; <code>kill()</code> only on timeout</td></tr>
+<tr><td><code>alive</code></td><td><code>proc is not None and proc.returncode is None</code></td></tr>
+</tbody>
+</table>
+
+<p>Three rules the implementation must honour.</p>
+
+<h4>stdout carries vendor noise, so the reader must tolerate it</h4>
+<p>EazyAI logs to the same stdout at the default <code>--log 2</code> (Notice).
+All four vendor demo scripts run with <code>stderr=STDOUT</code> and skip every
+line that is not <code>READY</code>/<code>OK</code>/<code>ERR</code>.
+<code>request()</code> therefore treats any line not beginning <code>OK </code> or
+<code>ERR</code> as a vendor log, recorded at debug level under
+<code>LOG_CATEGORY_VENDOR</code>. <code>property.json</code> defaults to
+<code>log: 1</code> (Error) to keep the channel quiet.</p>
+
+<h4>Model loading must not block <code>on_start</code></h4>
+<p>The model sets are 150 MB (Whisper) and 84 MB (OpenVoice); the vendor scripts
+allow a 180-second load timeout. TEN spawns one worker process per session from
+<code>POST /start</code>, so a synchronous load would stall session setup for tens
+of seconds. <code>start()</code> is launched as a background task and returns
+immediately; <code>request()</code> awaits readiness. The load then overlaps RTC
+join and the greeting, and the first turn pays only the remainder.</p>
+
+<h4><code>on_stop()</code> must send <code>QUIT</code> and await exit</h4>
+<p>VP memory is released only on the clean path (vendor README §7). This also
+satisfies the framework rule that extensions run off the main thread and must not
+install signal handlers or <code>atexit</code> hooks — cleanup belongs in
+<code>on_stop()</code>.</p>
+
+<h2 id="s6"><span class="pnum">Section 6</span><code>ambarella_asr_python</code></h2>
+
+<p>Overrides <code>vendor()</code>, <code>start_connection()</code>,
+<code>stop_connection()</code>, <code>is_connected()</code>,
+<code>input_audio_sample_rate()</code>, <code>buffer_strategy()</code>,
+<code>send_audio()</code> and <code>finalize()</code>, following
+<code>whisper_stt_python/extension.py</code>.</p>
+
+<figure id="fig2">
+<svg viewBox="0 0 880 330" role="img" aria-label="ASR data flow: frames accumulate in a buffer, ten_vad triggers finalize, which writes a WAV and runs one inference">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect class="d-box" x="8" y="30" width="118" height="46" rx="6"/>
+  <text class="d-label" x="67" y="50" text-anchor="middle">audio_frame</text>
+  <text class="d-sub" x="67" y="66" text-anchor="middle">16k S16 mono</text>
+
+  <rect class="d-box" x="160" y="30" width="130" height="46" rx="6"/>
+  <text class="d-label" x="225" y="50" text-anchor="middle">send_audio()</text>
+  <text class="d-sub" x="225" y="66" text-anchor="middle">accumulate only</text>
+
+  <rect class="d-box-soft" x="324" y="30" width="150" height="46" rx="6"/>
+  <text class="d-label" x="399" y="50" text-anchor="middle">bytearray buffer</text>
+  <text class="d-sub" x="399" y="66" text-anchor="middle">cap 960 000 B = 30 s</text>
+
+  <line class="d-line" x1="126" y1="53" x2="156" y2="53" marker-end="url(#a2)"/>
+  <line class="d-line" x1="290" y1="53" x2="320" y2="53" marker-end="url(#a2)"/>
+
+  <rect class="d-box" x="324" y="118" width="150" height="44" rx="6"/>
+  <text class="d-label" x="399" y="145" text-anchor="middle">ten_vad → finalize()</text>
+  <line class="d-line" x1="399" y1="76" x2="399" y2="114" marker-end="url(#a2)"/>
+  <text class="d-edge" x="410" y="99">silence detected</text>
+
+  <path class="d-dash" d="M 474 53 C 530 53, 530 140, 478 140" marker-end="url(#a2)"/>
+  <text class="d-edge" x="540" y="96">cap reached →</text>
+  <text class="d-edge" x="540" y="110">force early infer</text>
+
+  <rect class="d-box" x="324" y="196" width="150" height="44" rx="6"/>
+  <text class="d-label" x="399" y="215" text-anchor="middle">temp WAV</text>
+  <text class="d-sub" x="399" y="231" text-anchor="middle">reused, one per instance</text>
+  <line class="d-line" x1="399" y1="162" x2="399" y2="192" marker-end="url(#a2)"/>
+
+  <rect class="d-hot-b" x="530" y="196" width="150" height="44" rx="6"/>
+  <text class="d-hot-t" x="605" y="215" text-anchor="middle">asr_d INFER</text>
+  <text class="d-sub" x="605" y="231" text-anchor="middle">≈ 0.30 s</text>
+  <line class="d-line" x1="474" y1="218" x2="526" y2="218" marker-end="url(#a2)"/>
+
+  <rect class="d-box" x="722" y="196" width="150" height="44" rx="6"/>
+  <text class="d-label" x="797" y="215" text-anchor="middle">ASRResult</text>
+  <text class="d-sub" x="797" y="231" text-anchor="middle">final=True</text>
+  <line class="d-line" x1="680" y1="218" x2="718" y2="218" marker-end="url(#a2)"/>
+
+  <rect class="d-box" x="150" y="196" width="150" height="44" rx="6"/>
+  <text class="d-label" x="225" y="215" text-anchor="middle">too short</text>
+  <text class="d-sub" x="225" y="231" text-anchor="middle">skip the VP entirely</text>
+  <line class="d-line" x1="324" y1="218" x2="304" y2="218" marker-end="url(#a2)"/>
+
+  <rect class="d-hot-b" x="150" y="276" width="722" height="38" rx="6"/>
+  <text class="d-hot-t" x="511" y="300" text-anchor="middle">send_asr_finalize_end() — on every path: success, empty, no-speech, error, timeout, crash</text>
+  <line class="d-dash" x1="225" y1="240" x2="225" y2="272"/>
+  <line class="d-dash" x1="605" y1="240" x2="605" y2="272"/>
+  <line class="d-dash" x1="797" y1="240" x2="797" y2="272"/>
+</svg>
+<figcaption><b>Figure 2 — ASR data flow.</b> Inference happens at exactly one
+place, and every exit from <code>finalize()</code> must reach the bar at the
+bottom. Missing it on any single path leaves <code>main_control</code> waiting on
+that turn forever, which is why <a href="#s10">§10</a> spends five separate tests
+on it.</figcaption>
+</figure>
+
+<div class="note">
+<p><b>Deliberately unlike <code>whisper_stt_python</code>.</b> That extension
+transcribes every accumulated second inside <code>send_audio()</code> and clears
+its buffer (<code>whisper_client.py:102</code>). Against <code>asr_d</code> that
+would burn 0.3 s of VP per second of speech, chop sentences at window edges,
+and — because this daemon emits no partial results — offer nothing to accumulate
+them back from. Inference happens only in <code>finalize()</code>.</p>
+</div>
+
+<h4>The 30-second ceiling</h4>
+<p>16 kHz mono S16 is 32,000 B/s, so the daemon's window is 960,000 bytes. On
+reaching it the extension <b>forces an early inference and keeps listening</b>,
+rather than dropping the oldest audio: discarding loses speech the user produced,
+while an early inference merely splits a long monologue into two results, both
+final and both correct. <code>buffer_strategy()</code> returns
+<code>ASRBufferConfigModeKeep(byte_limit=960_000)</code>, so the base class's own
+buffer agrees with the daemon's limit and also catches the frames that arrive
+while the model is still loading.</p>
+
+<h4><code>ERR no speech.</code> is not an error</h4>
+<p>It is the daemon's normal answer to silence: emit no result and no
+<code>ModuleError</code>, only <code>finalize_end</code>. Genuine failures
+(<code>ERR infer</code>, <code>ERR wav_format</code>, <code>ERR oom</code>,
+timeout, dead process) go to <code>send_asr_error</code> with
+<code>NON_FATAL_ERROR</code> and vendor info.</p>
+
+<h4>Parsing and temp files</h4>
+<p>The text in <code>OK language=%s text=%s</code> may contain spaces and
+<code>=</code>, so it is taken as <code>split("text=", 1)[1]</code> (as the vendor
+scripts do), with the language read between <code>language=</code> and
+<code> text=</code>. The temp WAV is one fixed path per instance
+(<code>&lt;tmp_dir&gt;/ambarella_asr_&lt;uuid8&gt;.wav</code>), overwritten each turn
+and unlinked in <code>on_stop()</code>; <code>request()</code> already serialises
+access under its lock. Writing uses the stdlib <code>wave</code> module at
+1 channel, 2 bytes, 16000 Hz.</p>
+
+<h4>Language is fixed for the session</h4>
+<p><code>--language</code> is a startup flag, so one process serves one language.
+The property accepts TEN codes and maps them (<code>zh-CN</code>/<code>zh</code> →
+<code>chinese</code>, <code>en-US</code>/<code>en</code> → <code>english</code>,
+<code>auto</code> passes through), reporting the normalised TEN code back on
+<code>ASRResult</code> as <code>whisper_stt_python</code>'s
+<code>normalized_language</code> does.</p>
+
+<h2 id="s7"><span class="pnum">Section 7</span><code>ambarella_tts_python</code></h2>
+
+<p>Extends <code>AsyncTTS2HttpExtension</code> — the base <code>polly_tts</code>
+uses, whose contract is transport-agnostic despite the name. Four methods:
+<code>create_config()</code>, <code>create_client()</code>, <code>vendor()</code>,
+<code>synthesize_audio_sample_rate()</code>. The work is in the client's
+<code>get(text, request_id)</code>, an async generator of
+<code>(bytes | None, TTS2HttpResponseEventType)</code>.</p>
+
+<pre><code>get(text, request_id)
+  ├─ sanitise text (mandatory, below)
+  ├─ empty → yield None, END
+  ├─ request("INFER &lt;text&gt; &lt;out_path&gt;")   ≈ 0.3 s
+  ├─ parse OK wav=… frames=…
+  ├─ read PCM back with the wave module (no 44-byte assumption)
+  ├─ yield (pcm_chunk, RESPONSE) in ~20 ms units
+  │     check _is_cancelled before each chunk → yield None, FLUSH; return
+  └─ yield None, END</code></pre>
+
+<div class="bad">
+<p><b>Sanitising the text is mandatory, not defensive.</b> The protocol is one
+command per line with the last whitespace token as the output path. A single
+<code>\n</code> in LLM output would end the command early and leave the remainder
+to be read as a second, unparseable command — permanently desynchronising every
+subsequent request and response on that pipe. The first action in
+<code>get()</code> is to fold all <code>\r</code>, <code>\n</code>,
+<code>\t</code> and runs of whitespace into single spaces; if nothing remains,
+return <code>END</code>.</p>
+</div>
+
+<h4><code>cancel()</code> does not kill the process</h4>
+<p><code>tts_d</code>'s <code>INFER</code> cannot be interrupted, but it only runs
+~0.3 s. Barge-in therefore sets <code>_is_cancelled</code>, lets synthesis finish,
+discards the audio and closes the turn with <code>FLUSH</code>. Killing the daemon
+on barge-in would cost a full model reload (Figure 1, box two), and barge-in is
+routine in a voice pipeline.</p>
+
+<h3 id="rate">Sample rate: one conversion, in the extension</h3>
+
+<p>The transport is 16 kHz G.722 end to end, which settles both directions.</p>
+
+<figure id="fig3">
+<svg viewBox="0 0 880 272" role="img" aria-label="Inbound G.722 decodes to 16k PCM needing no conversion; outbound requires one resample from 22050 to 16000 inside the extension">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+
+  <text class="d-label" x="20" y="24">INBOUND — the two ends already agree</text>
+
+  <rect class="d-box" x="20" y="36" width="176" height="46" rx="6"/>
+  <text class="d-label" x="108" y="57" text-anchor="middle">remote peer</text>
+  <text class="d-sub" x="108" y="73" text-anchor="middle">G.722, 16 kHz</text>
+
+  <rect class="d-box" x="236" y="36" width="176" height="46" rx="6"/>
+  <text class="d-label" x="324" y="57" text-anchor="middle">agora_rtc</text>
+  <text class="d-sub" x="324" y="73" text-anchor="middle">decode</text>
+
+  <rect class="d-box-soft" x="452" y="36" width="176" height="46" rx="6"/>
+  <text class="d-label" x="540" y="57" text-anchor="middle">pcm_frame</text>
+  <text class="d-sub" x="540" y="73" text-anchor="middle">16 kHz PCM16 mono</text>
+
+  <rect class="d-box" x="668" y="36" width="176" height="46" rx="6"/>
+  <text class="d-label" x="756" y="57" text-anchor="middle">asr_d</text>
+  <text class="d-sub" x="756" y="73" text-anchor="middle">16000 compiled in</text>
+
+  <line class="d-line" x1="196" y1="59" x2="232" y2="59" marker-end="url(#a3)"/>
+  <line class="d-line" x1="412" y1="59" x2="448" y2="59" marker-end="url(#a3)"/>
+  <line class="d-line" x1="628" y1="59" x2="664" y2="59" marker-end="url(#a3)"/>
+
+  <text class="d-edge" x="432" y="102" text-anchor="middle">no conversion anywhere on this path</text>
+
+  <line class="d-dash" x1="20" y1="118" x2="860" y2="118"/>
+
+  <text class="d-hot-t" x="20" y="142">OUTBOUND — one conversion, and only the extension can do it</text>
+
+  <rect class="d-box" x="20" y="154" width="176" height="46" rx="6"/>
+  <text class="d-label" x="108" y="175" text-anchor="middle">tts_d</text>
+  <text class="d-sub" x="108" y="191" text-anchor="middle">22050, hardcoded</text>
+
+  <rect class="d-hot-b" x="236" y="154" width="176" height="46" rx="6"/>
+  <text class="d-hot-t" x="324" y="175" text-anchor="middle">resample_poly</text>
+  <text class="d-sub" x="324" y="191" text-anchor="middle">320 / 441, exact</text>
+
+  <rect class="d-box-soft" x="452" y="154" width="176" height="46" rx="6"/>
+  <text class="d-label" x="540" y="175" text-anchor="middle">pcm_frame</text>
+  <text class="d-sub" x="540" y="191" text-anchor="middle">16 kHz PCM16 mono</text>
+
+  <rect class="d-box" x="668" y="154" width="176" height="46" rx="6"/>
+  <text class="d-label" x="756" y="175" text-anchor="middle">agora_rtc</text>
+  <text class="d-sub" x="756" y="191" text-anchor="middle">encode G.722 16 kHz</text>
+
+  <line class="d-line" x1="196" y1="177" x2="232" y2="177" marker-end="url(#a3)"/>
+  <line class="d-line" x1="412" y1="177" x2="448" y2="177" marker-end="url(#a3)"/>
+  <line class="d-line" x1="628" y1="177" x2="664" y2="177" marker-end="url(#a3)"/>
+
+  <text class="d-sub" x="20" y="228">pcm_sample_rate is declared once, at service init, alongside the codec choice — the per-frame struct carries only a data_type.</text>
+  <text class="d-sub" x="20" y="244">So a session declared at 16000 reads 22050 samples as 16000: 22050 of them play as 1.378 s, slow and low-pitched, with no error raised.</text>
+  <text class="d-sub" x="20" y="260">G.722 tops out near 7 kHz, so the downsample discards nothing the codec would have kept.</text>
+</svg>
+<figcaption><b>Figure 3 — The 16 kHz chain.</b> Inbound is already matched end to
+end. Outbound carries the one unavoidable conversion, because
+<code>tts_d</code>&#8217;s 22050 is fixed in its <code>.text</code> and the SDK is
+told its PCM rate once at initialisation rather than per frame
+(<code>agora_rtc_api.h:634-654</code> against
+<code>audio_frame_info_t</code>, <code>:517-522</code>).</figcaption>
+</figure>
+
+<h4>Inbound needs no conversion at all</h4>
+<p>RTC receives G.722, decodes it to 16 kHz PCM and hands that to the pipeline;
+<code>asr_d</code> has 16000 compiled in (<a href="#s2">§2.3</a>). The two ends
+already agree, so <code>input_audio_sample_rate()</code> returns 16000 and
+nothing is resampled on the way to ASR.</p>
+
+<h4>Outbound needs exactly one conversion</h4>
+<p><code>tts_d</code> emits 22050 and cannot be told otherwise. The RTSA SDK is
+told its PCM input rate <b>once</b>, at service initialisation:
+<code>audio_codec_option_t</code> carries <code>audio_codec_type</code>,
+<code>pcm_sample_rate</code>, <code>pcm_channel_num</code> and
+<code>pcm_duration</code> together, while the per-frame struct handed to
+<code>agora_rtc_send_audio_data</code> carries only a <code>data_type</code>.</p>
+
+<div class="bad">
+<p>A session declared at 16000 reads 22050-sampled data as 16000: 22050 samples
+play as 1.378 seconds — slow and low-pitched, <b>with no error raised
+anywhere</b>. This is the silent failure the design exists to prevent.</p>
+</div>
+
+<p>The extension therefore resamples 22050 to 16000 with
+<code>scipy.signal.resample_poly(x, 320, 441)</code> — the ratio is exact,
+16000/22050 reducing to 320/441 — and
+<code>synthesize_audio_sample_rate()</code> returns 16000. <code>numpy</code> and
+<code>scipy</code> become dependencies; four extensions in this repo already
+carry scipy.</p>
+<p class="src">Source: <code>agora_rtc_api.h:397-414</code> (codec enum), <code>:439</code> (G.722 is 16 kHz), <code>:638</code> (the SDK encodes pushed PCM), <code>:634-654</code> (<code>audio_codec_option_t</code>), <code>:517-522</code> (<code>audio_frame_info_t</code>). Repo contract: <code>docs/ai/L1/02_architecture.md:75</code>.</p>
+
+<div class="ok">
+<p><b>The conversion costs nothing the codec would have kept.</b> G.722 is a
+16 kHz wideband codec (<code>AUDIO_DATA_TYPE_G722 = 5</code>, documented as
+&#8220;G722, sample=16k&#8221;) whose passband tops out near 7 kHz. Everything the
+downsample removes, G.722 would have discarded regardless.</p>
+</div>
+
+<p><code>resample_poly</code> is specified rather than the <code>np.interp</code>
+used elsewhere in this repo
+(<code>conversation_recorder/audio_mixer.py:38</code>,
+<code>qwen3_tts_python/qwen3_tts.py:204</code>) because linear interpolation
+carries no anti-aliasing filter, and this is a downsample: without the FIR stage
+the 8&#8211;11 kHz content folds back into the audible band as a persistent
+hiss.</p>
+
+<p>The WAV header is still read and checked on every response. A header that is
+not 22050 means the binary or the model was swapped, which would make a fixed
+320/441 ratio wrong — so the ratio is recomputed from the header rate, and the
+mismatch is logged loudly once.</p>
+
+<h4>Long text relies on upstream sentence splitting, with an internal guard</h4>
+<p><code>tts_text_input</code> already arrives per sentence, so a
+<code>get()</code> call is normally one sentence. For a single very long sentence
+the whole synthesis latency would land before the first frame, so
+<code>get()</code> splits on punctuation at <code>max_chars</code>, inferring and
+yielding per piece — consecutive single-shot syntheses producing a streaming
+impression.</p>
+
+<h4>Voice is fixed for the session</h4>
+<p>As language is on the ASR side: <code>--speaker_id</code> and
+<code>--rand_seed</code> are startup flags, not per-request parameters.</p>
+
+<h2 id="s8"><span class="pnum">Section 8</span>Error handling and recovery</h2>
+
+<table>
+<thead><tr><th>Class</th><th>Detection</th><th>Response</th></tr></thead>
+<tbody>
+<tr><td>Load failure</td><td><code>ERR init</code>, bad model path, Cavalry not loaded, VP OOM</td><td><code>FATAL_ERROR</code>; do not retry — retrying cannot succeed</td></tr>
+<tr><td>Inference failure</td><td><code>ERR infer</code>, <code>ERR wav_format</code>, <code>ERR oom</code>, <code>ERR sndfile</code></td><td><code>NON_FATAL_ERROR</code>; process is alive, next turn proceeds</td></tr>
+<tr><td>Process death</td><td><code>returncode is not None</code></td><td>Restart with exponential backoff, <b>capped</b></td></tr>
+</tbody>
+</table>
+
+<p>The restart cap matters: every restart pays a full model load, so an uncapped
+retry loop would pin the board in a reload cycle instead of failing visibly. The
+backoff follows <code>whisper_stt_python/reconnect_manager.py</code>.</p>
+
+<h2 id="s9"><span class="pnum">Section 9</span>Risks and unverified claims</h2>
+
+<div class="bad">
+<p><b>VP concurrency is unverified — the one real unknown.</b>
+<code>app_demo/test_alternate.py</code> proves the two daemons can be
+<b>resident</b> simultaneously and infer <b>alternately</b>. It never exercises
+<b>simultaneous</b> inference. A voice pipeline does: a user barging in while TTS
+is synthesising puts an ASR <code>INFER</code> on top of a TTS
+<code>INFER</code>. Outcomes range from both slowing down to VP contention
+failing outright.</p>
+<p>No cross-extension lock is specified. Both extensions live in the same worker
+process, so a module-level <code>asyncio.Lock</code> would be technically
+possible, but it would make barge-in ASR wait for TTS synthesis — paying latency
+for a problem not yet observed. <b>Instead this design carries a required
+measurement:</b> after implementation, run a concurrency test on the board
+(trigger ASR mid-synthesis) and decide on a lock from the result. This is a task,
+not a judgement call left to the implementer.</p>
+</div>
+
+<div class="warn">
+<p><b>Port 8080 collides on the board.</b> The board's LLM demo HTTP server binds
+8080, and TEN's Go API server defaults to the same port
+(<code>ai_agents/server/main.go:92</code>, from <code>SERVER_PORT</code>). Running
+the agent natively on the board hits this directly, and the vendor's documented
+<code>run_llm_demo.sh</code> options (<code>ip</code>, <code>run_mode</code>,
+<code>model_type</code>, <code>bsize</code>, <code>model_path</code>,
+<code>max_user</code>, <code>help</code>) contain no port flag. The resolution is
+therefore on TEN's side: set <code>SERVER_PORT</code> to something else for
+on-board runs.</p>
+</div>
+
+<p><b>No <code>conversation_recorder</code> concern remains.</b> An earlier revision of this design passed 22050 through, which would have left <code>audio_mixer</code> to downsample it with <code>np.interp</code> and no anti-aliasing filter (<code>conversation_recorder/audio_mixer.py:38</code>). Emitting 16000 removes that path entirely — the mixer and the transport now agree with the extension.</p>
+
+<p><b><code>asr_d</code>'s minimum audio length is not documented.</b>
+<code>ERR audio_too_short</code> exists, and mic mode's floor is 100 ms
+(<code>ERR duration_ms range 100-30000</code>), but the file-mode floor is
+unstated. <code>min_audio_ms</code> is therefore a property, defaulting to
+200 ms, to be tuned once the real floor is observed.</p>
+
+<h2 id="s10"><span class="pnum">Section 10</span>Testing strategy</h2>
+
+<div class="ok">
+<p>The protocol boundary is a child process, so pointing <code>bin_path</code> at
+a Python stub that speaks the same line protocol exercises the whole state
+machine on x86 CI, with no aarch64 hardware. This is the concrete payoff of
+<a href="#s3">§3</a>'s choice.</p>
+</div>
+
+<table>
+<thead><tr><th>Scenario the stub plays</th><th>Asserts</th></tr></thead>
+<tbody>
+<tr><td><code>READY</code> then <code>OK language=… text=…</code></td><td>Happy path; result reaches <code>send_asr_result</code></td></tr>
+<tr><td>No <code>READY</code> within the timeout</td><td>Load failure is <code>FATAL_ERROR</code>, not a hang</td></tr>
+<tr><td><code>ERR no speech.</code></td><td>No <code>ModuleError</code>; <code>finalize_end</code> still fires</td></tr>
+<tr><td>EazyAI noise interleaved on stdout</td><td>Noise is skipped, not parsed as a result</td></tr>
+<tr><td>Process exits mid-inference</td><td>Restart with backoff; the cap is honoured</td></tr>
+<tr><td>Audio shorter than <code>min_audio_ms</code></td><td>No <code>INFER</code> is issued at all</td></tr>
+<tr><td>Buffer reaches 960,000 bytes</td><td>Early inference fires; capture continues</td></tr>
+<tr><td>TTS: text containing <code>\n</code></td><td>Sanitised; the pipe stays synchronised</td></tr>
+<tr><td>TTS: WAV header at a rate other than 22050</td><td>Mismatch logged; rate reported from the header</td></tr>
+<tr><td>TTS: <code>cancel()</code> mid-stream</td><td><code>FLUSH</code>; the daemon is not killed</td></tr>
+</tbody>
+</table>
+
+<p><b>Five separate tests pin <code>send_asr_finalize_end()</code></b> — one per
+path: success, empty result, error, timeout, crash. This is the invariant whose
+failure mode (a permanently stalled turn) is worst and least visible.</p>
+
+<h2 id="s11"><span class="pnum">Section 11</span>Example graph</h2>
+
+<p><code>ai_agents/agents/examples/voice-assistant-ambarella/</code>, with the node
+chain:</p>
+
+<pre><code>mic → ten_vad → ambarella_asr_python → main_control
+                                          ↓
+speaker ← ambarella_tts_python ← ambarella_llm2_python</code></pre>
+
+<p>Two files change: <code>tenapp/property.json</code> for
+<code>predefined_graphs[]</code> (<code>nodes</code> plus typed
+<code>connections</code>), and <code>tenapp/manifest.json</code> for three path
+dependencies. No glue code — wiring an extension into a pipeline is JSON.</p>
+
+<div class="warn">
+<p>The LLM node must be named <code>llm</code>: <code>main_control</code>
+addresses <code>chat_completion</code> and <code>abort</code> to that name.
+Adding a graph is not hot-reloadable — both the server and the playground need a
+restart, because the frontend caches <code>/graphs</code>.</p>
+</div>
+
+<h2 id="s12"><span class="pnum">Section 12</span>Verification log</h2>
+
+<table>
+<thead><tr><th>Claim</th><th>How it was checked</th></tr></thead>
+<tbody>
+<tr><td>Protocol commands, responses, error strings</td><td><code>strings</code> on both binaries</td></tr>
+<tr><td>Startup flag names and validation bounds</td><td><code>strings</code>, exact-match on option tokens</td></tr>
+<tr><td><code>tts_d</code> output 22050 / mono / <code>WAV|PCM_16</code></td><td><code>MOVZ</code>/<code>MOVK</code> decode of <code>SF_INFO</code> setup at <code>.text</code> <code>0x21c0</code></td></tr>
+<tr><td><code>asr_d</code> input 16000</td><td><code>MOVZ w3, #16000</code> at <code>.text</code> <code>0x2984</code></td></tr>
+<tr><td>Rates are not configurable</td><td>Each constant occurs once in <code>.text</code>; no flag reaches it</td></tr>
+<tr><td><code>tts_d</code> needs <code>libsndfile</code>, <code>asr_d</code> does not</td><td><code>readelf -d</code> <code>NEEDED</code> entries on both</td></tr>
+<tr><td><code>tts_d</code> writes float through libsndfile</td><td><code>sf_write_float</code> in the dynamic symbol table</td></tr>
+<tr><td><code>AudioFrame</code> carries its own sample rate</td><td><code>core/include/ten_runtime/msg/audio_frame/audio_frame.h:39-41</code></td></tr>
+<tr><td><code>AsyncTTS2HttpClient.get()</code> signature</td><td><code>sarvam_http_tts/sarvam_tts.py:70</code></td></tr>
+<tr><td>ASR base class contract</td><td><code>whisper_stt_python/extension.py</code></td></tr>
+<tr><td><code>AUDIO_CODEC_TYPE_G722 = 2</code> is selectable</td><td><code>agora_rtc_api.h:397-414</code></td></tr>
+<tr><td>G.722 is a 16 kHz codec</td><td><code>agora_rtc_api.h:439</code> — &#8220;G722, sample=16k&#8221;</td></tr>
+<tr><td>The SDK encodes pushed PCM to the chosen codec</td><td><code>agora_rtc_api.h:638</code></td></tr>
+<tr><td>PCM rate and channels are declared once at init</td><td><code>audio_codec_option_t</code>, <code>agora_rtc_api.h:634-654</code>; per-frame struct is <code>data_type</code> only, <code>:517-522</code></td></tr>
+<tr><td><code>pcm_frame</code> is 16-bit mono at 16/24/48 kHz</td><td><code>docs/ai/L1/02_architecture.md:75</code></td></tr>
+<tr><td>The aarch64 transport is Agora&#8217;s RTSA SDK</td><td><code>ai_agents/agents/scripts/package_agora_rtc_sdk_arm64.sh</code>, pinned <code>4.4.32-141</code></td></tr>
+<tr><td><code>np.interp</code> resampling in-repo</td><td><code>conversation_recorder/audio_mixer.py:38</code>, <code>qwen3_tts_python/qwen3_tts.py:204</code></td></tr>
+<tr><td>TEN API server port is <code>SERVER_PORT</code></td><td><code>ai_agents/server/main.go:92</code></td></tr>
+<tr><td><code>run_llm_demo.sh</code> has no port flag</td><td>Table 4-3 of the Cooper development kit guide</td></tr>
+<tr><td>Both daemons can be co-resident</td><td><code>app_demo/test_alternate.py</code>, vendor-run</td></tr>
+<tr><td>Simultaneous inference</td><td><b>Not verified</b> — see <a href="#s9">§9</a></td></tr>
+<tr><td><code>asr_d</code> file-mode minimum length</td><td><b>Not verified</b> — see <a href="#s9">§9</a></td></tr>
+</tbody>
+</table>
+
+</main>
+</div>
+</body>
+</html>
