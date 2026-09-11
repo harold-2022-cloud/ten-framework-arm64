@@ -72,13 +72,22 @@ class DaemonClient:
         """
         self._ready.clear()
         self._start_error = None
-        self._proc = await asyncio.create_subprocess_exec(
-            self._bin_path,
-            *self._flags,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        try:
+            self._proc = await asyncio.create_subprocess_exec(
+                self._bin_path,
+                *self._flags,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except OSError as err:
+            self._start_error = DaemonError(
+                f"could not start {self._bin_path}: {err}"
+            )
+            # A waiter already blocked in wait_ready() must be woken now,
+            # not after its own timeout expires.
+            self._ready.set()
+            raise self._start_error from err
         try:
             line = await asyncio.wait_for(
                 self._read_terminal(
@@ -93,10 +102,12 @@ class DaemonClient:
                 f"within {self._load_timeout_s}s"
             )
             await self._kill()
+            self._ready.set()
             raise self._start_error from err
         except DaemonError as err:
             self._start_error = err
             await self._kill()
+            self._ready.set()
             raise
         self._ready.set()
         return line

@@ -5,7 +5,9 @@
 
 import asyncio
 import os
+import re
 import sys
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -159,3 +161,46 @@ async def test_request_before_start_raises():
     client = make_client()
     with pytest.raises(DaemonError, match="not running"):
         await client.request("INFER /tmp/x.wav", 1.0)
+
+
+@pytest.mark.asyncio
+async def test_start_with_bad_bin_path_raises_the_real_cause():
+    """A missing/unexecutable binary must surface as a DaemonError naming
+    the path immediately, not as a raw OSError, and not as a generic
+    "was not ready" message discovered only after a full timeout."""
+    bad_path = os.path.join(os.path.dirname(__file__), "no-such-daemon-binary")
+    client = DaemonClient(
+        bin_path=bad_path,
+        flags=[],
+        ready_token="READY asr",
+        logger=MagicMock(),
+    )
+    with pytest.raises(DaemonError, match=re.escape(bad_path)):
+        await client.start()
+    assert client.alive is False
+
+    began = time.monotonic()
+    with pytest.raises(DaemonError, match=re.escape(bad_path)):
+        await client.wait_ready(30.0)
+    assert time.monotonic() - began < 1.0
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_wakes_promptly_when_start_fails_while_blocked():
+    """The real race: a waiter already blocked in wait_ready() must be
+    woken the moment start() fails, not left to sleep through its own
+    (generous) timeout."""
+    client = make_client("die_on_load", load_timeout_s=5.0)
+    waiter = asyncio.create_task(client.wait_ready(30.0))
+    await asyncio.sleep(0)  # let the waiter block on the ready event
+    start_task = asyncio.create_task(client.start())
+    try:
+        began = time.monotonic()
+        with pytest.raises(DaemonError, match="ERR init"):
+            await waiter
+        assert time.monotonic() - began < 10.0
+
+        with pytest.raises(DaemonError, match="ERR init"):
+            await start_task
+    finally:
+        await client.stop()
