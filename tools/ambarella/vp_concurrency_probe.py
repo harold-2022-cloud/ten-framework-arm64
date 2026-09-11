@@ -39,7 +39,9 @@ Process = asyncio.subprocess.Process  # pylint: disable=no-member
 InferResult = Tuple[float, str]
 
 
-async def spawn(binary: str, flags: List[str], token: str) -> Process:
+async def spawn(
+    binary: str, flags: List[str], token: str, load_timeout_s: float
+) -> Process:
     """Start one daemon and block until it prints its readiness token."""
     proc = await asyncio.create_subprocess_exec(
         binary,
@@ -49,17 +51,16 @@ async def spawn(binary: str, flags: List[str], token: str) -> Process:
         stderr=asyncio.subprocess.STDOUT,
     )
     try:
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                raise RuntimeError(f"{binary} exited before printing {token}")
-            line = raw.decode("utf-8", errors="replace").strip()
-            if line.startswith(token):
-                return proc
-            if line.startswith("ERR"):
-                raise RuntimeError(f"{binary}: {line}")
-            if line:
-                print(f"  [{token}] {line}")
+        try:
+            await asyncio.wait_for(
+                _wait_for_token(proc, binary, token), load_timeout_s
+            )
+        except asyncio.TimeoutError as err:
+            raise RuntimeError(
+                f"load: {binary} did not print {token!r} within "
+                f"{load_timeout_s}s"
+            ) from err
+        return proc
     except Exception:
         # Kill process before re-raising to ensure VP memory is released.
         # Per vendor docs, only QUIT (or kill) releases VP memory.
@@ -72,12 +73,50 @@ async def spawn(binary: str, flags: List[str], token: str) -> Process:
         raise
 
 
-async def infer(proc: Process, command: str) -> InferResult:
-    """Send one command and time its terminal OK/ERR reply line."""
+async def _wait_for_token(proc: Process, binary: str, token: str) -> None:
+    assert proc.stdout is not None
+    while True:
+        raw = await proc.stdout.readline()
+        if not raw:
+            raise RuntimeError(f"{binary} exited before printing {token}")
+        line = raw.decode("utf-8", errors="replace").strip()
+        if line.startswith(token):
+            return
+        if line.startswith("ERR"):
+            raise RuntimeError(f"{binary}: {line}")
+        if line:
+            print(f"  [{token}] {line}")
+
+
+async def infer(
+    proc: Process, command: str, label: str, infer_timeout_s: float
+) -> InferResult:
+    """Send one command and time its terminal OK/ERR reply line.
+
+    VP contention wedging a daemon mid-overlap is exactly the failure this
+    probe exists to detect, so this must time out the same way the
+    production DaemonClient does, rather than hang forever on a probe that
+    is supposed to gate a runbook. `label` names both the phase and the
+    daemon (e.g. "overlapped tts"), so a timeout says exactly where it
+    happened.
+    """
     assert proc.stdin is not None and proc.stdout is not None
     started = time.monotonic()
     proc.stdin.write((command + "\n").encode("utf-8"))
     await proc.stdin.drain()
+    try:
+        return await asyncio.wait_for(
+            _read_terminal_line(proc, started), infer_timeout_s
+        )
+    except asyncio.TimeoutError as err:
+        raise RuntimeError(
+            f"{label} daemon did not answer within {infer_timeout_s}s "
+            "during inference"
+        ) from err
+
+
+async def _read_terminal_line(proc: Process, started: float) -> InferResult:
+    assert proc.stdout is not None
     while True:
         raw = await proc.stdout.readline()
         if not raw:
@@ -150,6 +189,20 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="rounds per phase (baseline and overlapped), default 10",
     )
+    parser.add_argument(
+        "--load-timeout-s",
+        type=float,
+        default=180.0,
+        help="seconds to wait for each daemon's ready token, default 180.0 "
+        "(matches the production extensions' load_timeout_s)",
+    )
+    parser.add_argument(
+        "--infer-timeout-s",
+        type=float,
+        default=30.0,
+        help="seconds to wait for one INFER's terminal reply, default 30.0 "
+        "(matches the production extensions' infer_timeout_s)",
+    )
     return parser.parse_args()
 
 
@@ -201,11 +254,13 @@ async def run_probe(
             "1",
         ],
         "READY asr",
+        args.load_timeout_s,
     )
     daemons["tts"] = await spawn(
         args.tts_bin,
         ["--model_dir", args.openvoice, "--speaker_id", "0", "--log", "1"],
         "READY tts",
+        args.load_timeout_s,
     )
     print("Both resident.\n")
     asr, tts = daemons["asr"], daemons["tts"]
@@ -216,14 +271,28 @@ async def run_probe(
     con_tts: List[float] = []
     failures: List[str] = []
 
+    # Same wording in both phases -- only the output path (which is not
+    # synthesised) differs -- so a text-length confound never enters the
+    # baseline-vs-overlapped comparison the verdict is based on.
+    def tts_text(index: int) -> str:
+        return f"probe round {index}"
+
     print(f"Baseline: {args.rounds} alternating rounds")
     for index in range(args.rounds):
-        elapsed, line = await infer(asr, f"INFER {args.wav}")
+        elapsed, line = await infer(
+            asr,
+            f"INFER {args.wav}",
+            "baseline asr",
+            args.infer_timeout_s,
+        )
         seq_asr.append(elapsed)
         if line.startswith("ERR") and line != "ERR no speech.":
             failures.append(f"sequential asr round {index}: {line}")
         elapsed, line = await infer(
-            tts, f"INFER baseline round {index} /tmp/probe_seq_{index}.wav"
+            tts,
+            f"INFER {tts_text(index)} /tmp/probe_seq_{index}.wav",
+            "baseline tts",
+            args.infer_timeout_s,
         )
         seq_tts.append(elapsed)
         if line.startswith("ERR"):
@@ -231,11 +300,20 @@ async def run_probe(
 
     print(f"\nOverlapped: {args.rounds} simultaneous rounds")
     for index in range(args.rounds):
-        asr_task = asyncio.create_task(infer(asr, f"INFER {args.wav}"))
+        asr_task = asyncio.create_task(
+            infer(
+                asr,
+                f"INFER {args.wav}",
+                "overlapped asr",
+                args.infer_timeout_s,
+            )
+        )
         tts_task = asyncio.create_task(
             infer(
                 tts,
-                f"INFER overlapped round {index} /tmp/probe_con_{index}.wav",
+                f"INFER {tts_text(index)} /tmp/probe_con_{index}.wav",
+                "overlapped tts",
+                args.infer_timeout_s,
             )
         )
         # return_exceptions=True: a daemon dying mid-round must not abort
