@@ -33,7 +33,7 @@ class AmbarellaTTSConfig(AsyncTTS2HttpConfig):
     restart_max_attempts: int = 3
 
     dump: bool = Field(default=False)
-    dump_path: str = Field(default="/tmp/ambarella_tts_out.pcm")
+    dump_path: str = Field(default="/tmp")
     params: Dict[str, Any] = Field(default_factory=dict)
 
     def daemon_flags(self) -> List[str]:

@@ -36,8 +36,10 @@ with no error raised, so this extension converts to 16000 itself using
 tops out near 7 kHz, so the downsample discards nothing the codec would have
 kept.
 
-The WAV header is checked on every response; a rate other than 22050 is logged
-loudly and the ratio is recomputed from the header.
+The WAV header is checked and the ratio recomputed from it on every response,
+but a rate other than 22050 is only ever logged once per client lifetime —
+`_warned_rate` latches after the first warning, so a persistently wrong rate
+does not spam the log on every subsequent response.
 
 ## Properties
 
@@ -52,6 +54,8 @@ loudly and the ratio is recomputed from the header.
 | `infer_timeout_s` | `30.0` | A breach means the daemon is wedged |
 | `quit_timeout_s` | `5.0` | Then `kill()`, accepting a VP leak |
 | `restart_max_attempts` | `3` | Each restart pays a full model load |
+| `dump` | `false` | Dump synthesised PCM for debugging |
+| `dump_path` | `/tmp` | Directory the dump file is written into |
 | `params` | see `property.json` | Expanded to `--key value` |
 
 `params` carries `speaker_id` (0-9, the voice), `rand_seed` and `log`. All
