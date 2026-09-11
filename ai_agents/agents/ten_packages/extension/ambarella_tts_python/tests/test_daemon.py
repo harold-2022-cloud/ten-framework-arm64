@@ -138,12 +138,18 @@ async def test_requests_are_serialised_under_the_lock():
     client = make_client()
     try:
         await client.start()
+        requested = ["/tmp/stub_a.wav", "/tmp/stub_b.wav", "/tmp/stub_c.wav"]
         lines = await asyncio.gather(
-            client.request("INFER a /tmp/stub_a.wav", 10.0),
-            client.request("INFER b /tmp/stub_b.wav", 10.0),
-            client.request("INFER c /tmp/stub_c.wav", 10.0),
+            client.request(f"INFER a {requested[0]}", 10.0),
+            client.request(f"INFER b {requested[1]}", 10.0),
+            client.request(f"INFER c {requested[2]}", 10.0),
         )
-        assert all(line.startswith("OK wav=") for line in lines)
+        # Unlike the ASR stub's fixed reply, the TTS stub echoes the
+        # requested path in "OK wav=...", so this can check that each
+        # reply is paired with its own request -- not merely that all
+        # three replies are individually well-formed.
+        returned = [line.split("wav=", 1)[1].split(" ", 1)[0] for line in lines]
+        assert returned == requested
     finally:
         await client.stop()
 
