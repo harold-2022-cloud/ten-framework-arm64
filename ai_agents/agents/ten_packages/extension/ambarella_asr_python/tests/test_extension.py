@@ -306,22 +306,43 @@ async def test_concurrent_turns_do_not_interleave_the_shared_wav():
 async def test_concurrent_dead_daemon_turns_schedule_only_one_restart():
     """Two turns that both find the daemon dead must not both restart it.
 
-    Without the in-flight-restart guard in _on_daemon_error(), the second
-    turn reads the same stale self._restarts value the first turn already
-    acted on and schedules a second restart -- which would tear down the
-    daemon the first restart is still loading.
+    Without the in-flight-restart guard in _on_daemon_error(), a second
+    turn that also finds the daemon dead reads the same stale
+    self._restarts value the first turn already acted on and schedules a
+    second restart -- which would tear down the daemon the first restart
+    is still loading.
+
+    Death is forced directly (daemon.alive = False) rather than driven
+    through a real crashing stub. A first version of this test drove it
+    through die_on_infer and was flaky: DaemonClient.alive races the OS
+    reaping the child against EOF detection on stdout, so immediately
+    after a real crash, self.daemon.alive is not deterministically False
+    -- when the reap had not yet landed, *both* calls below would return
+    at the alive check before ever reaching the guard this test exists to
+    pin, leaving self._restarts at 0 instead of 1. Calling
+    _on_daemon_error() directly, twice, against a daemon fixed as dead
+    exercises the exact same guard deterministically: the first call must
+    set self._restart_task, and the second call must see it in flight and
+    decline to schedule another, rather than the test merely asserting
+    state it set up itself.
     """
-    extension = await make_started("die_on_infer")
+    extension = await make_started()
     try:
+        extension.daemon = AsyncMock()
+        extension.daemon.alive = False
 
-        async def turn(payload):
-            extension._buffer.extend(payload)
-            await extension._infer_buffer()
-
-        await asyncio.gather(turn(speech(1000)), turn(speech(1000)))
-
-        assert extension.send_asr_error.await_count == 2
+        await extension._on_daemon_error(DaemonError("boom 1"))
+        first_restart_task = extension._restart_task
         assert extension._restarts == 1
+        assert first_restart_task is not None
+
+        # A second turn hitting the same still-dead daemon must see the
+        # first restart as already in flight and not schedule another.
+        await extension._on_daemon_error(DaemonError("boom 2"))
+
+        assert extension._restarts == 1
+        assert extension._restart_task is first_restart_task
+        assert extension.send_asr_error.await_count == 2
     finally:
         await extension.stop_connection()
 
@@ -330,12 +351,12 @@ async def test_concurrent_dead_daemon_turns_schedule_only_one_restart():
 async def test_daemon_error_handling_returns_promptly_without_waiting_for_the_restart_backoff():
     """_on_daemon_error() must not block the turn for the restart backoff.
 
-    Real death detection races the OS reaping the child against reading EOF
-    on stdout, so daemon.alive is not deterministic immediately after a
-    crash (see test_concurrent_dead_daemon_turns_schedule_only_one_restart's
-    docstring for the pattern that *is* deterministic). This test instead
-    fixes the daemon as unambiguously dead and drives _on_daemon_error()
-    directly, so it pins exactly one thing: scheduling a restart must not
+    Fixes the daemon as unambiguously dead and drives _on_daemon_error()
+    directly, for the same reason
+    test_concurrent_dead_daemon_turns_schedule_only_one_restart does (real
+    death detection races the OS reaping the child against reading EOF on
+    stdout, so daemon.alive is not deterministic immediately after a real
+    crash). This test pins exactly one thing: scheduling a restart must not
     make the caller (finalize(), via _infer_buffer()) wait out the backoff
     (>= 1s by default) before it can return and reach finalize_end.
     """
