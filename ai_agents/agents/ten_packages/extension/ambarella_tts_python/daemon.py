@@ -133,8 +133,13 @@ class DaemonClient:
             if not self.alive:
                 raise DaemonError(f"{self._bin_path} is not running")
             assert self._proc is not None and self._proc.stdin is not None
-            self._proc.stdin.write((command + "\n").encode("utf-8"))
-            await self._proc.stdin.drain()
+            try:
+                self._proc.stdin.write((command + "\n").encode("utf-8"))
+                await self._proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as err:
+                raise DaemonError(
+                    f"{self._bin_path} is not accepting input: {err}"
+                ) from err
             try:
                 return await asyncio.wait_for(
                     self._read_terminal(_is_terminal, raise_on_err=False),
@@ -142,6 +147,11 @@ class DaemonClient:
                 )
             except asyncio.TimeoutError as err:
                 verb = command.split(" ", 1)[0]
+                # The reply is still pending, not lost: without killing it
+                # here, the daemon stays "alive" and the *next* turn's
+                # request() would read this turn's answer instead of its
+                # own, silently, for the rest of the session.
+                await self._kill()
                 raise DaemonError(
                     f"{self._bin_path} did not answer {verb} "
                     f"within {timeout}s"
@@ -149,25 +159,31 @@ class DaemonClient:
 
     async def stop(self) -> None:
         """Send QUIT and reap the process, so the VP memory is released."""
-        if not self.alive:
-            self._proc = None
-            self._ready.clear()
-            return
-        assert self._proc is not None
-        try:
-            if self._proc.stdin is not None:
-                self._proc.stdin.write(b"QUIT\n")
-                await self._proc.stdin.drain()
-            await asyncio.wait_for(self._proc.wait(), self._quit_timeout_s)
-        except (
-            asyncio.TimeoutError,
-            BrokenPipeError,
-            ConnectionResetError,
-        ):
-            await self._kill()
-        finally:
-            self._proc = None
-            self._ready.clear()
+        # Shares _lock with request(): otherwise QUIT can land in the same
+        # pipe an in-flight INFER is waiting on, and the daemon -- a
+        # strictly sequential reader -- answers whichever command it reads
+        # first, handing the wrong terminal line to whichever side is
+        # still waiting.
+        async with self._lock:
+            if not self.alive:
+                self._proc = None
+                self._ready.clear()
+                return
+            assert self._proc is not None
+            try:
+                if self._proc.stdin is not None:
+                    self._proc.stdin.write(b"QUIT\n")
+                    await self._proc.stdin.drain()
+                await asyncio.wait_for(self._proc.wait(), self._quit_timeout_s)
+            except (
+                asyncio.TimeoutError,
+                BrokenPipeError,
+                ConnectionResetError,
+            ):
+                await self._kill()
+            finally:
+                self._proc = None
+                self._ready.clear()
 
     async def _read_line(self) -> str:
         assert self._proc is not None and self._proc.stdout is not None

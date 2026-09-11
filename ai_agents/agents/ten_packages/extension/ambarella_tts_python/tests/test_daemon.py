@@ -125,6 +125,99 @@ async def test_request_timeout_raises():
 
 
 @pytest.mark.asyncio
+async def test_request_timeout_kills_the_wedged_daemon():
+    """A timed-out request must not leave the daemon alive-but-hung.
+
+    Without killing on timeout, the process is still running (just never
+    going to answer this INFER): `alive` stays True, so the caller's death
+    -based restart path never fires, and the *next* turn's request() would
+    read this turn's still-pending reply instead of its own -- worse here,
+    since it would go on to read a WAV path tts_d may still be writing.
+    """
+    client = make_client("hang_on_infer")
+    try:
+        await client.start()
+        with pytest.raises(DaemonError, match="did not answer"):
+            await client.request("INFER hello /tmp/stub_hang.wav", 0.5)
+        assert client.alive is False
+    finally:
+        await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_broken_pipe_on_write_raises_daemon_error():
+    """A write to a dead daemon's stdin must surface as a DaemonError.
+
+    BrokenPipeError/ConnectionResetError are OSError, so an uncaught one
+    would be indistinguishable, at the call site, from a real WAV-read
+    failure -- and would bypass the daemon-death restart path entirely.
+    The daemon is not actually dead here; the write is forced to fail so
+    the exact failure mode is reproduced deterministically rather than
+    raced against real process-death timing.
+    """
+    client = make_client()
+    try:
+        await client.start()
+
+        def _boom(_data):
+            raise BrokenPipeError("write failed")
+
+        client._proc.stdin.write = _boom
+        with pytest.raises(DaemonError, match=re.escape(sys.executable)):
+            await client.request("INFER hello /tmp/stub_out.wav", 5.0)
+    finally:
+        await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_connection_reset_on_drain_raises_daemon_error():
+    client = make_client()
+    try:
+        await client.start()
+
+        async def _boom():
+            raise ConnectionResetError("connection reset")
+
+        client._proc.stdin.drain = _boom
+        with pytest.raises(DaemonError, match=re.escape(sys.executable)):
+            await client.request("INFER hello /tmp/stub_out.wav", 5.0)
+    finally:
+        await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_race_an_in_flight_request():
+    """Teardown must not interleave QUIT with an in-flight INFER.
+
+    The daemon is a single sequential reader: whichever command actually
+    lands in its stdin pipe first is the one it answers first. Creating
+    stop_task before req_task (neither awaited yet) lets stop()'s QUIT
+    reach the pipe before request() ever writes -- a session tearing down
+    while a request is (about to be) in flight. Without _lock guarding
+    stop() too, the daemon answers QUIT ("OK bye") and exits without ever
+    reading the buffered INFER line, and request()'s reader has no way to
+    tell that terminal "OK" apart from a real reply -- it would return
+    "OK bye" to whatever turn issued the INFER.
+
+    Guarded, stop() and request() serialise on the same lock: stop() reaps
+    the process before request() ever gets to write, so request() sees a
+    clean "not running" DaemonError instead of a corrupted reply.
+    """
+    client = make_client()
+    try:
+        await client.start()
+        stop_task = asyncio.create_task(client.stop())
+        req_task = asyncio.create_task(
+            client.request("INFER hello /tmp/stub_out.wav", 5.0)
+        )
+        await stop_task
+        with pytest.raises(DaemonError, match="not running"):
+            await req_task
+    finally:
+        await client.stop()
+
+
+@pytest.mark.asyncio
 async def test_stop_sends_quit_and_reaps_the_process():
     client = make_client()
     await client.start()
