@@ -1,0 +1,13 @@
+{
+    "bin_path": "/home/lychee/asr_tts_demo/app_demo/asr_d",
+    "model_dir": "/home/lychee/asr_tts_demo/n1-655_whisper_tiny",
+    "model_type": "tiny",
+    "tmp_dir": "/tmp",
+    "min_audio_ms": 200,
+    "params": {
+        "language": "chinese",
+        "beam_size": 5,
+        "no_speech_thres": 0.6,
+        "log": 1
+    }
+}
