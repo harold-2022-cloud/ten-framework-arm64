@@ -185,16 +185,30 @@ class AmbarellaASRExtension(AsyncASRBaseExtension):
             return False
         buf = frame.lock_buf()
         try:
-            self._buffer.extend(bytes(buf))
+            new_bytes = bytes(buf)
         finally:
             frame.unlock_buf(buf)
+        # Checked before appending, against what this frame would bring the
+        # buffer to: appending unconditionally first (and only then
+        # checking) can send up to one frame beyond the 30 s ceiling to
+        # asr_d. Flushing here keeps the accumulated (already-conforming)
+        # audio at or under the limit, and this frame simply starts the
+        # next window.
+        if len(self._buffer) + len(new_bytes) > MAX_BUFFER_BYTES:
+            await self._infer_early()
+        self._buffer.extend(new_bytes)
+        # A single frame landing exactly on (or, pathologically, past) the
+        # ceiling would not have tripped the check above; catch that too.
         if len(self._buffer) >= MAX_BUFFER_BYTES:
-            self.ten_env.log_info(
-                "30 s window reached; inferring early and still listening"
-            )
-            # Not the end of a turn, so no finalize_end here.
-            await self._infer_buffer()
+            await self._infer_early()
         return True
+
+    async def _infer_early(self) -> None:
+        self.ten_env.log_info(
+            "30 s window reached; inferring early and still listening"
+        )
+        # Not the end of a turn, so no finalize_end here.
+        await self._infer_buffer()
 
     @override
     async def finalize(self, _session_id: Optional[str]) -> None:

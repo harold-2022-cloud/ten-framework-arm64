@@ -181,6 +181,54 @@ async def test_thirty_second_ceiling_infers_early_and_keeps_listening():
 
 
 @pytest.mark.asyncio
+async def test_thirty_second_ceiling_never_overshoots():
+    """A frame that would push the buffer past the ceiling must not be
+    included in the inference it triggers.
+
+    Checking the limit *after* appending (the bug) lets the frame that
+    crosses the ceiling ride along into that same INFER, sending up to one
+    frame beyond 960 000 bytes. Checking before appending instead must
+    infer on only what was already buffered, and carry this frame over to
+    start the next window rather than dropping it.
+    """
+    extension = await make_started()
+    try:
+        write_calls = []
+        original_write_wav = extension._write_wav
+
+        def spy_write_wav(audio):
+            write_calls.append(audio)
+            original_write_wav(audio)
+
+        extension._write_wav = spy_write_wav
+
+        under_by = 100
+        frame1 = MagicMock()
+        frame1.lock_buf = MagicMock(
+            return_value=bytearray(MAX_BUFFER_BYTES - under_by)
+        )
+        frame1.unlock_buf = MagicMock()
+        assert await extension.send_audio(frame1, None) is True
+        # Still under the ceiling: no inference yet.
+        assert len(write_calls) == 0
+        assert len(extension._buffer) == MAX_BUFFER_BYTES - under_by
+
+        overshoot_by = 200
+        frame2 = MagicMock()
+        frame2.lock_buf = MagicMock(return_value=bytearray(overshoot_by))
+        frame2.unlock_buf = MagicMock()
+        assert await extension.send_audio(frame2, None) is True
+
+        assert len(write_calls) == 1
+        assert len(write_calls[0]) == MAX_BUFFER_BYTES - under_by
+        assert len(write_calls[0]) <= MAX_BUFFER_BYTES
+        # frame2 was not dropped: it starts the next window.
+        assert len(extension._buffer) == overshoot_by
+    finally:
+        await extension.stop_connection()
+
+
+@pytest.mark.asyncio
 async def test_send_audio_accumulates_without_inferring():
     extension = await make_started()
     try:
