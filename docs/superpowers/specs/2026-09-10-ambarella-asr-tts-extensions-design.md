@@ -321,8 +321,12 @@ inference and keeps listening**, rather than dropping the oldest audio:
 discarding loses speech the user produced, while an early inference merely
 splits a long monologue into two results, both final and both correct.
 `buffer_strategy()` returns `ASRBufferConfigModeKeep(byte_limit=960_000)`, so
-the base class's own buffer agrees with the daemon's limit and also catches the
-frames that arrive while the model is still loading.
+the base class's own buffer agrees with the daemon's limit. It does *not*,
+however, catch the frames that arrive while the model is still loading:
+`ten_ai_base` only consults `buffer_strategy()` while `is_connected()` is
+`False`, and `is_connected()` returns `True` the instant the process spawns —
+tens of seconds before the model is resident. The extension's own `_buffer`
+is what catches those early frames instead.
 
 **`ERR no speech.` is not an error.** It is the daemon's normal answer to
 silence: emit no result and no `ModuleError`, only `finalize_end`. Genuine

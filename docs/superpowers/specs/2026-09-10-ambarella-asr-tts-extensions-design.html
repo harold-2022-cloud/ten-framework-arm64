@@ -620,8 +620,13 @@ rather than dropping the oldest audio: discarding loses speech the user produced
 while an early inference merely splits a long monologue into two results, both
 final and both correct. <code>buffer_strategy()</code> returns
 <code>ASRBufferConfigModeKeep(byte_limit=960_000)</code>, so the base class's own
-buffer agrees with the daemon's limit and also catches the frames that arrive
-while the model is still loading.</p>
+buffer agrees with the daemon's limit. It does <i>not</i>, however, catch the
+frames that arrive while the model is still loading: <code>ten_ai_base</code>
+only consults <code>buffer_strategy()</code> while <code>is_connected()</code>
+is <code>False</code>, and <code>is_connected()</code> returns <code>True</code>
+the instant the process spawns — tens of seconds before the model is resident.
+The extension's own <code>_buffer</code> is what catches those early frames
+instead.</p>
 
 <h4><code>ERR no speech.</code> is not an error</h4>
 <p>It is the daemon's normal answer to silence: emit no result and no
