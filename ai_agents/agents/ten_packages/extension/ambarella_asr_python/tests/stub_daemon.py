@@ -46,6 +46,9 @@ def main() -> int:
     parser.add_argument("--stub-text", default="hello world")
     parser.add_argument("--stub-rate", type=int, default=22050)
     parser.add_argument("--stub-delay", type=float, default=0.0)
+    # Underscore, not hyphen: set via params.infer_delay, which the
+    # extension's pass-through expands verbatim into --infer_delay.
+    parser.add_argument("--infer_delay", type=float, default=0.0)
     args, _ignored = parser.parse_known_args()
 
     scenario = args.scenario
@@ -104,6 +107,11 @@ def main() -> int:
             emit(f"OK wav={out_path} frames={frames}")
             continue
 
+        if args.infer_delay:
+            # Widens the window a concurrency test needs: without it, a
+            # local reply is fast enough that a WAV-write race would never
+            # actually land inside another turn's request/response window.
+            time.sleep(args.infer_delay)
         emit(f"OK language=english text={args.stub_text}")
 
     return 0

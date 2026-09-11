@@ -3,9 +3,11 @@
 # Licensed under the Apache License, Version 2.0.
 #
 
+import asyncio
 import json
 import os
 import sys
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,6 +16,7 @@ from ten_ai_base.asr import ASRBufferConfigModeKeep
 from ten_ai_base.message import ModuleErrorCode
 
 from ambarella_asr_python.const import BYTES_PER_SECOND, MAX_BUFFER_BYTES
+from ambarella_asr_python.daemon import DaemonError
 from ambarella_asr_python.extension import AmbarellaASRExtension
 
 STUB = os.path.join(os.path.dirname(__file__), "stub_daemon.py")
@@ -248,3 +251,106 @@ async def test_stop_removes_the_temp_wav():
     assert os.path.exists(path)
     await extension.stop_connection()
     assert not os.path.exists(path)
+
+
+# --- Concurrency: send_audio() (the audio_frame consumer task) and
+# finalize() (the on_data task) run on separate asyncio tasks in the real
+# base class, and are free to interleave at any await point. ---
+
+
+@pytest.mark.asyncio
+async def test_concurrent_turns_do_not_interleave_the_shared_wav():
+    """Two turns overlapping in time must not race on the reused WAV path.
+
+    Without _infer_lock, the second turn's _write_wav() runs as soon as the
+    first turn's daemon.request() yields control -- long before the first
+    reply (deliberately slowed here) comes back -- overwriting the file the
+    daemon may still be reading for the first INFER. Serialised, the second
+    write cannot happen until the first turn's whole request/response cycle
+    has completed.
+    """
+    extension = await make_started(
+        params={
+            "scenario": "ok",
+            "language": "english",
+            "infer_delay": 0.3,
+        }
+    )
+    try:
+        write_times = []
+        original_write_wav = extension._write_wav
+
+        def spy_write_wav(audio):
+            write_times.append(time.monotonic())
+            original_write_wav(audio)
+
+        extension._write_wav = spy_write_wav
+
+        async def turn(payload):
+            extension._buffer.extend(payload)
+            await extension._infer_buffer()
+
+        await asyncio.gather(turn(speech(1000)), turn(speech(1000)))
+
+        assert len(write_times) == 2
+        # The second write must not land inside the first turn's in-flight
+        # request window (delayed 0.3s by the stub); a wide margin below
+        # that keeps this robust to scheduling jitter while still failing
+        # outright (typically a few ms apart) without the lock.
+        assert write_times[1] - write_times[0] >= 0.2
+    finally:
+        await extension.stop_connection()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dead_daemon_turns_schedule_only_one_restart():
+    """Two turns that both find the daemon dead must not both restart it.
+
+    Without the in-flight-restart guard in _on_daemon_error(), the second
+    turn reads the same stale self._restarts value the first turn already
+    acted on and schedules a second restart -- which would tear down the
+    daemon the first restart is still loading.
+    """
+    extension = await make_started("die_on_infer")
+    try:
+
+        async def turn(payload):
+            extension._buffer.extend(payload)
+            await extension._infer_buffer()
+
+        await asyncio.gather(turn(speech(1000)), turn(speech(1000)))
+
+        assert extension.send_asr_error.await_count == 2
+        assert extension._restarts == 1
+    finally:
+        await extension.stop_connection()
+
+
+@pytest.mark.asyncio
+async def test_daemon_error_handling_returns_promptly_without_waiting_for_the_restart_backoff():
+    """_on_daemon_error() must not block the turn for the restart backoff.
+
+    Real death detection races the OS reaping the child against reading EOF
+    on stdout, so daemon.alive is not deterministic immediately after a
+    crash (see test_concurrent_dead_daemon_turns_schedule_only_one_restart's
+    docstring for the pattern that *is* deterministic). This test instead
+    fixes the daemon as unambiguously dead and drives _on_daemon_error()
+    directly, so it pins exactly one thing: scheduling a restart must not
+    make the caller (finalize(), via _infer_buffer()) wait out the backoff
+    (>= 1s by default) before it can return and reach finalize_end.
+    """
+    extension = await make_started()
+    try:
+        extension.daemon = AsyncMock()
+        extension.daemon.alive = False
+
+        start = time.monotonic()
+        await extension._on_daemon_error(DaemonError("boom"))
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.5
+        assert extension._restarts == 1
+        assert extension._restart_task is not None
+        assert extension.send_asr_error.await_count == 1
+    finally:
+        await extension.stop_connection()
