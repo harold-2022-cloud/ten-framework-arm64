@@ -13,5 +13,64 @@
       "name": "ten_ai_base",
       "version": "0.7"
     }
-  ]
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "pyproject.toml",
+      "requirements.txt",
+      "tests/**"
+    ]
+  },
+  "api": {
+    "interface": [
+      {
+        "import_uri": "../../system/ten_ai_base/api/tts-interface.json"
+      }
+    ],
+    "property": {
+      "properties": {
+        "bin_path": {
+          "type": "string"
+        },
+        "model_dir": {
+          "type": "string"
+        },
+        "tmp_dir": {
+          "type": "string"
+        },
+        "max_chars": {
+          "type": "int64"
+        },
+        "output_sample_rate": {
+          "type": "int64"
+        },
+        "load_timeout_s": {
+          "type": "float64"
+        },
+        "infer_timeout_s": {
+          "type": "float64"
+        },
+        "quit_timeout_s": {
+          "type": "float64"
+        },
+        "restart_max_attempts": {
+          "type": "int64"
+        },
+        "dump": {
+          "type": "bool"
+        },
+        "dump_path": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  }
 }

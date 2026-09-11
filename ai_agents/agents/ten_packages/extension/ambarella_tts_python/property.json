@@ -1,0 +1,12 @@
+{
+    "bin_path": "/home/lychee/asr_tts_demo/app_demo/tts_d",
+    "model_dir": "/home/lychee/asr_tts_demo/n1-655_openvoice",
+    "tmp_dir": "/tmp",
+    "max_chars": 200,
+    "output_sample_rate": 16000,
+    "params": {
+        "speaker_id": 0,
+        "rand_seed": -1,
+        "log": 1
+    }
+}
