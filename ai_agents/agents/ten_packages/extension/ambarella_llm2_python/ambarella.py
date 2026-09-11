@@ -1,0 +1,354 @@
+#
+# This file is part of TEN Framework, an open source project.
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file for more information.
+#
+# ------------------------------
+# Config
+# ------------------------------
+import asyncio
+import codecs
+import json
+import time
+import uuid
+from typing import AsyncGenerator, Optional
+
+import aiohttp
+from pydantic import BaseModel
+from ten_ai_base.struct import (
+    LLMMessageContent,
+    LLMRequest,
+    LLMResponse,
+    LLMResponseMessageDelta,
+    LLMResponseMessageDone,
+)
+from ten_runtime import AsyncTenEnv
+
+SSE_PREFIX = "data:"
+SSE_DONE = "[DONE]"
+
+# Keys a streamed Ambarella payload might carry the assistant text under.
+# The board's HTTP interface is documented only by one curl example and its
+# headers -- the response framing is not specified anywhere, so this list is
+# a best guess. See the "Response framing" section of README.md.
+TEXT_KEYS = ("delta", "answer", "text", "content", "response", "token")
+
+
+def _sse_payload(line: str) -> str:
+    """Strip the SSE field prefix, preserving whitespace inside the value.
+
+    The spec removes exactly one optional space after the colon. Stripping
+    the whole payload would delete the leading and trailing spaces of a
+    plain-text token, gluing words together in the assembled answer.
+    """
+    payload = line[len(SSE_PREFIX) :]
+    if payload.startswith(" "):
+        payload = payload[1:]
+    return payload
+
+
+class AmbarellaLLM2Config(BaseModel):
+    # The on-board LLM demo server, started by run_llm_demo.sh. Point this at
+    # the board's IP when the agent runs off-board.
+    base_url: str = "http://127.0.0.1:8080"
+    # model_type as accepted by run_llm_demo.sh. 9 is deepseek_7B, the only
+    # model the developer kit guide lists as pre-converted for the N1-655.
+    model_type: int = 9
+    # Reused across turns so the board keeps the conversation history. Left
+    # empty, a random id is generated per extension instance.
+    session_id: str = ""
+    # Folded into the first query, as the interface has no system role.
+    prompt: str = ""
+    # "auto" sniffs SSE vs raw text from the first chunk. Pin it to "sse" or
+    # "raw" once the board's actual framing has been observed.
+    response_format: str = "auto"
+    # Upper bound on streaming; the per-request value still wins.
+    streaming: bool = True
+    # Clear the board-side history on this instance's first request, so a
+    # previous worker's session cannot leak into this one.
+    reset_on_first_request: bool = True
+    # The board keeps history server-side and cannot rewind a turn it already
+    # half-answered. Enabling this trades the whole history for a clean
+    # context after a barge-in; off by default, because barge-in is routine
+    # in a voice pipeline and wiping history on each one is worse.
+    reset_after_abort: bool = False
+    # Networking. The total timeout is generous: a 7B model at W4A16 on
+    # CVflow has no published token rate, and the first load after boot can
+    # take up to 80 s.
+    connect_timeout_s: float = 15.0
+    total_timeout_s: float = 120.0
+
+
+# ------------------------------
+# Thin Ambarella streaming client
+# ------------------------------
+class AmbarellaChatClient:
+    def __init__(self, ten_env: AsyncTenEnv, config: AmbarellaLLM2Config):
+        self.ten_env = ten_env
+        self.config = config
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._session_id = config.session_id or uuid.uuid4().hex[:16]
+        self._needs_reset = config.reset_on_first_request
+        self._prompt_sent = False
+        self._warned_tools = False
+        # run_llm_demo.sh is documented with --max_user 1, so two overlapping
+        # turns would contend for the board's single slot. Drop this lock if
+        # the server is started with a higher --max_user.
+        self._turn_lock = asyncio.Lock()
+
+    async def _ensure_session(self):
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(
+                connect=self.config.connect_timeout_s,
+                total=self.config.total_timeout_s,
+            )
+            self._session = aiohttp.ClientSession(timeout=timeout)
+
+    async def aclose(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+    def _url(self) -> str:
+        # The guide posts to the server root:
+        #   curl -X POST --url http://127.0.0.1:8080/
+        return self.config.base_url.rstrip("/") + "/"
+
+    def _headers(self, streaming: bool, reset: bool) -> dict:
+        return {
+            "Session-Id": self._session_id,
+            "Model-Type": str(self.config.model_type),
+            "Stream-Off": "0" if streaming else "1",
+            "Reset-En": "1" if reset else "0",
+            "Content-Type": "text/plain; charset=utf-8",
+        }
+
+    def _latest_user_text(self, request_input: LLMRequest) -> str:
+        """
+        The board takes a single prompt string and keeps the history itself,
+        keyed by Session-Id, so only the newest user turn is sent -- the same
+        trade the Dify extension makes with its conversation_id.
+        """
+        for message in reversed(request_input.messages or []):
+            if not isinstance(message, LLMMessageContent):
+                continue
+            if message.role != "user":
+                continue
+            if isinstance(message.content, str):
+                return message.content
+            if isinstance(message.content, list):
+                chunks = [
+                    getattr(item, "text", "")
+                    for item in message.content
+                    if hasattr(item, "text")
+                ]
+                joined = "\n".join(c for c in chunks if c)
+                if joined:
+                    return joined
+
+        # Fall back to the last text-looking message of any role.
+        for message in reversed(request_input.messages or []):
+            if isinstance(message, LLMMessageContent) and isinstance(
+                message.content, str
+            ):
+                return message.content
+        return ""
+
+    def _extract_text(self, payload: str) -> str:
+        """Pull the assistant text out of one streamed payload."""
+        try:
+            event = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            # Not JSON -- the payload is the text itself.
+            return payload
+        if not isinstance(event, dict):
+            return payload
+        for key in TEXT_KEYS:
+            value = event.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
+
+    async def _iter_deltas(
+        self, resp: aiohttp.ClientResponse
+    ) -> AsyncGenerator[str, None]:
+        """
+        Yield assistant text fragments off the wire.
+
+        Handles both framings the board might use: SSE-style "data:" lines,
+        and an unframed stream of UTF-8 text.
+        """
+        mode = self.config.response_format
+        buffer = ""
+        # iter_any() yields arbitrary TCP chunks, so a multi-byte character
+        # can straddle two of them. A per-chunk bytes.decode() would turn
+        # every split CJK character into U+FFFD, silently: the stream is
+        # decoded incrementally instead, holding partial sequences back.
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
+        async for chunk in resp.content.iter_any():
+            if not chunk:
+                continue
+            buffer += decoder.decode(chunk)
+
+            if mode == "auto":
+                # Wait for enough bytes to tell "data:" from a payload that
+                # merely starts with "da"; a short first chunk would
+                # otherwise lock the stream into the wrong mode for good.
+                stripped = buffer.lstrip()
+                if len(stripped) < len(SSE_PREFIX):
+                    continue
+                mode = "sse" if stripped.startswith(SSE_PREFIX) else "raw"
+                self.ten_env.log_info(
+                    f"[Ambarella] sniffed response_format={mode}"
+                )
+
+            if mode == "raw":
+                yield buffer
+                buffer = ""
+                continue
+
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.rstrip("\r\n")
+                if not line.startswith(SSE_PREFIX):
+                    continue
+                payload = _sse_payload(line)
+                if payload.strip() == SSE_DONE:
+                    return
+                text = self._extract_text(payload)
+                if text:
+                    yield text
+
+        buffer += decoder.decode(b"", final=True)
+
+        # Whatever is left had no trailing newline to close it.
+        if not buffer:
+            return
+        if mode == "raw":
+            yield buffer
+            return
+        tail = buffer.rstrip("\r\n")
+        if not tail.startswith(SSE_PREFIX):
+            return
+        payload = _sse_payload(tail)
+        if payload.strip() and payload.strip() != SSE_DONE:
+            text = self._extract_text(payload)
+            if text:
+                yield text
+
+    async def get_chat_completions(
+        self, request_input: LLMRequest
+    ) -> AsyncGenerator[LLMResponse, None]:
+        """
+        Map LLMRequest -> the Ambarella LLM demo HTTP interface.
+
+        Emit LLMResponseMessageDelta and LLMResponseMessageDone, mirroring
+        the OpenAI and Dify LLM2 extensions.
+        """
+        if request_input.tools and not self._warned_tools:
+            self._warned_tools = True
+            self.ten_env.log_warn(
+                f"[Ambarella] {len(request_input.tools)} tool(s) registered, "
+                "but the board's LLM HTTP interface takes a plain-text prompt "
+                "and has no tool-calling support; they will be ignored and no "
+                "tool call will ever be emitted."
+            )
+
+        created = int(time.time())
+        response_id = f"{self._session_id}-{uuid.uuid4().hex[:8]}"
+
+        query = self._latest_user_text(request_input)
+        if not query:
+            self.ten_env.log_warn(
+                "[Ambarella] no user text in request, nothing to send"
+            )
+            yield LLMResponseMessageDone(
+                response_id=response_id,
+                role="assistant",
+                content="",
+                created=created,
+            )
+            return
+
+        system_prompt = request_input.prompt or self.config.prompt
+        if system_prompt and not self._prompt_sent:
+            # No system role on this interface -- fold the prompt into the
+            # first turn and let the board carry it in session history.
+            query = f"{system_prompt}\n\n{query}"
+
+        streaming = self.config.streaming and request_input.streaming
+        reset = self._needs_reset
+
+        await self._ensure_session()
+        assert self._session is not None
+
+        full_content = ""
+        async with self._turn_lock:
+            self.ten_env.log_info(
+                f"[Ambarella] POST {self._url()} "
+                f"model_type={self.config.model_type} "
+                f"session_id={self._session_id} "
+                f"streaming={streaming} reset={reset} "
+                f"query_len={len(query)}"
+            )
+            try:
+                async with self._session.post(
+                    self._url(),
+                    data=query.encode("utf-8"),
+                    headers=self._headers(streaming, reset),
+                ) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        raise RuntimeError(
+                            "Ambarella LLM request failed: "
+                            f"status={resp.status} body={body[:512]}"
+                        )
+
+                    # The turn reached the model, so the board-side history is
+                    # ours now; do not clear it again on the next turn.
+                    self._needs_reset = False
+                    self._prompt_sent = True
+
+                    if not streaming:
+                        full_content = (await resp.text()).strip()
+                        if full_content:
+                            yield LLMResponseMessageDelta(
+                                response_id=response_id,
+                                role="assistant",
+                                content=full_content,
+                                delta=full_content,
+                                created=created,
+                            )
+                    else:
+                        async for delta in self._iter_deltas(resp):
+                            full_content += delta
+                            yield LLMResponseMessageDelta(
+                                response_id=response_id,
+                                role="assistant",
+                                content=full_content,
+                                delta=delta,
+                                created=created,
+                            )
+            except (asyncio.CancelledError, GeneratorExit):
+                # main_control aborts the turn on barge-in. The board cannot
+                # rewind the partial answer already appended to the session.
+                if self.config.reset_after_abort:
+                    self._needs_reset = True
+                    # Reset-En clears the board-side history, which is where
+                    # the system prompt lives once it has been folded into
+                    # the first turn. Without this the session runs without
+                    # a prompt from here on, and nothing says so.
+                    self._prompt_sent = False
+                self.ten_env.log_info(
+                    "[Ambarella] turn aborted after "
+                    f"{len(full_content)} chars"
+                )
+                raise
+
+        yield LLMResponseMessageDone(
+            response_id=response_id,
+            role="assistant",
+            content=full_content,
+            created=created,
+        )

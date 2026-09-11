@@ -1,0 +1,6 @@
+{
+    "base_url": "http://127.0.0.1:8080",
+    "model_type": 9,
+    "prompt": "You are a helpful assistant.",
+    "response_format": "auto"
+}

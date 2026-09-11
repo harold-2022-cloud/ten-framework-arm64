@@ -1,0 +1,7 @@
+[project]
+name = "ambarella-llm2-python"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.14.1",
+]
