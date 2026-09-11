@@ -48,17 +48,28 @@ async def spawn(binary: str, flags: List[str], token: str) -> Process:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
-    while True:
-        raw = await proc.stdout.readline()
-        if not raw:
-            raise RuntimeError(f"{binary} exited before printing {token}")
-        line = raw.decode("utf-8", errors="replace").strip()
-        if line.startswith(token):
-            return proc
-        if line.startswith("ERR"):
-            raise RuntimeError(f"{binary}: {line}")
-        if line:
-            print(f"  [{token}] {line}")
+    try:
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                raise RuntimeError(f"{binary} exited before printing {token}")
+            line = raw.decode("utf-8", errors="replace").strip()
+            if line.startswith(token):
+                return proc
+            if line.startswith("ERR"):
+                raise RuntimeError(f"{binary}: {line}")
+            if line:
+                print(f"  [{token}] {line}")
+    except Exception:
+        # Kill process before re-raising to ensure VP memory is released.
+        # Per vendor docs, only QUIT (or kill) releases VP memory.
+        if proc.returncode is None:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), 5.0)
+            except asyncio.TimeoutError:
+                pass
+        raise
 
 
 async def infer(proc: Process, command: str) -> InferResult:
@@ -96,7 +107,10 @@ async def quit_daemon(proc: Process) -> None:
         ConnectionResetError,
         ProcessLookupError,
     ):
-        proc.kill()
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
         try:
             await asyncio.wait_for(proc.wait(), 5.0)
         except asyncio.TimeoutError:
