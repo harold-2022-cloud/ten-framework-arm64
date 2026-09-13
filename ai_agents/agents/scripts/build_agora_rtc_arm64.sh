@@ -129,14 +129,20 @@ OUT="$WRAPPER_DIR/out/linux/arm64/ten_packages/extension/agora_rtc"
 [[ -f "$OUT/lib/libagora_rtc.so" ]] || die "libagora_rtc.so was not produced"
 
 echo -n "    arch: "
-file -b "$OUT/lib/libagora_rtc.so" | grep -oE 'ARM aarch64|x86-64'
+file -b "$OUT/lib/libagora_rtc.so" | grep -oE 'ARM aarch64|x86-64' \
+  || die "unexpected architecture: $(file -b "$OUT/lib/libagora_rtc.so")"
 
 echo "    NEEDED:"
 readelf -d "$OUT/lib/libagora_rtc.so" | awk '/NEEDED/ {print "      " $NF}'
 
 echo "    unresolved symbols against the SDK:"
-if ldd -r "$OUT/lib/libagora_rtc.so" 2>&1 | grep -q 'undefined symbol'; then
-  ldd -r "$OUT/lib/libagora_rtc.so" 2>&1 | grep 'undefined symbol' | head
+# Collect once, then slice with sed. Piping grep into head made grep die of
+# SIGPIPE past the tenth symbol, which killed the script through pipefail --
+# precisely when the list this prints is the thing worth reading.
+UNRESOLVED="$(ldd -r "$OUT/lib/libagora_rtc.so" 2>&1 | grep 'undefined symbol' || true)"
+if [[ -n "$UNRESOLVED" ]]; then
+  echo "$UNRESOLVED" | sed -n '1,20p' | sed 's/^/      /'
+  echo "      ... $(echo "$UNRESOLVED" | wc -l) total"
 else
   echo "      none"
 fi

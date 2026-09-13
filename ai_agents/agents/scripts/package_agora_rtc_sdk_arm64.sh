@@ -187,8 +187,13 @@ echo "==> Done"
 ls -lh "$TPKG"
 echo
 echo "Contents:"
-tar tzf "$TPKG" | head -12
-echo "  ... $(tar tzf "$TPKG" | wc -l) entries total"
+# Read the listing once into a variable. Piping tar straight into head makes
+# head close the pipe after 12 lines, tar die of SIGPIPE (141), and pipefail
+# abort the whole script -- on a slow board, where tar has not yet finished
+# writing, that turns a purely cosmetic listing into a build failure.
+LISTING="$(tar tzf "$TPKG")"
+echo "$LISTING" | sed -n '1,12p'
+echo "  ... $(echo "$LISTING" | wc -l) entries total"
 echo
 echo "Install into a tenapp with:"
 echo "  tman install --os linux --arch arm64   # after publishing to a registry"
