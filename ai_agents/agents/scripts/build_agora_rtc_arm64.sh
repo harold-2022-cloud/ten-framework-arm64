@@ -50,7 +50,27 @@ cd "$WRAPPER_DIR"
 # cannot coexist with the official one. The SDK is therefore installed by hand
 # below, and its dependency is taken out of the manifest for the duration of
 # the resolve so the rest can install.
+# A leftover .bak means a previous run died between the edit and the restore.
+# Copying over it now would destroy the only good copy, so refuse instead.
+if [[ -f manifest.json.bak ]]; then
+  die "manifest.json.bak exists from an interrupted run.
+  Its manifest.json is the edited one, missing the agora_rtc_sdk dependency.
+  Restore it first:
+    mv $WRAPPER_DIR/manifest.json.bak $WRAPPER_DIR/manifest.json"
+fi
+
 cp manifest.json manifest.json.bak
+
+# Restore on ANY exit, including a failed resolve. Without this the script
+# leaves manifest.json permanently missing the agora_rtc_sdk dependency, and
+# the next run copies that damaged file over the backup.
+restore_manifest() {
+  if [[ -f "$WRAPPER_DIR/manifest.json.bak" ]]; then
+    mv -f "$WRAPPER_DIR/manifest.json.bak" "$WRAPPER_DIR/manifest.json"
+    echo "    manifest restored"
+  fi
+}
+trap restore_manifest EXIT
 python3 - <<'PY'
 import json, collections, pathlib
 p = pathlib.Path("manifest.json")
@@ -63,8 +83,8 @@ PY
 
 tman -y install --standalone
 
-mv manifest.json.bak manifest.json
-echo "    manifest restored"
+restore_manifest
+trap - EXIT
 
 # ---------------------------------------------------------------- 3. SDK
 echo "==> [3/6] Unpacking the SDK into the standalone app"

@@ -54,7 +54,24 @@ cd "$TENAPP"
 # tman resolves the whole dependency tree or fails, and the registry has no
 # arm64 agora_rtc. Drop it for the resolve so the ~40 Python extensions install,
 # then restore the manifest untouched.
+if [[ -f manifest.json.bak ]]; then
+  die "manifest.json.bak exists from an interrupted run.
+  Its manifest.json is the edited one, missing the agora_rtc dependency.
+  Restore it first:
+    mv $TENAPP/manifest.json.bak $TENAPP/manifest.json"
+fi
+
 cp manifest.json manifest.json.bak
+
+# Restore on ANY exit, including a failed resolve -- otherwise the tenapp is
+# left permanently missing its agora_rtc dependency.
+restore_manifest() {
+  if [[ -f "$TENAPP/manifest.json.bak" ]]; then
+    mv -f "$TENAPP/manifest.json.bak" "$TENAPP/manifest.json"
+    echo "    OK  manifest restored"
+  fi
+}
+trap restore_manifest EXIT
 python3 - <<'PY'
 import json, collections, pathlib
 p = pathlib.Path("manifest.json")
@@ -67,8 +84,8 @@ PY
 
 tman -y install
 
-mv manifest.json.bak manifest.json
-ok "manifest restored"
+restore_manifest
+trap - EXIT
 
 # ---------------------------------------------------------------- 3
 echo "==> [3/6] Placing the extension"
