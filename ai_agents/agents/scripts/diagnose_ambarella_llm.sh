@@ -120,20 +120,25 @@ echo "Each probe changes exactly one thing from the one above it."
 
 # B1 -- the developer kit guide's own example, verbatim. ASCII body, no
 # Content-Type of our own (curl's --data supplies form-urlencoded).
+#
+# Session-Id must be a DECIMAL INTEGER. The server parses it numerically and
+# rejects a zero: a non-numeric value logs "session_id=0 should not be 0" in
+# /tmp/log.txt and the connection closes with no HTTP response at all, which
+# curl reports as (52) Empty reply from server.
 probe B1 "guide example verbatim (ASCII body, non-streaming)" \
-  -H "Session-Id: diag1" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: 1234" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   --data "Hello"
 
 # B2 -- same, but a multibyte body.
 probe B2 "+ multibyte (UTF-8) body" \
-  -H "Session-Id: diag2" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: 1235" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   --data "你好"
 
 # B3 -- same, plus the Content-Type the extension sets (ambarella.py:123).
 probe B3 "+ Content-Type: text/plain; charset=utf-8 (what the extension sends)" \
-  -H "Session-Id: diag3" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: 1236" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   -H "Content-Type: text/plain; charset=utf-8" \
   --data "你好"
@@ -142,7 +147,7 @@ probe B3 "+ Content-Type: text/plain; charset=utf-8 (what the extension sends)" 
 # (ambarella.py:66, streaming=True). This is the one that reveals the framing
 # that `response_format: auto` has to sniff.
 probe B4 "streaming (Stream-Off: 0) -- the extension's real request" \
-  -H "Session-Id: diag4" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: 1237" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 0" -H "Reset-En: 1" \
   -H "Content-Type: text/plain; charset=utf-8" \
   --data "你好，一句話介紹自己"
@@ -161,7 +166,8 @@ for t in B1 B2 B3 B4; do
 done
 echo
 echo "  Where the ladder first fails names the cause:"
-echo "    B1 -> the service itself, unrelated to TEN. Check test_llm_client above."
+echo "    B1 -> the service itself, unrelated to TEN. Check test_llm_client above,"
+echo "          and grep /tmp/log.txt for the reason the request was refused."
 echo "    B2 -> multibyte body handling."
 echo "    B3 -> the Content-Type header at ambarella.py:123."
 echo "    B4 -> streaming specifically; non-streaming would still work."

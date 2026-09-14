@@ -9,6 +9,7 @@
 import asyncio
 import codecs
 import json
+import random
 import time
 import uuid
 from typing import AsyncGenerator, Optional
@@ -47,6 +48,25 @@ def _sse_payload(line: str) -> str:
     return payload
 
 
+def _resolve_session_id(configured: str) -> str:
+    """
+    The board parses Session-Id as an integer, so it has to be decimal digits
+    and must not come out as zero. A hex id such as uuid4().hex is either
+    rejected outright (leading letter -> 0) or silently truncated at the first
+    letter, which collides across instances.
+    """
+    candidate = (configured or "").strip()
+    if candidate:
+        if not candidate.isdigit() or int(candidate) == 0:
+            raise ValueError(
+                "session_id must be a non-zero decimal integer, as the board "
+                f"parses it numerically; got {candidate!r}"
+            )
+        return candidate
+    # Positive and inside int32, which is what the board's demo server uses.
+    return str(random.randint(1, 2**31 - 1))
+
+
 class AmbarellaLLM2Config(BaseModel):
     # The on-board LLM demo server, started by run_llm_demo.sh. Point this at
     # the board's IP when the agent runs off-board.
@@ -55,7 +75,12 @@ class AmbarellaLLM2Config(BaseModel):
     # model the developer kit guide lists as pre-converted for the N1-655.
     model_type: int = 9
     # Reused across turns so the board keeps the conversation history. Left
-    # empty, a random id is generated per extension instance.
+    # empty, a random one is generated per extension instance.
+    #
+    # Must be a non-zero DECIMAL INTEGER. The board parses this header
+    # numerically and refuses a zero -- a non-numeric value logs
+    # "session_id=0 should not be 0" in /tmp/log.txt and the connection is
+    # closed with no HTTP response at all.
     session_id: str = ""
     # Folded into the first query, as the interface has no system role.
     prompt: str = ""
@@ -87,7 +112,7 @@ class AmbarellaChatClient:
         self.ten_env = ten_env
         self.config = config
         self._session: Optional[aiohttp.ClientSession] = None
-        self._session_id = config.session_id or uuid.uuid4().hex[:16]
+        self._session_id = _resolve_session_id(config.session_id)
         self._needs_reset = config.reset_on_first_request
         self._prompt_sent = False
         self._warned_tools = False

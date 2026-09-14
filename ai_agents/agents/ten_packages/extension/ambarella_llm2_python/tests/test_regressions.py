@@ -17,6 +17,7 @@ from ten_ai_base.struct import LLMMessageContent
 from ambarella_llm2_python.ambarella import (
     AmbarellaChatClient,
     AmbarellaLLM2Config,
+    _resolve_session_id,
     _sse_payload,
 )
 from ambarella_llm2_python.extension import AmbarellaLLM2Extension
@@ -143,3 +144,42 @@ async def test_uninitialised_client_reports_why():
     env.log_debug = MagicMock()
     with pytest.raises(RuntimeError, match="not initialized"):
         extension.on_call_chat_completion(env, MagicMock())
+
+
+# ---------------------------------------------------------------------------
+# Session-Id has to be a decimal integer.
+#
+# The board parses the header numerically. A hex id such as uuid4().hex either
+# leads with a letter and parses to zero -- the server then logs
+# "session_id=0 should not be 0" and closes the connection without sending any
+# HTTP response, which curl reports as (52) Empty reply from server -- or
+# leads with a digit and is silently truncated at the first letter, which
+# collides across extension instances. Observed on an N1-655 on 2026-09-14.
+# ---------------------------------------------------------------------------
+
+
+def test_generated_session_id_is_a_non_zero_decimal_integer():
+    for _ in range(200):
+        generated = _resolve_session_id("")
+        assert generated.isdigit(), f"not decimal: {generated!r}"
+        assert int(generated) > 0, f"zero session id: {generated!r}"
+
+
+def test_configured_numeric_session_id_is_used_verbatim():
+    assert _resolve_session_id("1234") == "1234"
+    assert _resolve_session_id("  1234  ") == "1234"
+
+
+@pytest.mark.parametrize(
+    "bad", ["0", "00", "af2a9c1b7e4d0856", "12ab", "diag1", "-5", "1.5"]
+)
+def test_non_integer_session_id_is_rejected(bad):
+    with pytest.raises(ValueError, match="non-zero decimal integer"):
+        _resolve_session_id(bad)
+
+
+def test_client_sends_a_decimal_session_id_header():
+    client = make_client()
+    headers = client._headers(streaming=True, reset=False)
+    assert headers["Session-Id"].isdigit()
+    assert int(headers["Session-Id"]) > 0
