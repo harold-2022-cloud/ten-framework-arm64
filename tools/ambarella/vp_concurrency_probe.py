@@ -3,15 +3,30 @@
 # This file is part of TEN Framework, an open source project.
 # Licensed under the Apache License, Version 2.0.
 #
-"""Measure whether asr_d and tts_d can infer at the same time.
+"""Measure whether the board's three on-device models can infer together.
 
-test_alternate.py in the vendor demo proves the two daemons can be resident
-together and infer alternately. It never overlaps them. A voice pipeline does:
-a user barging in while TTS is synthesising puts an ASR INFER on top of a TTS
-INFER. Run this on the board before trusting that path.
+test_alternate.py in the vendor demo proves asr_d and tts_d can be resident
+together and infer alternately. It never overlaps them, and it never involves
+the LLM at all. The voice-assistant-ambarella graph runs all three on the same
+Vector Processor:
 
-Deliberately standalone: this script imports nothing from the extensions, so
-a failure here implicates the hardware and the vendor binaries, not the
+    ambarella_asr_python  -> asr_d          (whisper tiny)
+    ambarella_llm2_python -> test_llm       (deepseek_7B, over HTTP)
+    ambarella_tts_python  -> tts_d          (openvoice)
+
+Three overlaps occur in that pipeline, and only the first is rare:
+
+    llm + tts   every turn -- main_control sends each finished sentence to TTS
+                while the LLM is still streaming the next one
+    asr + tts   barge-in while the agent is speaking
+    asr + llm   barge-in while the agent is thinking
+
+Run this on the board before trusting any of them. Residency is checked first,
+because if the three models cannot be co-resident at all then no amount of
+scheduling saves the design.
+
+Deliberately standalone: this script imports nothing from the extensions, so a
+failure here implicates the hardware and the vendor binaries, not the
 extensions' Python.
 
 Usage:
@@ -21,22 +36,28 @@ Usage:
       --whisper  /home/lychee/asr_tts_demo/n1-655_whisper_tiny \\
       --openvoice /home/lychee/asr_tts_demo/n1-655_openvoice \\
       --wav      /home/lychee/asr_tts_demo/app_demo/sample_16k_mono.wav \\
-      --rounds   10
+      --rounds   5
 
-Exit code is 0 only when both daemons came up, ran to completion, and
-overlapped inference produced no failures. Anything else -- a daemon that
-never got ready, one that dies mid-run, or an ERR that is not the expected
-"ERR no speech." -- is a non-zero exit, so a runbook can gate on this script.
+Exit code is 0 only when every model loaded, every phase ran to completion, and
+no overlap produced a failure, so a runbook can gate on this script.
 """
 
 import argparse
 import asyncio
+import json
 import statistics
 import time
+import urllib.error
+import urllib.request
 from typing import Dict, List, Optional, Tuple, Union
 
 Process = asyncio.subprocess.Process  # pylint: disable=no-member
 InferResult = Tuple[float, str]
+
+# The board parses Session-Id numerically and refuses a zero, allows one user
+# at a time, and holds a used session for 180s before freeing it. One id for
+# the whole probe therefore keeps every request inside a single user's budget.
+LLM_SESSION_ID = "20260914"
 
 
 async def spawn(
@@ -115,6 +136,58 @@ async def infer(
         ) from err
 
 
+def _llm_request(url: str, model_type: int, prompt: str) -> Tuple[bool, str]:
+    """POST one prompt and reassemble the streamed reply. Blocking on purpose.
+
+    Called through asyncio.to_thread so it can run while a daemon inference is
+    in flight, which is the whole point of the overlapped phases.
+
+    The board streams one character per SSE event and escapes whitespace, so
+    the reply has to be joined before it means anything -- a substring search
+    over the raw bytes finds nothing even when the text is there.
+    """
+    req = urllib.request.Request(
+        url,
+        data=prompt.encode("utf-8"),
+        method="POST",
+        headers={
+            "Session-Id": LLM_SESSION_ID,
+            "Model-Type": str(model_type),
+            "Stream-Off": "0",
+            "Reset-En": "1",
+            "Content-Type": "text/plain; charset=utf-8",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError) as err:
+        # A refusal closes the connection with no HTTP response at all, so
+        # this is what "the VP was busy" looks like from the client side.
+        return False, f"{type(err).__name__}: {err}"
+
+    joined = "".join(
+        line[len("data:") :].lstrip(" ")
+        for line in body.split("\n")
+        if line.startswith("data:")
+    )
+    text = joined.replace("<SP>", " ").replace("<NL>", "\n")
+    if "<DONE>" not in text:
+        return False, "reply did not terminate with <DONE>"
+    text = text.replace("<DONE>", "")
+    _, tag, answer = text.partition("</think>")
+    return True, (answer if tag else text).strip()
+
+
+async def llm_infer(
+    url: str, model_type: int, prompt: str, label: str
+) -> InferResult:
+    started = time.monotonic()
+    ok, detail = await asyncio.to_thread(_llm_request, url, model_type, prompt)
+    elapsed = time.monotonic() - started
+    return elapsed, ("OK " + detail[:60]) if ok else ("ERR " + detail[:120])
+
+
 async def _read_terminal_line(proc: Process, started: float) -> InferResult:
     assert proc.stdout is not None
     while True:
@@ -186,8 +259,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rounds",
         type=int,
-        default=10,
-        help="rounds per phase (baseline and overlapped), default 10",
+        default=5,
+        help="asr/tts rounds per phase, default 5",
+    )
+    parser.add_argument(
+        "--llm-url",
+        default="http://127.0.0.1:8080",
+        help="the board's LLM demo server, default http://127.0.0.1:8080",
+    )
+    parser.add_argument(
+        "--model-type",
+        type=int,
+        default=9,
+        help="run_llm_demo.sh --model_type, default 9 (deepseek_7B)",
+    )
+    parser.add_argument(
+        "--llm-rounds",
+        type=int,
+        default=2,
+        help="rounds per phase that involve the LLM, default 2. Kept small "
+        "because one generation takes 5-14s on an N1-655 and the board "
+        "serves one session at a time",
+    )
+    parser.add_argument(
+        "--skip-llm",
+        action="store_true",
+        help="probe asr_d and tts_d only, for a board where the LLM demo is "
+        "not running. The three-way phase is then skipped entirely",
     )
     parser.add_argument(
         "--load-timeout-s",
@@ -240,7 +338,44 @@ async def main() -> int:
 async def run_probe(
     args: argparse.Namespace, daemons: Dict[str, Process]
 ) -> int:
-    print("Loading both daemons into VP memory...")
+    failures: List[str] = []
+    timing: Dict[str, List[float]] = {}
+
+    def record(
+        key: str, elapsed: float, line: str, fatal_err: bool = True
+    ) -> None:
+        timing.setdefault(key, []).append(elapsed)
+        # asr_d answers "ERR no speech." for silence, which is a correct
+        # answer about the audio rather than a failure of the VP.
+        if line.startswith("ERR") and not (
+            not fatal_err and line == "ERR no speech."
+        ):
+            failures.append(f"{key}: {line}")
+
+    def tts_cmd(index: int) -> str:
+        # Identical wording in every phase, so a text-length difference never
+        # enters the baseline-versus-overlapped comparison.
+        return f"INFER probe round {index} /tmp/probe_{index}.wav"
+
+    asr_cmd = f"INFER {args.wav}"
+    llm_url = args.llm_url.rstrip("/") + "/"
+
+    # ---------------------------------------------------------------- phase 1
+    print("=== 1. Residency")
+    print("  the LLM is expected to be already resident, served over HTTP")
+    elapsed, line = await llm_infer(
+        llm_url, args.model_type, "Hi", "residency llm"
+    )
+    if line.startswith("ERR"):
+        print(f"  llm: {line}")
+        print("\n  The LLM server did not answer, so nothing below would mean")
+        print("  anything. Start it, or pass --skip-llm to probe asr+tts only.")
+        if not args.skip_llm:
+            return 2
+    else:
+        print(f"  llm resident and answering ({elapsed:.1f}s)")
+
+    print("  loading asr_d ...")
     daemons["asr"] = await spawn(
         args.asr_bin,
         [
@@ -256,144 +391,200 @@ async def run_probe(
         "READY asr",
         args.load_timeout_s,
     )
+    print("  loading tts_d ...")
     daemons["tts"] = await spawn(
         args.tts_bin,
         ["--model_dir", args.openvoice, "--speaker_id", "0", "--log", "1"],
         "READY tts",
         args.load_timeout_s,
     )
-    print("Both resident.\n")
+    print("  all three models are co-resident\n")
     asr, tts = daemons["asr"], daemons["tts"]
 
-    seq_asr: List[float] = []
-    seq_tts: List[float] = []
-    con_asr: List[float] = []
-    con_tts: List[float] = []
-    failures: List[str] = []
-
-    # Same wording in both phases -- only the output path (which is not
-    # synthesised) differs -- so a text-length confound never enters the
-    # baseline-vs-overlapped comparison the verdict is based on.
-    def tts_text(index: int) -> str:
-        return f"probe round {index}"
-
-    print(f"Baseline: {args.rounds} alternating rounds")
+    # ---------------------------------------------------------------- phase 2
+    print(f"=== 2. Baseline, {args.rounds} rounds each, nothing overlapping")
     for index in range(args.rounds):
-        elapsed, line = await infer(
-            asr,
-            f"INFER {args.wav}",
-            "baseline asr",
-            args.infer_timeout_s,
+        record(
+            "asr alone",
+            *await infer(asr, asr_cmd, "baseline asr", args.infer_timeout_s),
+            fatal_err=False,
         )
-        seq_asr.append(elapsed)
-        if line.startswith("ERR") and line != "ERR no speech.":
-            failures.append(f"sequential asr round {index}: {line}")
-        elapsed, line = await infer(
-            tts,
-            f"INFER {tts_text(index)} /tmp/probe_seq_{index}.wav",
-            "baseline tts",
-            args.infer_timeout_s,
+        record(
+            "tts alone",
+            *await infer(
+                tts, tts_cmd(index), "baseline tts", args.infer_timeout_s
+            ),
         )
-        seq_tts.append(elapsed)
-        if line.startswith("ERR"):
-            failures.append(f"sequential tts round {index}: {line}")
+    if not args.skip_llm:
+        for index in range(args.llm_rounds):
+            record(
+                "llm alone",
+                *await llm_infer(
+                    llm_url,
+                    args.model_type,
+                    f"Say hello, attempt {index}.",
+                    "baseline llm",
+                ),
+            )
+    print("  done\n")
 
-    print(f"\nOverlapped: {args.rounds} simultaneous rounds")
+    # ---------------------------------------------------------------- phase 3
+    async def overlap(phase: str, *coros) -> None:
+        """Run several inferences together and file each under this phase.
+
+        Rows are named "<model> in <phase>" rather than "<model> with
+        <partner>", which would give a model its own name as its partner.
+        """
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        for name, res in results:
+            if isinstance(res, BaseException):
+                failures.append(f"{phase} {name}: {type(res).__name__}: {res}")
+            else:
+                record(f"{name} in {phase}", *res, fatal_err=(name != "asr"))
+
+    async def tagged(name: str, coro):
+        try:
+            return name, await coro
+        except Exception as err:  # noqa: BLE001 - recorded, not raised
+            return name, err
+
+    print("=== 3. Pairwise overlap")
+    if not args.skip_llm:
+        print("  llm + tts   (happens on every turn of a real conversation)")
+        for index in range(args.llm_rounds):
+            await overlap(
+                "llm+tts",
+                tagged(
+                    "llm",
+                    llm_infer(
+                        llm_url,
+                        args.model_type,
+                        f"Count to five, attempt {index}.",
+                        "overlap llm",
+                    ),
+                ),
+                tagged(
+                    "tts",
+                    infer(
+                        tts,
+                        tts_cmd(100 + index),
+                        "overlap tts",
+                        args.infer_timeout_s,
+                    ),
+                ),
+            )
+
+    print("  asr + tts   (barge-in while the agent is speaking)")
     for index in range(args.rounds):
-        asr_task = asyncio.create_task(
-            infer(
-                asr,
-                f"INFER {args.wav}",
-                "overlapped asr",
-                args.infer_timeout_s,
+        await overlap(
+            "asr+tts",
+            tagged(
+                "asr", infer(asr, asr_cmd, "overlap asr", args.infer_timeout_s)
+            ),
+            tagged(
+                "tts",
+                infer(
+                    tts,
+                    tts_cmd(200 + index),
+                    "overlap tts",
+                    args.infer_timeout_s,
+                ),
+            ),
+        )
+
+    if not args.skip_llm:
+        print("  asr + llm   (barge-in while the agent is thinking)")
+        for index in range(args.llm_rounds):
+            await overlap(
+                "asr+llm",
+                tagged(
+                    "llm",
+                    llm_infer(
+                        llm_url,
+                        args.model_type,
+                        f"Name three colours, attempt {index}.",
+                        "overlap llm",
+                    ),
+                ),
+                tagged(
+                    "asr",
+                    infer(asr, asr_cmd, "overlap asr", args.infer_timeout_s),
+                ),
             )
-        )
-        tts_task = asyncio.create_task(
-            infer(
-                tts,
-                f"INFER {tts_text(index)} /tmp/probe_con_{index}.wav",
-                "overlapped tts",
-                args.infer_timeout_s,
+
+    # ---------------------------------------------------------------- phase 4
+    if not args.skip_llm:
+        print("\n=== 4. All three at once")
+        for index in range(args.llm_rounds):
+            await overlap(
+                "all three",
+                tagged(
+                    "llm",
+                    llm_infer(
+                        llm_url,
+                        args.model_type,
+                        f"Describe the sky, attempt {index}.",
+                        "three-way llm",
+                    ),
+                ),
+                tagged(
+                    "asr",
+                    infer(asr, asr_cmd, "three-way asr", args.infer_timeout_s),
+                ),
+                tagged(
+                    "tts",
+                    infer(
+                        tts,
+                        tts_cmd(300 + index),
+                        "three-way tts",
+                        args.infer_timeout_s,
+                    ),
+                ),
             )
-        )
-        # return_exceptions=True: a daemon dying mid-round must not abort
-        # the gather while leaving the *other* task's result (and therefore
-        # its process) unaccounted for -- both outcomes are inspected below,
-        # and either one can be an exception without losing the other.
-        results: List[Union[InferResult, BaseException]] = list(
-            await asyncio.gather(asr_task, tts_task, return_exceptions=True)
-        )
-        asr_result, tts_result = results
-        stop_early = False
 
-        if isinstance(asr_result, BaseException):
-            failures.append(f"concurrent asr round {index}: {asr_result}")
-            stop_early = True
-        else:
-            asr_ms, asr_line = asr_result
-            con_asr.append(asr_ms)
-            if asr_line.startswith("ERR") and asr_line != "ERR no speech.":
-                failures.append(f"concurrent asr round {index}: {asr_line}")
+    # ---------------------------------------------------------------- phase 5
+    print("\n=== 5. Results")
+    for key in sorted(timing):
+        report(key, timing[key])
 
-        if isinstance(tts_result, BaseException):
-            failures.append(f"concurrent tts round {index}: {tts_result}")
-            stop_early = True
-        else:
-            tts_ms, tts_line = tts_result
-            con_tts.append(tts_ms)
-            if tts_line.startswith("ERR"):
-                failures.append(f"concurrent tts round {index}: {tts_line}")
+    def ratio(under: str, alone: str) -> Optional[float]:
+        a, b = timing.get(under), timing.get(alone)
+        if not a or not b:
+            return None
+        return statistics.median(a) / statistics.median(b)
 
-        if stop_early:
-            print(f"  round {index}: a daemon exited mid-run, stopping")
-            break
+    print("\n  slowdown versus running alone")
+    for under, alone, what in (
+        ("tts in llm+tts", "tts alone", "tts, while the llm generates"),
+        ("llm in llm+tts", "llm alone", "llm, while tts synthesises"),
+        ("asr in asr+tts", "asr alone", "asr, while tts synthesises"),
+        ("tts in asr+tts", "tts alone", "tts, while asr transcribes"),
+        ("asr in asr+llm", "asr alone", "asr, while the llm generates"),
+        ("llm in asr+llm", "llm alone", "llm, while asr transcribes"),
+        ("asr in all three", "asr alone", "asr, with both others running"),
+        ("tts in all three", "tts alone", "tts, with both others running"),
+        ("llm in all three", "llm alone", "llm, with both others running"),
+    ):
+        value = ratio(under, alone)
+        if value is not None:
+            print(f"    {what:38} {value:.2f}x")
 
-    print("\nResults")
-    report("asr, alternating", seq_asr)
-    report("asr, overlapped", con_asr)
-    report("tts, alternating", seq_tts)
-    report("tts, overlapped", con_tts)
-
-    asr_ratio: Optional[float] = None
-    tts_ratio: Optional[float] = None
-    if seq_asr and con_asr:
-        asr_ratio = statistics.mean(con_asr) / statistics.mean(seq_asr)
-        print(f"\n  asr slowdown when overlapped: {asr_ratio:.2f}x")
-    if seq_tts and con_tts:
-        tts_ratio = statistics.mean(con_tts) / statistics.mean(seq_tts)
-        print(f"  tts slowdown when overlapped: {tts_ratio:.2f}x")
-
-    print("\nVerdict")
+    print("\n=== Verdict")
     if failures:
-        for failure in failures:
+        for failure in failures[:20]:
             print(f"  FAIL {failure}")
+        if len(failures) > 20:
+            print(f"  ... and {len(failures) - 20} more")
         print(
-            "  Concurrent inference FAILS on this board. Serialise VP "
-            "access with a module-level asyncio.Lock shared by both "
-            "extensions, and record the added barge-in latency."
+            "\n  Overlapping inference is NOT safe on this board as configured."
+            "\n  The all-Ambarella graph would have to serialise the models."
         )
         return 1
-
-    if asr_ratio is None or tts_ratio is None:
-        print("  Not enough samples were collected to reach a verdict.")
-        return 1
-
-    # 2x is the threshold this probe treats as "cheap": below it, overlapped
-    # inference is judged close enough to the alternating baseline that a
-    # barge-in would not read as a stall. It is a judgement call, not a
-    # measured cliff -- record the actual ratios in the spec regardless, so
-    # a reviewer can re-draw the line themselves.
-    if max(asr_ratio, tts_ratio) > 2.0:
-        print(
-            "  Concurrent inference works but costs more than 2x versus "
-            "alternating. Consider serialising, and measure the barge-in "
-            "latency either way."
-        )
-        return 0
 
     print(
-        "  Concurrent inference is safe and cheap on this board. No "
-        "cross-extension lock is needed; spec section 9 is resolved."
+        "  Every model stayed up and every overlap completed."
+        "\n  Read the slowdown figures above: they are the cost of the"
+        "\n  overlaps, not a reason to avoid them."
     )
     return 0
 
