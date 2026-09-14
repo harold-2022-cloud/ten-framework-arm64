@@ -183,6 +183,194 @@
                         }
                     ]
                 }
+            },
+            {
+                "name": "voice_assistant_openai_llm",
+                "auto_start": false,
+                "graph": {
+                    "nodes": [
+                        {
+                            "type": "extension",
+                            "name": "agora_rtc",
+                            "addon": "agora_rtc",
+                            "extension_group": "default",
+                            "property": {
+                                "app_id": "${env:AGORA_APP_ID}",
+                                "app_certificate": "${env:AGORA_APP_CERTIFICATE|}",
+                                "channel": "ten_agent_test",
+                                "stream_id": 1234,
+                                "remote_stream_id": 123,
+                                "subscribe_audio": true,
+                                "publish_audio": true,
+                                "publish_data": true,
+                                "enable_agora_asr": false
+                            }
+                        },
+                        {
+                            "type": "extension",
+                            "name": "streamid_adapter",
+                            "addon": "streamid_adapter",
+                            "extension_group": "default"
+                        },
+                        {
+                            "type": "extension",
+                            "name": "vad",
+                            "addon": "ten_vad_python",
+                            "extension_group": "default",
+                            "property": {}
+                        },
+                        {
+                            "type": "extension",
+                            "name": "stt",
+                            "addon": "ambarella_asr_python",
+                            "extension_group": "default",
+                            "property": {
+                                "bin_path": "/home/lychee/asr_tts_demo/app_demo/asr_d",
+                                "model_dir": "/home/lychee/asr_tts_demo/n1-655_whisper_tiny",
+                                "params": {
+                                    "language": "chinese",
+                                    "beam_size": 5,
+                                    "no_speech_thres": 0.6,
+                                    "log": 1
+                                }
+                            }
+                        },
+                        {
+                            "type": "extension",
+                            "name": "llm",
+                            "addon": "openai_llm2_python",
+                            "extension_group": "chatgpt",
+                            "property": {
+                                "base_url": "https://api.openai.com/v1",
+                                "api_key": "${env:OPENAI_API_KEY}",
+                                "frequency_penalty": 0.9,
+                                "model": "${env:OPENAI_MODEL}",
+                                "max_tokens": 512,
+                                "prompt": "",
+                                "proxy_url": "${env:OPENAI_PROXY_URL|}",
+                                "greeting": "TEN Agent connected. How can I help you today?",
+                                "max_memory_length": 10
+                            }
+                        },
+                        {
+                            "type": "extension",
+                            "name": "tts",
+                            "addon": "ambarella_tts_python",
+                            "extension_group": "default",
+                            "property": {
+                                "bin_path": "/home/lychee/asr_tts_demo/app_demo/tts_d",
+                                "model_dir": "/home/lychee/asr_tts_demo/n1-655_openvoice",
+                                "output_sample_rate": 16000,
+                                "params": {
+                                    "speaker_id": 0,
+                                    "rand_seed": -1,
+                                    "log": 1
+                                }
+                            }
+                        },
+                        {
+                            "type": "extension",
+                            "name": "main_control",
+                            "addon": "main_python",
+                            "extension_group": "default",
+                            "property": {
+                                "greeting": "TEN Agent connected. How can I help you today?"
+                            }
+                        },
+                        {
+                            "type": "extension",
+                            "name": "message_collector",
+                            "addon": "message_collector2",
+                            "extension_group": "default"
+                        }
+                    ],
+                    "connections": [
+                        {
+                            "extension": "main_control",
+                            "cmd": [
+                                {
+                                    "names": [
+                                        "on_user_joined",
+                                        "on_user_left"
+                                    ],
+                                    "source": [
+                                        {
+                                            "extension": "agora_rtc"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "names": [
+                                        "start_of_sentence",
+                                        "end_of_sentence"
+                                    ],
+                                    "source": [
+                                        {
+                                            "extension": "vad"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "data": [
+                                {
+                                    "name": "asr_result",
+                                    "source": [
+                                        {
+                                            "extension": "stt"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "extension": "agora_rtc",
+                            "audio_frame": [
+                                {
+                                    "name": "pcm_frame",
+                                    "dest": [
+                                        {
+                                            "extension": "streamid_adapter"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "name": "pcm_frame",
+                                    "source": [
+                                        {
+                                            "extension": "tts"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "data": [
+                                {
+                                    "name": "data",
+                                    "source": [
+                                        {
+                                            "extension": "message_collector"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "extension": "streamid_adapter",
+                            "audio_frame": [
+                                {
+                                    "name": "pcm_frame",
+                                    "dest": [
+                                        {
+                                            "extension": "stt"
+                                        },
+                                        {
+                                            "extension": "vad"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
             }
         ],
         "log": {

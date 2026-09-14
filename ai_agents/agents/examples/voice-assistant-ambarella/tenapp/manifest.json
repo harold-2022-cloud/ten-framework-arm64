@@ -31,6 +31,9 @@
       "path": "../../../ten_packages/extension/ambarella_llm2_python"
     },
     {
+      "path": "../../../ten_packages/extension/openai_llm2_python"
+    },
+    {
       "path": "../../../ten_packages/extension/ambarella_tts_python"
     },
     {
