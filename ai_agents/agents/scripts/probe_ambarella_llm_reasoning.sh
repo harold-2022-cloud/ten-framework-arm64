@@ -44,49 +44,92 @@ echo "  reasoning problem entirely."
 
 sec "2. Reply framing, one prompt at a time"
 
+# The cost of buffering until </think> is a wall-clock number, not an opinion,
+# so the request is made from Python and every chunk is timestamped as it
+# arrives. curl can report time-to-first-byte but not time-to-a-token.
 ask() {
   local tag="$1" prompt="$2"
-  local out="/tmp/ambarella_reason_${tag}.bin"
   printf '\n\033[1m--- %s\033[0m\n' "$tag"
   printf '  prompt: %s\n' "$prompt"
   sleep "$SETTLE"
-  curl -sS -X POST --url "$URL/" --max-time "$TIMEOUT" --output "$out" \
-    -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
-    -H "Stream-Off: 0" -H "Reset-En: 1" \
-    -H "Content-Type: text/plain; charset=utf-8" \
-    --data "$prompt"
-  local rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "  curl exit $rc -- no reply"
-    return
-  fi
-  python3 - "$out" <<'PYEOF'
-import sys, pathlib
-raw = pathlib.Path(sys.argv[1]).read_bytes().decode("utf-8", errors="replace")
+  AMB_URL="$URL/" AMB_SESSION="$SESSION_ID" AMB_MODEL="$MODEL_TYPE" \
+  AMB_TIMEOUT="$TIMEOUT" AMB_PROMPT="$prompt" AMB_OUT="/tmp/ambarella_reason_${tag}.bin" \
+  python3 - <<'PYEOF'
+import os, time, urllib.request, pathlib
 
-# Reassemble the SSE stream. The board sends one character per event and
-# escapes whitespace, so the literal text never appears contiguously in the
-# file -- grepping the raw bytes for a tag finds nothing even when it is there.
-events = [ln[len("data:"):].lstrip(" ")
-          for ln in raw.split("\n") if ln.startswith("data:")]
-text = "".join(events).replace("<SP>", " ").replace("<NL>", "\n")
-done = text.endswith("<DONE>")
-text = text[:-len("<DONE>")] if done else text
+url, out = os.environ["AMB_URL"], pathlib.Path(os.environ["AMB_OUT"])
+req = urllib.request.Request(
+    url, data=os.environ["AMB_PROMPT"].encode("utf-8"), method="POST",
+    headers={
+        "Session-Id": os.environ["AMB_SESSION"],
+        "Model-Type": os.environ["AMB_MODEL"],
+        "Stream-Off": "0",
+        "Reset-En": "1",
+        "Content-Type": "text/plain; charset=utf-8",
+    })
 
-print("    events:        %d" % len(events))
-print("    complete:      %s" % ("yes (<DONE>)" if done else "NO -- truncated"))
-print("    chars:         %d" % len(text))
+t0 = time.monotonic()
+t_first = t_think = t_done = None
+buf = b""
+raw_text = ""           # events joined, still escaped
+pending = ""            # partial SSE line carried across chunks
+
+# Decoding runs on the joined text, never per event: an escape can be split
+# across events exactly as </think> is, and a per-event replace would miss it.
+def decode(t):
+    return t.replace("<SP>", " ").replace("<NL>", "\n")
+
+try:
+    with urllib.request.urlopen(req, timeout=float(os.environ["AMB_TIMEOUT"])) as r:
+        while True:
+            chunk = r.read(64)
+            if not chunk:
+                break
+            now = time.monotonic()
+            if t_first is None:
+                t_first = now
+            buf += chunk
+            pending += chunk.decode("utf-8", errors="replace")
+            *lines, pending = pending.split("\n")
+            for ln in lines:
+                if ln.startswith("data:"):
+                    raw_text += ln[5:].lstrip(" ")
+            if t_think is None and "</think>" in raw_text:
+                t_think = now
+            if t_done is None and "<DONE>" in raw_text:
+                t_done = now
+                break
+except Exception as e:                      # noqa: BLE001 - report, do not raise
+    print("    request failed: %s: %s" % (type(e).__name__, e))
+    raise SystemExit(0)
+
+out.write_bytes(buf)
+t_end = time.monotonic()
+if pending.startswith("data:"):
+    raw_text += pending[5:].lstrip(" ")
+
+done = "<DONE>" in raw_text
+text = decode(raw_text.replace("<DONE>", ""))
+el = lambda t: "n/a" if t is None else "%.2fs" % (t - t0)
+
+print("    complete:        %s" % ("yes (<DONE>)" if done else "NO -- truncated"))
+print("    chars:           %d" % len(text))
+print("    first byte at:   %s" % el(t_first))
+print("    total:           %s" % el(t_end))
 if "</think>" in text:
     head, _, tail = text.partition("</think>")
     head, tail = head.strip(), tail.strip()
-    print("    </think>:      present")
-    print("    reasoning:     %d chars" % len(head))
-    print("    answer:        %d chars" % len(tail))
+    print("    </think>:        present, at %s" % el(t_think))
+    print("    reasoning:       %d chars" % len(head))
+    print("    answer:          %d chars" % len(tail))
     print("    answer == reasoning: %s" % (head == tail))
-    print("    answer text:   %s" % (tail[:160] if tail else "<EMPTY>"))
+    print("    >> BUFFERING COST: %s before the answer could start" % el(t_think))
+    print("    answer text:     %s" % (tail[:160] if tail else "<EMPTY>"))
 else:
-    print("    </think>:      ABSENT")
-    print("    whole text:    %s" % text.strip()[:160])
+    print("    </think>:        ABSENT")
+    print("    >> BUFFERING COST: %s -- nothing could be released until the end"
+          % el(t_end))
+    print("    whole text:      %s" % text.strip()[:160])
 PYEOF
 }
 
@@ -108,5 +151,9 @@ echo "             true means the model repeats itself and the reasoning half"
 echo "             is pure waste -- dropping it costs nothing."
 echo "  E and F:   if either suppresses </think>, the problem is solved by"
 echo "             configuration rather than by parsing."
+echo "  BUFFERING COST:"
+echo "             the wall-clock delay option A would add before the first"
+echo "             word reaches TTS. Compare it against 'first byte at' --"
+echo "             the delay option B has today."
 echo
 printf '  full log: %s\n' "$LOG"
