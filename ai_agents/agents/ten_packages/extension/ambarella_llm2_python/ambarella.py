@@ -22,14 +22,27 @@ from ten_ai_base.struct import (
     LLMResponse,
     LLMResponseMessageDelta,
     LLMResponseMessageDone,
+    LLMResponseReasoningDelta,
+    LLMResponseReasoningDone,
 )
 from ten_runtime import AsyncTenEnv
 
 SSE_PREFIX = "data:"
-SSE_DONE = "[DONE]"
+# The board terminates with <DONE>; [DONE] is the convention elsewhere and is
+# accepted too, since nothing documents which one to expect.
+SSE_DONE_TOKENS = ("<DONE>", "[DONE]")
 
 # The board emits only the closing tag; generation starts inside the block.
 CLOSE_THINK_TAG = "</think>"
+
+# Whitespace is escaped, because an SSE value cannot carry a leading or
+# trailing space safely. Measured on an N1-655 on 2026-09-14: 97 <SP> and 7
+# <NL> events in a single session.
+ESCAPES = {"<SP>": " ", "<NL>": "\n"}
+
+# Every token the board can emit starts with "<", so a partial one can only
+# ever be a suffix of the text seen so far that begins at the last "<".
+_TOKENS = tuple(ESCAPES) + (CLOSE_THINK_TAG,) + SSE_DONE_TOKENS
 
 # Keys a streamed Ambarella payload might carry the assistant text under.
 # The board's HTTP interface is documented only by one curl example and its
@@ -71,6 +84,88 @@ def _strip_reasoning(text: str) -> str:
     """
     _, delimiter, answer = text.partition(CLOSE_THINK_TAG)
     return (answer if delimiter else text).strip()
+
+
+class _ReasoningSplitter:
+    """
+    Turn the board's escaped, character-at-a-time stream into (kind, text)
+    pairs, where kind is "reasoning" before the closing think tag and "answer"
+    after it.
+
+    Every token the board emits -- <SP>, <NL>, </think> -- can be split across
+    SSE events, since each event carries one character. Anything that might
+    still become a token is held back until it either completes or is ruled
+    out, which costs at most len("</think>") - 1 characters of lag.
+
+    Reasoning is withheld rather than emitted as it arrives, because until the
+    tag appears there is no way to know the text is reasoning at all. A stream
+    that ends without one is emitted as answer in full: classifying it as
+    reasoning would drop the reply, since main_control only speaks answers.
+    Reasoning is for display, so releasing it in one piece costs nothing.
+    """
+
+    def __init__(self) -> None:
+        self._pending = ""  # may still grow into a token
+        self._held = ""  # decoded text whose kind is not yet decided
+        self._in_reasoning = True  # generation starts inside the block
+
+    def feed(self, chunk: str) -> list[tuple[str, str]]:
+        self._pending += chunk
+        out: list[tuple[str, str]] = []
+        while self._pending:
+            start = self._pending.find("<")
+            if start < 0:
+                out += self._take(self._pending)
+                self._pending = ""
+                break
+            if start > 0:
+                out += self._take(self._pending[:start])
+                self._pending = self._pending[start:]
+
+            token = next(
+                (t for t in _TOKENS if self._pending.startswith(t)), None
+            )
+            if token is None:
+                if any(t.startswith(self._pending) for t in _TOKENS):
+                    break  # still might become a token
+                out += self._take("<")  # ruled out: a literal "<"
+                self._pending = self._pending[1:]
+                continue
+
+            self._pending = self._pending[len(token) :]
+            if token == CLOSE_THINK_TAG:
+                self._in_reasoning = False
+                if self._held:
+                    out.append(("reasoning", self._held))
+                    self._held = ""
+            elif token in ESCAPES:
+                out += self._take(ESCAPES[token])
+            # a terminator token yields nothing
+
+        return [(k, t) for k, t in out if t]
+
+    def flush(self) -> list[tuple[str, str]]:
+        """
+        Close the stream. Text still held when no tag ever arrived is the
+        answer, not reasoning.
+        """
+        tail, self._held, self._pending = (
+            self._held + self._pending,
+            "",
+            "",
+        )
+        return [(self._kind(), tail)] if tail else []
+
+    def _take(self, text: str) -> list[tuple[str, str]]:
+        if self._in_reasoning:
+            self._held += text  # kind still undecided
+            return []
+        return [("answer", text)]
+
+    def _kind(self) -> str:
+        # Reaching the end still "in reasoning" means no tag was ever sent,
+        # so the text was the answer all along.
+        return "answer"
 
 
 def _resolve_session_id(configured: str) -> str:
@@ -264,7 +359,7 @@ class AmbarellaChatClient:
                 if not line.startswith(SSE_PREFIX):
                     continue
                 payload = _sse_payload(line)
-                if payload.strip() == SSE_DONE:
+                if payload.strip() in SSE_DONE_TOKENS:
                     return
                 text = self._extract_text(payload)
                 if text:
@@ -282,7 +377,7 @@ class AmbarellaChatClient:
         if not tail.startswith(SSE_PREFIX):
             return
         payload = _sse_payload(tail)
-        if payload.strip() and payload.strip() != SSE_DONE:
+        if payload.strip() and payload.strip() not in SSE_DONE_TOKENS:
             text = self._extract_text(payload)
             if text:
                 yield text
@@ -371,13 +466,45 @@ class AmbarellaChatClient:
                                 created=created,
                             )
                     else:
-                        async for delta in self._iter_deltas(resp):
-                            full_content += delta
+                        # Reasoning goes out under the reasoning types, which
+                        # main_control renders but never speaks: _send_to_tts
+                        # is gated on the event being a message. Without this
+                        # the board's monologue is read aloud before the
+                        # answer -- 235 characters of it, measured on an
+                        # N1-655 on 2026-09-14.
+                        splitter = _ReasoningSplitter()
+                        reasoning = ""
+
+                        async def _pairs():
+                            async for chunk in self._iter_deltas(resp):
+                                for pair in splitter.feed(chunk):
+                                    yield pair
+                            for pair in splitter.flush():
+                                yield pair
+
+                        async for kind, text in _pairs():
+                            if kind == "reasoning":
+                                reasoning += text
+                                yield LLMResponseReasoningDelta(
+                                    response_id=response_id,
+                                    role="assistant",
+                                    content=reasoning,
+                                    delta=text,
+                                    created=created,
+                                )
+                                yield LLMResponseReasoningDone(
+                                    response_id=response_id,
+                                    role="assistant",
+                                    content=reasoning,
+                                    created=created,
+                                )
+                                continue
+                            full_content += text
                             yield LLMResponseMessageDelta(
                                 response_id=response_id,
                                 role="assistant",
                                 content=full_content,
-                                delta=delta,
+                                delta=text,
                                 created=created,
                             )
             except (asyncio.CancelledError, GeneratorExit):
