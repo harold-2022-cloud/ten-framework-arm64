@@ -20,7 +20,13 @@ REPO="${REPO:-$HOME/ten-framework}"
 URL="${AMBARELLA_LLM_BASE_URL:-http://127.0.0.1:8080}"
 MODEL_TYPE="${MODEL_TYPE:-9}"
 TIMEOUT="${TIMEOUT:-90}"
-SETTLE="${SETTLE:-8}"   # seconds to let the single-user slot drain between probes
+SETTLE="${SETTLE:-8}"   # seconds to let the board finish the previous turn
+# Every probe shares one Session-Id on purpose. The board counts a distinct id
+# as a distinct user, allows exactly one (--max_user 1), and holds a used
+# session for 180s before freeing it -- so a per-probe id refuses every probe
+# after the first with "current user num (2) > max_user_num (1)". Reset-En is
+# 1 on each probe, so sharing the id does not let history leak between them.
+SESSION_ID="${SESSION_ID:-1234}"
 
 sec() { printf '\n\033[1m===== %s\033[0m\n' "$*"; }
 kv()  { printf '  %-34s %s\n' "$1" "$2"; }
@@ -35,6 +41,7 @@ kv "date"        "$(date -Is)"
 kv "llm url"     "$URL"
 kv "model_type"  "$MODEL_TYPE"
 kv "settle between probes" "${SETTLE}s"
+kv "session id (shared)"   "$SESSION_ID"
 kv "log"         "$LOG"
 
 # --------------------------------------------------------------- 1. ports
@@ -148,19 +155,19 @@ echo "Each probe changes exactly one thing from the one above it."
 # /tmp/log.txt and the connection closes with no HTTP response at all, which
 # curl reports as (52) Empty reply from server.
 probe B1 "guide example verbatim (ASCII body, non-streaming)" \
-  -H "Session-Id: 1234" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   --data "Hello"
 
 # B2 -- same, but a multibyte body.
 probe B2 "+ multibyte (UTF-8) body" \
-  -H "Session-Id: 1235" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   --data "你好"
 
 # B3 -- same, plus the Content-Type the extension sets (ambarella.py:123).
 probe B3 "+ Content-Type: text/plain; charset=utf-8 (what the extension sends)" \
-  -H "Session-Id: 1236" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   -H "Content-Type: text/plain; charset=utf-8" \
   --data "你好"
@@ -169,17 +176,17 @@ probe B3 "+ Content-Type: text/plain; charset=utf-8 (what the extension sends)" 
 # (ambarella.py:66, streaming=True). This is the one that reveals the framing
 # that `response_format: auto` has to sniff.
 probe B4 "streaming (Stream-Off: 0) -- the extension's real request" \
-  -H "Session-Id: 1237" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 0" -H "Reset-En: 1" \
   -H "Content-Type: text/plain; charset=utf-8" \
   --data "你好，一句話介紹自己"
 
-# B5 -- B1 again with a fresh session id. This is the control. If B1 passed and
-# B5 passes too, the board is not stuck and B2..B4 failed on their own merits.
-# If B5 also fails, everything after B1 failed because the single user slot was
-# still busy, and the ladder proves nothing about the body or the headers.
+# B5 -- B1 again. This is the control. If B1 passed and B5 passes too, the
+# board is not stuck and B2..B4 failed on their own merits. If B5 also fails,
+# everything after B1 failed because the board was still busy or the session
+# slot was held, and the ladder proves nothing about the body or the headers.
 probe B5 "control: B1 repeated verbatim (ASCII body, non-streaming)" \
-  -H "Session-Id: 1238" -H "Model-Type: $MODEL_TYPE" \
+  -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
   -H "Stream-Off: 1" -H "Reset-En: 1" \
   --data "Hello"
 
@@ -198,8 +205,11 @@ done
 echo
 echo "  READ B5 FIRST -- it repeats B1 exactly."
 echo "    B5 ok      -> the board is not stuck; B2..B4 failed on their own merits."
-echo "    B5 FAILED  -> the single user slot was still busy, and the ladder below"
-echo "                  proves nothing. Re-run with SETTLE=30 $0"
+echo "    B5 FAILED  -> the board was still busy or the session was held, and the"
+echo "                  ladder below proves nothing. If the log says"
+echo "                  \"current user num (2) > max_user_num (1)\", a session is"
+echo "                  still open; it is freed 180s after its last use."
+echo "                  Re-run with SETTLE=30 $0"
 echo
 echo "  Where the ladder first fails names the cause:"
 echo "    B1 -> the service itself, unrelated to TEN. Check test_llm_client above,"
