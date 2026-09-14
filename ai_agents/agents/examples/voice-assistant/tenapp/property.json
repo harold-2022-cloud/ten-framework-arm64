@@ -1817,7 +1817,8 @@
                     "zh"
                   ],
                   "enable_language_identification": true,
-                  "sample_rate": 16000
+                  "sample_rate": 16000,
+                  "holding_mode": "sentence_terminator"
                 }
               }
             },
@@ -2023,7 +2024,8 @@
                     "zh"
                   ],
                   "enable_language_identification": true,
-                  "sample_rate": 16000
+                  "sample_rate": 16000,
+                  "holding_mode": "sentence_terminator"
                 }
               }
             },
