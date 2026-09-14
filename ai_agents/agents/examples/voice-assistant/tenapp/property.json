@@ -2036,7 +2036,7 @@
                 "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
                 "model_type": 9,
                 "prompt": "You are a helpful assistant running on an Ambarella N1-655 board. Keep answers short and spoken.",
-                "response_format": "auto"
+                "response_format": "sse"
               }
             },
             {

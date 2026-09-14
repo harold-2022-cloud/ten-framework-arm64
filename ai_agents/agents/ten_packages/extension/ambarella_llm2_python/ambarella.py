@@ -28,6 +28,9 @@ from ten_runtime import AsyncTenEnv
 SSE_PREFIX = "data:"
 SSE_DONE = "[DONE]"
 
+# The board emits only the closing tag; generation starts inside the block.
+CLOSE_THINK_TAG = "</think>"
+
 # Keys a streamed Ambarella payload might carry the assistant text under.
 # The board's HTTP interface is documented only by one curl example and its
 # headers -- the response framing is not specified anywhere, so this list is
@@ -46,6 +49,28 @@ def _sse_payload(line: str) -> str:
     if payload.startswith(" "):
         payload = payload[1:]
     return payload
+
+
+def _strip_reasoning(text: str) -> str:
+    """
+    Drop the model's chain-of-thought.
+
+    deepseek_7B is an R1 distill and reasons before it answers. Measured on an
+    N1-655 on 2026-09-14, a non-streaming reply is
+
+        <reasoning>\n</think>\n\n<answer>
+
+    -- the closing tag with no opening one, because generation starts already
+    inside the block. Streaming replies carry no reasoning at all, so this only
+    ever fires when the caller turned streaming off; without it the board's
+    internal monologue is what reaches TTS.
+
+    A reply with no closing tag is returned whole: absent the delimiter there
+    is nothing to say the text is reasoning, and swallowing it would lose the
+    answer outright.
+    """
+    _, delimiter, answer = text.partition(CLOSE_THINK_TAG)
+    return (answer if delimiter else text).strip()
 
 
 def _resolve_session_id(configured: str) -> str:
@@ -336,7 +361,7 @@ class AmbarellaChatClient:
                     self._prompt_sent = True
 
                     if not streaming:
-                        full_content = (await resp.text()).strip()
+                        full_content = _strip_reasoning(await resp.text())
                         if full_content:
                             yield LLMResponseMessageDelta(
                                 response_id=response_id,

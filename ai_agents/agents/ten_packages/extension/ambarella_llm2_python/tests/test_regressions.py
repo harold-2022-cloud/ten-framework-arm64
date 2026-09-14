@@ -19,6 +19,7 @@ from ambarella_llm2_python.ambarella import (
     AmbarellaLLM2Config,
     _resolve_session_id,
     _sse_payload,
+    _strip_reasoning,
 )
 from ambarella_llm2_python.extension import AmbarellaLLM2Extension
 
@@ -183,3 +184,34 @@ def test_client_sends_a_decimal_session_id_header():
     headers = client._headers(streaming=True, reset=False)
     assert headers["Session-Id"].isdigit()
     assert int(headers["Session-Id"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# deepseek_7B is an R1 distill and reasons before answering. A non-streaming
+# reply measured on an N1-655 on 2026-09-14 is "<reasoning>\n</think>\n\n
+# <answer>" -- the closing tag with no opening one, because generation starts
+# already inside the block. Without stripping it, the board's internal
+# monologue is what reaches TTS.
+# ---------------------------------------------------------------------------
+
+
+def test_reasoning_before_the_closing_tag_is_dropped():
+    board = (
+        'Alright, the user said "Hello." I should respond warmly.\n'
+        "</think>\n\nHello! How can I assist you today?"
+    )
+    assert _strip_reasoning(board) == "Hello! How can I assist you today?"
+
+
+def test_a_reply_without_the_tag_is_kept_whole():
+    # Absent the delimiter nothing marks the text as reasoning, and dropping
+    # it would lose the answer outright.
+    assert _strip_reasoning("  Hello there.  ") == "Hello there."
+
+
+def test_only_the_text_after_the_delimiter_survives():
+    assert _strip_reasoning("a</think>b") == "b"
+
+
+def test_an_empty_answer_after_the_tag_yields_empty():
+    assert _strip_reasoning("thinking only</think>   ") == ""
