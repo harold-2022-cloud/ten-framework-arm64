@@ -14,7 +14,13 @@
 
 set -uo pipefail
 
-LOG="/tmp/ambarella_reasoning_$(date +%Y%m%d_%H%M%S).log"
+STAMP="$(date +%Y%m%d_%H%M%S)"
+LOG="/tmp/ambarella_reasoning_${STAMP}.log"
+# One line per probe, rendered into a table at the end. The full log is for
+# reading on the board; this file is short enough to paste.
+SUMMARY="/tmp/ambarella_reasoning_summary_${STAMP}.txt"
+TSV="$(mktemp)"
+trap 'rm -f "$TSV"' EXIT
 exec > >(tee "$LOG") 2>&1
 
 URL="${AMBARELLA_LLM_BASE_URL:-http://127.0.0.1:8080}"
@@ -54,6 +60,7 @@ ask() {
   sleep "$SETTLE"
   AMB_URL="$URL/" AMB_SESSION="$SESSION_ID" AMB_MODEL="$MODEL_TYPE" \
   AMB_TIMEOUT="$TIMEOUT" AMB_PROMPT="$prompt" AMB_OUT="/tmp/ambarella_reason_${tag}.bin" \
+  AMB_TAG="$tag" AMB_TSV="$TSV" \
   python3 - <<'PYEOF'
 import os, time, urllib.request, pathlib
 
@@ -67,6 +74,15 @@ req = urllib.request.Request(
         "Reset-En": "1",
         "Content-Type": "text/plain; charset=utf-8",
     })
+
+def row(fields):
+    """Append this probe's one-line summary for the table at the end."""
+    tsv = os.environ.get("AMB_TSV")
+    if tsv:
+        with open(tsv, "a", encoding="utf-8") as fh:
+            fh.write("\t".join([os.environ.get("AMB_TAG", "?")] +
+                                [str(f) for f in fields]) + "\n")
+
 
 t0 = time.monotonic()
 t_first = t_think = t_done = None
@@ -101,6 +117,7 @@ try:
                 break
 except Exception as e:                      # noqa: BLE001 - report, do not raise
     print("    request failed: %s: %s" % (type(e).__name__, e))
+    row(["FAILED"] * 8)
     raise SystemExit(0)
 
 out.write_bytes(buf)
@@ -125,11 +142,15 @@ if "</think>" in text:
     print("    answer == reasoning: %s" % (head == tail))
     print("    >> BUFFERING COST: %s before the answer could start" % el(t_think))
     print("    answer text:     %s" % (tail[:160] if tail else "<EMPTY>"))
+    row(["yes" if done else "TRUNC", "yes", len(text), len(head), len(tail),
+         "yes" if head == tail else "no", el(t_first), el(t_think), el(t_end)])
 else:
     print("    </think>:        ABSENT")
     print("    >> BUFFERING COST: %s -- nothing could be released until the end"
           % el(t_end))
     print("    whole text:      %s" % text.strip()[:160])
+    row(["yes" if done else "TRUNC", "no", len(text), "-", "-", "-",
+         el(t_first), "n/a", el(t_end)])
 PYEOF
 }
 
@@ -141,7 +162,24 @@ ask D "介紹一下你自己，一句話就好"
 ask E "Answer directly with no reasoning and no preamble. Question: what is the capital of France?"
 ask F "/no_think What is the capital of France?"
 
-sec "3. What to read"
+sec "3. Summary"
+{
+  printf 'probe  done   think  chars  reason  answer  dup  1st-byte  think-at  total\n'
+  printf -- '-----  -----  -----  -----  ------  ------  ---  --------  --------  -----\n'
+  if [[ -s "$TSV" ]]; then
+    awk -F'\t' '{printf "%-5s  %-5s  %-5s  %5s  %6s  %6s  %3s  %8s  %8s  %5s\n",
+                  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10}' "$TSV"
+  else
+    printf '(no probe completed)\n'
+  fi
+  printf '\nmodels installed: '
+  for d in ~/demo_resources/llm_demo/*/; do
+    [[ -d "$d" ]] && printf '%s ' "$(basename "$d")"
+  done
+  printf '\nmodel_type in use: %s\n' "$MODEL_TYPE"
+} | tee "$SUMMARY"
+
+sec "4. What to read"
 echo "  complete:  a reply without <DONE> was truncated and proves nothing."
 echo "  </think>:  if every complete reply has it, buffering until it arrives"
 echo "             is bounded and safe. If some replies lack it, buffering has"
@@ -157,3 +195,4 @@ echo "             word reaches TTS. Compare it against 'first byte at' --"
 echo "             the delay option B has today."
 echo
 printf '  full log: %s\n' "$LOG"
+printf '  summary : %s   <-- paste this one\n' "$SUMMARY"
