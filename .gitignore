@@ -148,6 +148,13 @@ ai_agents/*.pem
 # vendor source that are fetched separately, not carried in this repo.
 /agora/
 
+# ...but the built aarch64 packages are carried, so an arm64 board can install
+# them without a toolchain or an SDK download. *.so is ignored repo-wide, so
+# this path needs an explicit exception. Both lines are required: a negation
+# cannot re-include a file whose parent directory is still excluded.
+!/ai_agents/agents/prebuilt/
+!/ai_agents/agents/prebuilt/**
+
 # Ambarella AI Developer Kit (N1-655 / Cooper Pro) documentation. A 24 MB
 # Doxygen export of vendor material marked confidential and proprietary --
 # obtained from Ambarella, not redistributable through this repository.
