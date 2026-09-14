@@ -4,9 +4,15 @@ How to start a voice agent on a TEN device and talk to it from a phone, with no
 web playground involved. Written for someone implementing the mobile client:
 every claim below is anchored to the source that produces the behaviour.
 
-Paths in this document are repo-relative, except those beginning `src/`, which
-are inside the `agora_rtc` extension package (the wrapper source, not tracked in
-this repo — see [`arm64_build.md`](./arm64_build.md) for where it lives).
+Paths in this document are repo-relative, with four shorthands:
+
+- `src/...` is inside the `agora_rtc` extension package (the wrapper source,
+  not tracked in this repo — see [`arm64_build.md`](./arm64_build.md)).
+- `main_python/...` is
+  `ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/extension/main_python/`.
+- `message_collector2/...` is
+  `ai_agents/agents/ten_packages/extension/message_collector2/`.
+- `playground/...` is `ai_agents/playground/`.
 
 ## What connects to what
 
@@ -215,12 +221,142 @@ The phone does not need to match this. The Agora SDK negotiates and resamples.
 
 ### Receiving transcripts
 
-If the graph contains a `message_collector` node wired to `agora_rtc` (the
-`voice_assistant*` graphs do), transcripts are published as RTC data-stream
-messages: the wrapper opens a stream with `createDataStream`
-(`src/rtc_connection.cc:946`) and writes to it with `sendStreamMessage`
-(`:1286`). Implement `onStreamMessage` on the phone to render live captions.
-Requires `publish_data: true` on the `agora_rtc` node — the default is `false`.
+Transcripts arrive as RTC data-stream messages, in a chunked format that has to
+be reassembled. See [Transcripts over the data
+stream](#transcripts-over-the-data-stream).
+
+## Transcripts over the data stream
+
+If the graph has a `message_collector` node wired to `agora_rtc` — the
+`voice_assistant*` graphs do — every ASR partial and every LLM delta is
+published over the RTC data stream. This is how you render live captions.
+
+Requires `publish_data: true` on the `agora_rtc` node; the default is `false`
+(`src/configs/predefined_props.h:74`).
+
+### The pipeline
+
+```
+main_python._send_transcript()                 main_python/extension.py:145-157
+   │   data "message" → the message_collector node
+   ▼
+message_collector2.on_data()                   message_collector2/extension.py:53-60
+   │   JSON → UTF-8 bytes → base64 → split into chunks
+   ▼
+_process_queue()                               message_collector2/extension.py:82-86
+   │   Data.create("data"), set_property_buf("data", ...), one chunk per 40 ms
+   ▼
+agora_rtc.on_data()                            src/rtc_extension.cc:148
+   │   get_property_buf("data")
+   ▼
+sendStreamMessage()                            src/rtc_connection.cc:1286
+   ▼
+your onStreamMessage handler
+```
+
+### Wire format
+
+Each data-stream message is one chunk, formatted at
+`message_collector2/helper.py:53`:
+
+```
+<msg_id>|<part_index>|<total_parts>|<base64 fragment>
+```
+
+| Field | Meaning |
+| --- | --- |
+| `msg_id` | 8 characters, `str(uuid.uuid4())[:8]` (`message_collector2/extension.py:57`) |
+| `part_index` | **1-based**, not 0-based |
+| `total_parts` | how many chunks this message was split into |
+| base64 fragment | **a slice of one base64 string — not independently decodable** |
+
+The whole formatted chunk is capped at 1024 bytes
+(`message_collector2/helper.py:12` and the check at `:56`). The payload slice
+is 924 characters in practice: 1024 minus the prefix, arrived at by the
+decrement loop at `:60`.
+
+### Parsing
+
+```
+1. bytes → ASCII string
+2. split on "|" into 4 fields   (base64's alphabet has no "|", so this is safe)
+3. cache each chunk under its msg_id
+4. once total_parts chunks have arrived:
+       sort by part_index
+       concatenate the base64 fragments
+5. base64-decode the concatenated string → UTF-8 → parse as JSON
+```
+
+**Concatenate before decoding.** 924 is not a multiple of 4, so decoding any
+individual fragment produces garbage. The reference implementation is
+`playground/src/manager/rtc/rtc.ts:292-298`:
+
+```js
+reconstructMessage(chunks) {
+  chunks.sort((a, b) => a.part_index - b.part_index);   // order first
+  return chunks.map((chunk) => chunk.content).join(""); // then join
+}
+```
+
+Decoding then goes through bytes, not through a string
+(`playground/src/manager/rtc/rtc.ts:300-307`): `atob` → `Uint8Array` →
+`TextDecoder("utf-8")`. Treating the `atob` output as text directly mangles any
+non-ASCII content.
+
+### Payload schema
+
+The decoded JSON, from `main_python/extension.py:145-157`:
+
+```json
+{
+  "data_type": "transcribe",
+  "role": "user",
+  "text": "...",
+  "text_ts": 1789310499000,
+  "is_final": false,
+  "stream_id": 149966
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `data_type` | `"transcribe"` — `text` is the text. `"raw"` — `text` is *itself* a JSON string, `{type, data}`, where `type` is `reasoning`, `image_url` or `action` (`main_python/extension.py:159-178`, handled at `rtc.ts:256-277`) |
+| `role` | `"user"` or `"assistant"` — who spoke |
+| `text` | the transcript |
+| `text_ts` | milliseconds since epoch |
+| `is_final` | `false` while the utterance is still being revised |
+| `stream_id` | the speaker's RTC uid |
+
+### Merging partials
+
+**Every ASR partial and every LLM delta is its own message.** One conversation
+turn easily produces dozens. Appending each one gives you `哈`, `哈喽`,
+`哈喽，`, `哈喽，你` scrolling up the screen.
+
+The playground merges them in `playground/src/store/reducers/global.ts:97-141`.
+Grouped by `stream_id`:
+
+```
+find the last final item and the last non-final item for this stream_id
+
+if a final item exists and incoming.time <= that item's time  →  discard
+else if a non-final item exists                               →  replace it in place
+else                                                          →  append a new item
+```
+
+Partials from one speaker overwrite each other until one arrives with
+`is_final: true`, which becomes the anchor for the next group.
+
+### Pitfalls
+
+| Pitfall | Handling |
+| --- | --- |
+| Chunks can arrive out of order | Sort by `part_index`; never rely on arrival order |
+| A message may never complete | Expire the cache (`rtc.ts:223-230`). Chunks are paced 40 ms apart (`message_collector2/extension.py:86`), so the timeout must exceed `total_parts × 40 ms` |
+| `"???"` placeholder for `total_parts` | Substituted before send (`helper.py:71-74`), so it should never reach you — but `rtc.ts:203` still guards for it, and so should you |
+| base64 decoded as a string | Decode to bytes, then UTF-8. Anything else corrupts non-ASCII text |
+
+The full working parser is `playground/src/manager/rtc/rtc.ts:174-307`.
 
 ## Keeping the worker alive
 
