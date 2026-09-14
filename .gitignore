@@ -147,3 +147,8 @@ ai_agents/*.pem
 # Agora SDK tarballs and the agora_rtc wrapper source. Large binaries and
 # vendor source that are fetched separately, not carried in this repo.
 /agora/
+
+# Ambarella AI Developer Kit (N1-655 / Cooper Pro) documentation. A 24 MB
+# Doxygen export of vendor material marked confidential and proprietary --
+# obtained from Ambarella, not redistributable through this repository.
+/ambarella_ai_developer_kit_doc/

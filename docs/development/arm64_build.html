@@ -1,0 +1,2586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEN Framework on arm64 — Technical Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#E8EDED;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --rule-2:#B7C3C5;
+  --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+  --measure:74ch;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,"Noto Sans TC","Microsoft JhengHei",sans-serif;
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+/* ---------- shell ---------- */
+.shell{display:grid; grid-template-columns:17rem minmax(0,1fr); max-width:86rem; margin:0 auto}
+@media(max-width:64rem){.shell{grid-template-columns:1fr}}
+
+nav.toc{
+  position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto;
+  padding:2rem 1rem 3rem 1.5rem; border-right:1px solid var(--rule);
+  font-size:.84rem; line-height:1.5;
+}
+@media(max-width:64rem){nav.toc{position:static; max-height:none; border-right:0; border-bottom:1px solid var(--rule)}}
+nav.toc .brand{font-weight:700; font-size:.95rem; margin-bottom:.15rem; color:var(--ink)}
+nav.toc .brandsub{color:var(--ink-3); font-size:.78rem; margin-bottom:1.4rem}
+nav.toc .part{
+  margin:1.1rem 0 .3rem; font-size:.7rem; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-3); font-weight:600;
+}
+nav.toc a{display:block; color:var(--ink-2); text-decoration:none; padding:.16rem 0 .16rem .55rem;
+  border-left:2px solid transparent}
+nav.toc a:hover{color:var(--accent); border-left-color:var(--accent)}
+nav.toc a .n{color:var(--ink-3); display:inline-block; min-width:1.5rem}
+
+main{padding:2.5rem 3rem 6rem; min-width:0}
+@media(max-width:64rem){main{padding:2rem 1.25rem 4rem}}
+main > *{max-width:var(--measure)}
+main > figure, main > .wide{max-width:none}
+
+/* ---------- type ---------- */
+h1{font-size:2.1rem; line-height:1.2; margin:0 0 .5rem; letter-spacing:-.02em}
+.lede{font-size:1.05rem; color:var(--ink-2); margin:0 0 2rem; max-width:66ch}
+h2{font-size:1.6rem; margin:3.5rem 0 .2rem; padding-top:2rem; border-top:2px solid var(--rule-2);
+   letter-spacing:-.01em}
+h2 .pnum{display:block; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+   color:var(--ink-3); font-weight:600; margin-bottom:.35rem}
+h3{font-size:1.18rem; margin:2.4rem 0 .4rem; letter-spacing:-.005em}
+h4{font-size:1rem; margin:1.6rem 0 .35rem; color:var(--accent)}
+h5{font-size:.9rem; margin:1.2rem 0 .3rem; color:var(--ink-2); font-weight:600}
+p{margin:.75rem 0}
+strong{font-weight:600}
+a{color:var(--accent)}
+
+code{background:var(--sunk); padding:.1em .36em; border-radius:3px; font-size:.87em}
+pre{background:var(--code-bg); color:var(--code-ink); padding:1rem 1.15rem; border-radius:8px;
+  overflow-x:auto; font-size:.82rem; line-height:1.6; margin:1rem 0}
+pre code{background:none; padding:0; color:inherit; font-size:inherit}
+
+table{border-collapse:collapse; margin:1.1rem 0; font-size:.88rem; width:100%;
+  display:block; overflow-x:auto}
+th,td{text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--rule); vertical-align:top}
+th{background:var(--sunk); font-weight:600; white-space:nowrap}
+td code{white-space:nowrap}
+
+ul,ol{margin:.75rem 0; padding-left:1.4rem}
+li{margin:.3rem 0}
+
+/* ---------- callouts ---------- */
+.note,.warn,.bad,.ok{border-left:3px solid; padding:.8rem 1rem; margin:1.2rem 0; border-radius:0 6px 6px 0}
+.note{border-color:var(--accent); background:var(--accent-soft)}
+.warn{border-color:var(--warn);   background:var(--warn-soft)}
+.bad {border-color:var(--danger); background:var(--danger-soft)}
+.ok  {border-color:var(--ok);     background:var(--ok-soft)}
+.note > :first-child,.warn > :first-child,.bad > :first-child,.ok > :first-child{margin-top:0}
+.note > :last-child,.warn > :last-child,.bad > :last-child,.ok > :last-child{margin-bottom:0}
+
+.src{color:var(--ink-3); font-size:.82rem; margin:.3rem 0 .8rem}
+.src code{background:none; padding:0; color:var(--ink-3)}
+
+/* ---------- figures ---------- */
+figure{margin:1.8rem 0; padding:1.2rem 1.2rem .9rem; background:var(--card);
+  border:1px solid var(--rule); border-radius:10px; max-width:none}
+figure svg{display:block; margin:0 auto; max-width:100%; height:auto; color:var(--ink)}
+figcaption{margin-top:.9rem; padding-top:.7rem; border-top:1px solid var(--rule);
+  font-size:.84rem; color:var(--ink-2); line-height:1.55}
+figcaption b{color:var(--ink)}
+
+/* diagram helpers */
+.d-label{font:600 12px "IBM Plex Sans",sans-serif}
+.d-sub{font:400 10.5px "IBM Plex Mono",monospace; fill:currentColor; fill-opacity:.62}
+.d-edge{font:400 10.5px "IBM Plex Mono",monospace; fill:currentColor; fill-opacity:.75}
+.d-box{fill:none; stroke:currentColor; stroke-width:1.25; rx:6}
+.d-box-soft{fill:currentColor; fill-opacity:.045; stroke:currentColor; stroke-width:1.25; rx:6}
+.d-line{stroke:currentColor; stroke-width:1.25; fill:none}
+.d-dash{stroke:currentColor; stroke-width:1.25; fill:none; stroke-dasharray:4 3; opacity:.55}
+.d-hot{stroke:#C2410C; stroke-width:1.9; fill:none}
+.d-hot-t{fill:#C2410C; font:600 11px "IBM Plex Sans",sans-serif}
+.d-hot-b{fill:#C2410C; fill-opacity:.09; stroke:#C2410C; stroke-width:1.6; rx:6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .d-hot{stroke:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-t{fill:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}}
+:root[data-theme="dark"] .d-hot{stroke:#F59E6B}
+:root[data-theme="dark"] .d-hot-t{fill:#F59E6B}
+:root[data-theme="dark"] .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">TEN Framework on arm64</div>
+  <div class="brandsub">Technical manual · <code>feat/arm64-native-build</code></div>
+
+  <a href="#top"><span class="n">—</span>Front matter</a>
+
+  <div class="part">Part I — Architecture</div>
+  <a href="#ch1"><span class="n">1</span>The layer stack</a>
+  <a href="#ch2"><span class="n">2</span>Two halves of the repo</a>
+  <a href="#ch3"><span class="n">3</span>Messages and routing</a>
+  <a href="#ch4"><span class="n">4</span>RPC: cmd and CmdResult</a>
+  <a href="#ch5"><span class="n">5</span>How an addon is loaded</a>
+
+  <div class="part">Part II — Platform</div>
+  <a href="#ch6"><span class="n">6</span>The ABI floor</a>
+  <a href="#ch7"><span class="n">7</span>Which <code>.so</code> does what</a>
+  <a href="#ch8"><span class="n">8</span>Component inventory</a>
+  <a href="#ch9"><span class="n">9</span>Build dependencies</a>
+
+  <div class="part">Part III — Building</div>
+  <a href="#ch10"><span class="n">10</span>The core from source</a>
+  <a href="#ch11"><span class="n">11</span>Agents on Ubuntu 24.04</a>
+  <a href="#ch12"><span class="n">12</span>Agents on RPM distros</a>
+  <a href="#ch13"><span class="n">13</span>Agents in a container</a>
+  <a href="#ch14"><span class="n">14</span>Building <code>agora_rtc</code></a>
+
+  <div class="part">Part IV — Development</div>
+  <a href="#ch15"><span class="n">15</span>Writing an extension</a>
+  <a href="#ch16"><span class="n">16</span>Version management</a>
+  <a href="#ch17"><span class="n">17</span>Configuration</a>
+  <a href="#ch18"><span class="n">18</span>Testing</a>
+
+  <div class="part">Part V — Operations</div>
+  <a href="#ch19"><span class="n">19</span>The scripts</a>
+  <a href="#ch20"><span class="n">20</span>Where the logs are</a>
+  <a href="#ch21"><span class="n">21</span>Diagnosing by symptom</a>
+  <a href="#ch22"><span class="n">22</span>Quick reference</a>
+
+  <div class="part">Part VI — Status</div>
+  <a href="#ch23"><span class="n">23</span>Worth fixing upstream</a>
+  <a href="#ch24"><span class="n">24</span>Not covered here</a>
+
+  <div class="part">Figures</div>
+  <a href="#fig1"><span class="n">1</span>Layer stack</a>
+  <a href="#fig2"><span class="n">2</span><code>source</code> vs <code>dest</code></a>
+  <a href="#fig3"><span class="n">3</span>Unrouted message</a>
+  <a href="#fig4"><span class="n">4</span>Addon load</a>
+  <a href="#fig5"><span class="n">5</span>Python ABI</a>
+  <a href="#fig6"><span class="n">6</span>RTC is two packages</a>
+  <a href="#fig7"><span class="n">7</span>RTC build pipeline</a>
+  <a href="#fig8"><span class="n">8</span>Version pinning</a>
+  <a href="#fig9"><span class="n">9</span><code>${env:}</code> states</a>
+  <a href="#fig10"><span class="n">10</span>Log routing</a>
+  <a href="#fig11"><span class="n">11</span>Worker start</a>
+</nav>
+
+<main id="top">
+
+<h1>TEN Framework on arm64</h1>
+<p class="lede">A working manual for running and building TEN Framework on aarch64
+Linux: what the framework is made of, which parts are architecture-dependent,
+how to build each of them, and how to find out what went wrong.</p>
+
+<p>Written against <code>feat/arm64-native-build</code>. Every claim here was
+checked against the source or run on a machine; where something could not be
+verified it says so rather than guessing. Source citations carry a file and a
+line number — those line numbers were re-checked against the tree at the time of
+writing, not remembered.</p>
+
+<table>
+<thead><tr><th>Part</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td>I — Architecture</td><td>The layer stack, how extensions talk to each other, how the runtime loads them</td></tr>
+<tr><td>II — Platform</td><td>The ABI floor, which shared object does what, the build system and its flags</td></tr>
+<tr><td>III — Building</td><td>The framework core, the agents on three distribution families, and <code>agora_rtc</code></td></tr>
+<tr><td>IV — Development</td><td>Writing and maintaining an extension, version pinning, swapping vendors, testing</td></tr>
+<tr><td>V — Operations</td><td>The scripts, where the logs are, and diagnosing by symptom</td></tr>
+<tr><td>VI — Status</td><td>What is left for upstream, and what this manual does not cover</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<p>A Traditional Chinese edition of this manual, with the same eleven figures, is
+alongside it at <a href="arm64_build.zh-TW.html"><code>arm64_build.zh-TW.html</code></a>.</p>
+</div>
+
+<h4>Where to start</h4>
+<ul>
+<li>Running the agents on an arm64 box → <a href="#part3">Part III</a>, then <a href="#part5">Part V</a></li>
+<li>RTC does not work → <a href="#ch14">ch. 14, Building <code>agora_rtc</code> for aarch64</a></li>
+<li>Something fails and the UI says nothing → <a href="#ch21">ch. 21, Diagnosing by symptom</a></li>
+<li>Writing an extension → <a href="#part4">Part IV</a></li>
+<li>Deciding whether a change is arm64-specific → <a href="#part2">Part II</a></li>
+</ul>
+<h2 id="part1"><span class="pnum">Part I</span>Architecture</h2>
+
+<h3 id="ch1">1. The layer stack</h3>
+
+<p>A vendor extension is Python-only and sits at the top of four layers. Which
+layer a change lands in decides the toolchain, the CI job, and whether the
+change is architecture-dependent at all.</p>
+
+<figure id="fig1">
+<svg viewBox="-26 0 986 336" role="img" aria-label="Four-layer stack: a Python extension sits on ten_ai_base, which sits on a language binding, which sits on the C runtime. Adding a vendor touches only the top layer; changing a message type reaches the bottom two, which are the other half of the repository.">
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <!-- boxes -->
+  <rect class="d-hot-b" x="210" y="20"  width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="98"  width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="176" width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="254" width="380" height="48"/>
+
+  <text class="d-label d-hot-t" x="400" y="40" text-anchor="middle">extension  (Python)</text>
+  <text class="d-sub" x="400" y="56" text-anchor="middle">deepgram_asr_python, elevenlabs_tts2_python, …</text>
+
+  <text class="d-label" x="400" y="118" text-anchor="middle" fill="currentColor">ten_ai_base</text>
+  <text class="d-sub" x="400" y="134" text-anchor="middle">AsyncASRBaseExtension, AsyncTTS2BaseExtension, …</text>
+
+  <text class="d-label" x="400" y="196" text-anchor="middle" fill="currentColor">language binding</text>
+  <text class="d-sub" x="400" y="212" text-anchor="middle">libten_runtime_python.so / _go.so / _nodejs.so</text>
+
+  <text class="d-label" x="400" y="274" text-anchor="middle" fill="currentColor">C runtime</text>
+  <text class="d-sub" x="400" y="290" text-anchor="middle">graph parsing · lifecycle · message routing · addon loading</text>
+
+  <!-- vertical "built on" arrows -->
+  <line class="d-line" x1="260" y1="96" x2="260" y2="70" marker-end="url(#a1)"/>
+  <line class="d-line" x1="260" y1="174" x2="260" y2="148" marker-end="url(#a1)"/>
+  <line class="d-line" x1="260" y1="252" x2="260" y2="226" marker-end="url(#a1)"/>
+  <text class="d-edge" x="274" y="87">subclasses</text>
+  <text class="d-edge" x="274" y="165">import ten_runtime</text>
+  <text class="d-edge" x="274" y="243">links libten_runtime.so</text>
+
+  <!-- right provenance -->
+  <text class="d-sub" x="608" y="40">ai_agents/agents/ten_packages/extension/&lt;name&gt;/</text>
+  <text class="d-sub" x="608" y="55">editable source in this repo</text>
+  <text class="d-sub" x="608" y="118">registry dependency — NOT source here;</text>
+  <text class="d-sub" x="608" y="133">materialised by `tman install` into the tenapp</text>
+  <text class="d-sub" x="608" y="196">core/src/ten_runtime/binding/{python,go,nodejs}</text>
+  <text class="d-sub" x="608" y="274">core/src/ten_runtime</text>
+
+  <!-- left brackets -->
+  <path class="d-hot" d="M200 20 L188 20 L188 68 L200 68"/>
+  <text class="d-hot-t" x="180" y="40" text-anchor="end">add a vendor:</text>
+  <text class="d-hot-t" x="180" y="56" text-anchor="end">only this layer</text>
+
+  <path class="d-line" d="M200 176 L188 176 L188 302 L200 302"/>
+  <text class="d-label" x="180" y="228" text-anchor="end" fill="currentColor">change a message type,</text>
+  <text class="d-label" x="180" y="244" text-anchor="end" fill="currentColor">schema or lifecycle:</text>
+  <text class="d-sub" x="180" y="262" text-anchor="end">core/ — GN+Ninja, different CI</text>
+</svg>
+<figcaption><b>Figure 1 — the four layers, and where a change lands.</b> Adding a
+vendor touches only the top box: a new Python package, a manifest, and a graph
+edit. Anything that alters a message type, a schema or a lifecycle contract
+falls through to <code>core/</code>, which is a different build system, a
+different CI job and the other half of the repository (ch. 2).
+<code>ten_ai_base</code> is the layer people go looking for and cannot find —
+it is a versioned registry dependency, so its source is not in a fresh checkout,
+only inside an installed tenapp.</figcaption>
+</figure>
+
+<h3 id="ch2">2. The two halves of the repository</h3>
+
+<table>
+<thead><tr><th></th><th>Framework core</th><th>AI agents</th></tr></thead>
+<tbody>
+<tr><th>Paths</th><td><code>core/</code>, <code>packages/</code>, <code>tests/</code>, <code>build/</code>, <code>third_party/</code>, <code>tools/</code></td><td><code>ai_agents/</code></td></tr>
+<tr><th>Languages</th><td>C/C++ runtime, Rust (<code>ten_rust</code>, <code>ten_manager</code>), Go/Python/Node bindings</td><td>Python extensions, Go API server, Next.js playground</td></tr>
+<tr><th>Build</th><td>GN + Ninja through the <code>tgn</code> wrapper</td><td><code>task</code> targets</td></tr>
+<tr><th>CI</th><td><code>linux_ubuntu2204.yml</code>, <code>mac_*</code>, <code>win.yml</code>, <code>tman_full_*</code></td><td><code>ai_agents.yaml</code></td></tr>
+</tbody>
+</table>
+
+<p>The two CI sets use mutually exclusive <code>paths-ignore</code> filters: a
+change under <code>ai_agents/</code> never triggers the core build, and a change
+under <code>core/</code> never triggers the agents job.</p>
+
+<p>Most of this manual concerns the agents half. Chapter 10 is the only one
+about building the core.</p>
+
+<h3 id="ch3">3. Messages and routing</h3>
+
+<p>Extensions never call each other. Every interaction is a message, and the
+graph's <code>connections</code> block decides who receives it. That is why
+swapping a vendor is a JSON edit — and why a mistyped name fails silently.</p>
+
+<h4>3.1 Five message types</h4>
+<p class="src">Source: <code>core/include/ten_runtime/msg/msg.h</code></p>
+
+<table>
+<thead><tr><th>Type</th><th>Semantics</th><th>Typical use</th></tr></thead>
+<tbody>
+<tr><td><code>cmd</code></td><td><b>Has a reply</b> — the sender receives a <code>CmdResult</code></td><td><code>tool_register</code>, <code>on_user_joined</code></td></tr>
+<tr><td><code>cmd_result</code></td><td>The reply, paired by the runtime</td><td>never routed by hand</td></tr>
+<tr><td><code>data</code></td><td>One-way, structured</td><td><code>asr_result</code>, <code>metrics</code>, <code>tts_flush_end</code></td></tr>
+<tr><td><code>audio_frame</code></td><td>One-way, zero-copy audio buffer</td><td><code>pcm_frame</code></td></tr>
+<tr><td><code>video_frame</code></td><td>One-way, video buffer</td><td>vision extensions</td></tr>
+</tbody>
+</table>
+
+<p>The runtime also defines internal commands — <code>START_GRAPH</code>,
+<code>STOP_GRAPH</code>, <code>CLOSE_APP</code>, <code>TIMER</code>,
+<code>TIMEOUT</code>, <code>TRIGGER_LIFE_CYCLE</code> — which the framework uses
+itself.</p>
+
+<h4>3.2 The connections block, and why direction is written twice</h4>
+
+<p>Routing lives in <code>tenapp/property.json</code> under
+<code>predefined_graphs[].graph.connections</code>. Each block hangs off one
+node, keyed by the node's <b><code>name</code></b>, not its addon. Direction
+comes from <code>source</code> (these nodes send to me) or <code>dest</code> (I
+send to these nodes) — and both are legal, so the same edge may be declared from
+either end.</p>
+
+<figure id="fig2">
+<svg viewBox="0 0 900 322" role="img" aria-label="Three graph nodes connected by data messages. The same edge between stt and main_control can be declared either as a source entry under main_control or as a dest entry under stt; both produce the identical link, so reading a graph means checking both ends.">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="30"  y="30" width="180" height="54"/>
+  <rect class="d-box-soft" x="350" y="30" width="200" height="54"/>
+  <rect class="d-box-soft" x="690" y="30" width="180" height="54"/>
+
+  <text class="d-label" x="120" y="52" text-anchor="middle" fill="currentColor">stt</text>
+  <text class="d-sub"   x="120" y="70" text-anchor="middle">addon: soniox_asr_python</text>
+  <text class="d-label" x="450" y="52" text-anchor="middle" fill="currentColor">main_control</text>
+  <text class="d-sub"   x="450" y="70" text-anchor="middle">addon: main_python</text>
+  <text class="d-label" x="780" y="52" text-anchor="middle" fill="currentColor">tts</text>
+  <text class="d-sub"   x="780" y="70" text-anchor="middle">addon: elevenlabs_tts2_python</text>
+
+  <line class="d-hot" x1="212" y1="57" x2="346" y2="57" marker-end="url(#a2)"/>
+  <text class="d-hot-t" x="279" y="24" text-anchor="middle">data  "asr_result"</text>
+
+  <line class="d-line" x1="552" y1="57" x2="686" y2="57" marker-end="url(#a2)"/>
+  <text class="d-edge" x="619" y="24" text-anchor="middle">data  "tts_text_input"</text>
+
+  <!-- two declarations of the same edge -->
+  <rect class="d-box" x="30"  y="150" width="380" height="104"/>
+  <rect class="d-box" x="480" y="150" width="380" height="104"/>
+
+  <text class="d-label d-hot-t" x="220" y="172" text-anchor="middle">declared on main_control — subscribe</text>
+  <text class="d-sub" x="46" y="196">{ "extension": "main_control",</text>
+  <text class="d-sub" x="46" y="212">&#160; "data": [ { "name": "asr_result",</text>
+  <text class="d-sub" x="46" y="228">&#160;&#160;&#160;&#160; "source": [ {"extension": "stt"} ] } ] }</text>
+
+  <text class="d-label d-hot-t" x="670" y="172" text-anchor="middle">declared on stt — publish</text>
+  <text class="d-sub" x="496" y="196">{ "extension": "stt",</text>
+  <text class="d-sub" x="496" y="212">&#160; "data": [ { "name": "asr_result",</text>
+  <text class="d-sub" x="496" y="228">&#160;&#160;&#160;&#160; "dest": [ {"extension": "main_control"} ] } ] }</text>
+
+  <path class="d-dash" d="M220 148 L220 120 L279 120 L279 66"/>
+  <path class="d-dash" d="M670 148 L670 120 L279 120"/>
+  <text class="d-hot-t" x="279" y="112" text-anchor="middle">the same edge — either end</text>
+
+  <text class="d-sub" x="30" y="284">"extension" keys a connections block by the node's name — never by its addon. Swapping a vendor changes addon and must leave name alone.</text>
+  <text class="d-sub" x="30" y="302">cmd blocks take "names" (an array); data / audio_frame / video_frame take "name" (a single string).</text>
+</svg>
+<figcaption><b>Figure 2 — one edge, two ways to write it.</b> Reading a graph
+means checking both ends: an extension's inbound links may be declared on itself
+with <code>source</code>, or on the sender with <code>dest</code>, and neither
+form is preferred by the runtime. The routing key throughout is the node's
+<code>name</code>, which is why renaming a node to match a new vendor silently
+detaches it from the pipeline while the <code>addon</code> swap itself works
+fine.</figcaption>
+</figure>
+
+<h4>3.3 Three names must match</h4>
+
+<p>An extension is instantiated only if all three agree. When they do not, it
+fails <b>silently at graph load</b> — no error, the extension simply is not
+there:</p>
+
+<ol>
+<li>the <code>@register_addon_as_extension("x")</code> argument in <code>addon.py</code></li>
+<li>the <code>name</code> field in that extension's <code>manifest.json</code></li>
+<li>the <code>addon</code> field of the graph node</li>
+</ol>
+
+<p>A node's <code>name</code> is a separate thing: the instance's label within
+the graph, and what <code>connections</code> routes by. When swapping a vendor,
+change <code>addon</code> and <b>leave <code>name</code> alone</b>.</p>
+
+<h4>3.4 Unrouted messages are dropped — and the warning is throttled</h4>
+
+<p>Sending a message the graph has no connection for produces a warning and
+nothing else. The warning is easy to miss for a reason that is not obvious from
+the log: it is rate-limited per message name.</p>
+
+<figure id="fig3">
+<svg viewBox="0 0 880 424" role="img" aria-label="A send_data call whose message name has no destination in the graph: the runtime sets MSG_NOT_CONNECTED, increments a per-extension per-name counter, and logs a warning only when that counter is a multiple of one thousand — so the line appears on the first occurrence and then every thousandth.">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="20" y="24" width="170" height="52"/>
+  <text class="d-label" x="105" y="46" text-anchor="middle" fill="currentColor">send_data(msg)</text>
+  <text class="d-sub"   x="105" y="63" text-anchor="middle">name = "error"</text>
+
+  <rect class="d-box" x="230" y="24" width="330" height="52"/>
+  <text class="d-label" x="395" y="46" text-anchor="middle" fill="currentColor">look the name up in the graph's connections</text>
+  <text class="d-sub"   x="395" y="63" text-anchor="middle">runtime routing</text>
+
+  <line class="d-line" x1="192" y1="50" x2="226" y2="50" marker-end="url(#a3)"/>
+
+  <rect class="d-box" x="620" y="24" width="240" height="52"/>
+  <text class="d-label" x="740" y="46" text-anchor="middle" fill="currentColor">found → delivered</text>
+  <text class="d-sub"   x="740" y="63" text-anchor="middle">to every dest of that name</text>
+  <line class="d-line" x1="562" y1="50" x2="616" y2="50" marker-end="url(#a3)"/>
+
+  <line class="d-hot" x1="395" y1="78" x2="395" y2="108" marker-end="url(#a3)"/>
+  <text class="d-hot-t" x="408" y="98">no destination</text>
+
+  <rect class="d-box" x="230" y="112" width="330" height="52"/>
+  <text class="d-label" x="395" y="134" text-anchor="middle" fill="currentColor">ten_error_set(TEN_ERROR_CODE_MSG_NOT_CONNECTED)</text>
+  <text class="d-sub"   x="395" y="151" text-anchor="middle">extension.c:435 — "Failed to find destination of a '%s' message '%s'"</text>
+
+  <line class="d-line" x1="395" y1="166" x2="395" y2="196" marker-end="url(#a3)"/>
+
+  <rect class="d-box" x="230" y="200" width="330" height="52"/>
+  <text class="d-label" x="395" y="222" text-anchor="middle" fill="currentColor">increment_msg_not_connected_count(ext, name)</text>
+  <text class="d-sub"   x="395" y="239" text-anchor="middle">send.c:161 — one counter per (extension, message name)</text>
+
+  <line class="d-line" x1="395" y1="254" x2="395" y2="284" marker-end="url(#a3)"/>
+
+  <rect class="d-hot-b" x="255" y="288" width="280" height="46"/>
+  <text class="d-label d-hot-t" x="395" y="310" text-anchor="middle">count % 1000 == 0 ?</text>
+  <text class="d-sub"  x="395" y="326" text-anchor="middle">msg_not_connected_cnt.c:76</text>
+
+  <path class="d-line" d="M295 336 L295 358" marker-end="url(#a3)"/>
+  <path class="d-hot"  d="M495 336 L495 358" marker-end="url(#a3)"/>
+  <text class="d-edge"  x="286" y="352" text-anchor="end">false</text>
+  <text class="d-hot-t" x="506" y="352">true</text>
+
+  <rect class="d-box" x="60" y="362" width="290" height="46"/>
+  <text class="d-label" x="205" y="384" text-anchor="middle" fill="currentColor">silent — nothing is logged</text>
+  <text class="d-sub"   x="205" y="400" text-anchor="middle">the message is still dropped</text>
+
+  <rect class="d-hot-b" x="410" y="362" width="330" height="46"/>
+  <text class="d-label d-hot-t" x="575" y="384" text-anchor="middle">TEN_LOGW — send.c:163</text>
+  <text class="d-sub"   x="575" y="400" text-anchor="middle">counter resets to 0 in the same branch</text>
+
+  <text class="d-hot-t" x="600" y="222">prints on occurrence 1,</text>
+  <text class="d-hot-t" x="600" y="238">then every 1000th</text>
+  <text class="d-sub"   x="600" y="256">TEN_MSG_NOT_CONNECTED_COUNT_</text>
+  <text class="d-sub"   x="600" y="270">RESET_THRESHOLD = 1000</text>
+</svg>
+<figcaption><b>Figure 3 — a dropped message logs once, then once per thousand.</b>
+The counter starts at zero and zero satisfies <code>% 1000 == 0</code>, so the
+first occurrence always prints; the branch then resets the counter, and the next
+999 are silent. The practical consequence is that <b>the absence of this warning
+proves nothing</b> — a message dropped a few hundred times an hour may have
+logged exactly once, hours ago. The counter is keyed per extension <em>and</em>
+per message name, so a second unrouted name gets its own first-occurrence
+line.</figcaption>
+</figure>
+
+<pre><code>W ten:runtime ten_env_send_msg_internal@send.c:163
+  Failed to send message: Failed to find destination of a 'data' message 'error' from graph.</code></pre>
+
+<div class="warn">
+<p><b>This is a real case.</b> The ASR extension emits an <code>error</code> data
+message, but <code>websocket-example</code>'s graph routes only
+<code>asr_result</code>, <code>metrics</code> and <code>tts_flush_end</code>. A
+missing API key therefore never reaches the UI and lives only in the log. When
+the interface shows nothing, grep for that line first — and, given the
+throttling above, grep the whole log rather than its tail.</p>
+</div>
+
+<h3 id="ch4">4. RPC: cmd and CmdResult</h3>
+<p class="src">Source: <code>core/src/ten_runtime/binding/python/interface/ten_runtime/async_ten_env.py</code></p>
+
+<p><code>cmd</code> is the framework's RPC. Python offers two shapes.</p>
+
+<h5>Single reply</h5>
+<pre><code>result, err = await ten_env.send_cmd(cmd)
+# the runtime guarantees result.is_completed()</code></pre>
+
+<h5>Streamed replies</h5>
+<pre><code>async for result, err in ten_env.send_cmd_ex(cmd):
+    if err: break
+    ...
+    if result.is_completed(): break</code></pre>
+
+<p><code>send_cmd_ex</code> backs onto a queue of <code>maxsize=10</code>, so
+intermediate results arrive as they are produced and the last one carries
+<code>is_completed()</code>. Token-by-token LLM output travels this way.</p>
+
+<h5>Replying</h5>
+<pre><code>await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))</code></pre>
+
+<h5>One-way sends</h5>
+<pre><code>await ten_env.send_data(data)
+await ten_env.send_audio_frame(frame)
+await ten_env.send_video_frame(frame)</code></pre>
+
+<p>Each accepts an optional <code>SendOptions</code>; the default is
+fire-and-forget, while <code>wait_for_result=True</code> waits for the runtime to
+confirm delivery — which reports whether it was delivered, not what the receiver
+did with it.</p>
+
+<div class="bad">
+<p>Two mistakes that cost the most time:</p>
+<ul>
+<li><code>ten_env.get_property_*()</code> returns a <b><code>(value, error)</code>
+tuple</b>, not the value. Always take <code>[0]</code>.</li>
+<li>Extensions run off the main thread, so <b>no signal handlers and no
+<code>atexit</code></b>. Clean up in <code>on_stop()</code>.</li>
+</ul>
+</div>
+
+<h3 id="ch5">5. How the runtime loads an addon</h3>
+<p class="src">Source: <code>core/src/ten_runtime/addon/addon_autoload.c</code></p>
+
+<p>An addon package is a directory. The runtime scans its <code>lib/</code>
+subdirectory and <code>dlopen</code>s <b>every <code>.so</code> it finds
+there</b> — it does not consult the manifest for a filename, and it does not
+skip objects it cannot load.</p>
+
+<figure id="fig4">
+<svg viewBox="0 0 924 372" role="img" aria-label="The runtime scans each addon package's lib directory and dlopens every shared object in it. A successful load registers the addon; a load that fails because the object is the wrong architecture makes the extension absent from the graph rather than degraded.">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="20" y="24" width="330" height="264"/>
+  <text class="d-label" x="36" y="46" fill="currentColor">tenapp/ten_packages/</text>
+  <text class="d-sub" x="36" y="72">├ system/</text>
+  <text class="d-sub" x="36" y="88">│&#160;&#160;├ ten_runtime/lib/</text>
+  <text class="d-sub" x="36" y="104">│&#160;&#160;│&#160;&#160;&#160;libten_runtime.so, libten_utils.so</text>
+  <text class="d-sub" x="36" y="120">│&#160;&#160;└ ten_runtime_python/lib/</text>
+  <text class="d-sub" x="36" y="136">│&#160;&#160;&#160;&#160;&#160;&#160;libten_runtime_python.so</text>
+  <text class="d-sub" x="36" y="158">├ addon_loader/</text>
+  <text class="d-sub" x="36" y="174">│&#160;&#160;└ python_addon_loader/lib/</text>
+  <text class="d-sub" x="36" y="190">│&#160;&#160;&#160;&#160;&#160;&#160;libpython_addon_loader.so</text>
+  <text class="d-sub" x="36" y="212">└ extension/</text>
+  <text class="d-sub" x="36" y="228">&#160;&#160;&#160;├ agora_rtc/lib/</text>
+  <text class="d-sub" x="36" y="244">&#160;&#160;&#160;│&#160;&#160;&#160;libagora_rtc.so&#160;&#160;&#160;← native</text>
+  <text class="d-sub" x="36" y="260">&#160;&#160;&#160;└ soniox_asr_python/</text>
+  <text class="d-sub" x="36" y="276">&#160;&#160;&#160;&#160;&#160;&#160;&#160;no lib/ at all&#160;&#160;← pure Python</text>
+
+  <line class="d-line" x1="354" y1="90" x2="396" y2="90" marker-end="url(#a4)"/>
+  <text class="d-edge" x="358" y="82">scan</text>
+
+  <rect class="d-box" x="400" y="60" width="480" height="58"/>
+  <text class="d-label" x="640" y="84" text-anchor="middle" fill="currentColor">load_all_dynamic_libraries_under_path(&lt;addon&gt;/lib/)</text>
+  <text class="d-sub"   x="640" y="102" text-anchor="middle">addon_autoload.c:441 — "Load the library from the 'lib/' directory."</text>
+
+  <line class="d-line" x1="640" y1="120" x2="640" y2="152" marker-end="url(#a4)"/>
+
+  <rect class="d-box" x="400" y="156" width="480" height="48"/>
+  <text class="d-label" x="640" y="180" text-anchor="middle" fill="currentColor">dlopen() every .so found there, one by one</text>
+  <text class="d-sub"   x="640" y="196" text-anchor="middle">no filename filter, no architecture pre-check</text>
+
+  <path class="d-line" d="M520 206 L520 240" marker-end="url(#a4)"/>
+  <path class="d-hot"  d="M760 206 L760 240" marker-end="url(#a4)"/>
+  <text class="d-edge"  x="511" y="228" text-anchor="end">ok</text>
+  <text class="d-hot-t" x="770" y="228">ELF machine mismatch</text>
+
+  <rect class="d-box" x="392" y="244" width="256" height="60"/>
+  <text class="d-label" x="520" y="268" text-anchor="middle" fill="currentColor">addon registers itself</text>
+  <text class="d-sub"   x="520" y="285" text-anchor="middle">the graph node instantiates</text>
+
+  <rect class="d-hot-b" x="664" y="244" width="216" height="60"/>
+  <text class="d-label d-hot-t" x="772" y="268" text-anchor="middle">load fails</text>
+  <text class="d-sub"   x="772" y="285" text-anchor="middle">nothing registers</text>
+
+  <text class="d-hot-t" x="640" y="332" text-anchor="middle">A failed dlopen is an ABSENT extension, not a degraded one.</text>
+  <text class="d-sub"   x="640" y="350" text-anchor="middle">One x86-64 object anywhere under an addon's lib/ removes the whole addon on aarch64.</text>
+</svg>
+<figcaption><b>Figure 4 — the scan is unconditional, and that is the whole arm64
+problem.</b> Because the runtime opens every object in <code>lib/</code>, a
+single file of the wrong architecture is not skipped over: the addon fails to
+register and the graph node it backs never instantiates. This is why an
+architecture mismatch presents as <em>an extension that does not exist</em>
+rather than one that misbehaves — and why edit 2 in ch. 14.4 removes an
+x86-64-only artefact from the arm64 package rather than leaving it in
+place.</figcaption>
+</figure>
+
+<p>An extension with native code is therefore two JSON files plus
+<code>lib/*.so</code>; a pure-Python one has no <code>lib/</code> and reaches the
+runtime through <code>python_addon_loader</code>.</p>
+<h2 id="part2"><span class="pnum">Part II</span>Platform</h2>
+
+<h3 id="ch6">6. The ABI floor</h3>
+
+<p>Two properties of the published arm64 binaries decide whether they will load
+at all. Both were read with <code>readelf</code> against
+<code>ten_packages-linux-arm64-gcc-release.zip</code> at 0.11.71.</p>
+
+<h4>6.1 glibc ≥ 2.38</h4>
+
+<table>
+<thead><tr><th>Library</th><th>Highest glibc symbol required</th></tr></thead>
+<tbody>
+<tr><td><code>libten_utils.so</code></td><td><code>__isoc23_strtol@GLIBC_2.38</code></td></tr>
+<tr><td><code>libpython_addon_loader.so</code></td><td><code>__isoc23_strtol@GLIBC_2.38</code></td></tr>
+<tr><td><code>libten_runtime.so</code></td><td><code>GLIBC_2.34</code></td></tr>
+<tr><td><code>libten_runtime_python.so</code></td><td><code>GLIBC_2.17</code></td></tr>
+</tbody>
+</table>
+
+<p>The x64 packages top out at 2.34 for the same libraries. The difference is not
+a deliberate choice: <code>__isoc23_strtol</code> is what glibc's headers
+redirect <code>strtol</code> to on 2.38+ with a recent GCC. It is an artefact of
+<code>linux_arm64.yml</code> running on <code>ubuntu-24.04-arm</code> while
+<code>linux_ubuntu2204.yml</code> runs on 22.04, and it raises the arm64 floor by
+four glibc releases.</p>
+
+<h4>6.2 The Python version must match the binding</h4>
+
+<p><code>ten_runtime_python</code> is compiled against one Python's headers, and
+<code>python_addon_loader</code> <code>dlopen</code>s libpython by a hardcoded
+filename. On arm64 those two are not the same version.</p>
+
+<figure id="fig5">
+<svg viewBox="0 0 936 392" role="img" aria-label="The arm64 Python binding is compiled against Python 3.12 headers while the addon loader dlopens libpython3.10.so by default. The two artefacts disagree, so the loader must be redirected with TEN_PYTHON_LIB_PATH to the 3.12 library the binding was built against.">
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="40" y="24" width="360" height="56"/>
+  <text class="d-label" x="220" y="48" text-anchor="middle" fill="currentColor">libten_runtime_python.so</text>
+  <text class="d-sub"   x="220" y="66" text-anchor="middle">the Python binding, arm64 package 0.11.71</text>
+
+  <rect class="d-box" x="500" y="24" width="360" height="56"/>
+  <text class="d-label" x="680" y="48" text-anchor="middle" fill="currentColor">libpython_addon_loader.so</text>
+  <text class="d-sub"   x="680" y="66" text-anchor="middle">starts the interpreter inside the worker</text>
+
+  <line class="d-line" x1="220" y1="82" x2="220" y2="110" marker-end="url(#a5)"/>
+  <line class="d-line" x1="680" y1="82" x2="680" y2="110" marker-end="url(#a5)"/>
+
+  <rect class="d-box-soft" x="40" y="114" width="360" height="52"/>
+  <text class="d-label" x="220" y="138" text-anchor="middle" fill="currentColor">compiled against Python 3.12 headers</text>
+  <text class="d-sub"   x="220" y="155" text-anchor="middle">needs the CPython 3.12 ABI at run time</text>
+
+  <rect class="d-box-soft" x="500" y="114" width="360" height="52"/>
+  <text class="d-label" x="680" y="138" text-anchor="middle" fill="currentColor">dlopen("libpython3.10.so")</text>
+  <text class="d-sub"   x="680" y="155" text-anchor="middle">built-in default — same value as the x64 package</text>
+
+  <path class="d-hot" d="M220 168 L220 190 L680 190 L680 168"/>
+  <rect class="d-hot-b" x="270" y="196" width="360" height="50"/>
+  <text class="d-label d-hot-t" x="450" y="218" text-anchor="middle">3.12 ≠ 3.10</text>
+  <text class="d-sub" x="450" y="235" text-anchor="middle">the two arm64 artefacts disagree with each other</text>
+
+  <text class="d-sub" x="668" y="216" >without the override, the worker prints:</text>
+  <text class="d-sub" x="668" y="232" >[Python addon loader] Failed to load</text>
+  <text class="d-sub" x="668" y="246" >system libpython.</text>
+
+  <line class="d-line" x1="450" y1="248" x2="450" y2="274" marker-end="url(#a5)"/>
+
+  <rect class="d-box" x="180" y="278" width="540" height="56"/>
+  <text class="d-label" x="450" y="302" text-anchor="middle" fill="currentColor">export TEN_PYTHON_LIB_PATH=…/libpython3.12.so</text>
+  <text class="d-sub"   x="450" y="320" text-anchor="middle">/usr/lib/aarch64-linux-gnu/ on Debian layouts&#160;&#160;·&#160;&#160;/usr/lib64/ on RPM layouts</text>
+
+  <line class="d-line" x1="450" y1="336" x2="450" y2="358" marker-end="url(#a5)"/>
+  <text class="d-label" x="450" y="376" text-anchor="middle" fill="currentColor">the loader opens 3.12 — the binding is satisfied, extensions import</text>
+</svg>
+<figcaption><b>Figure 5 — the one setting no arm64 host works without.</b> The
+mismatch is internal to the published arm64 packages: nothing about the host
+causes it, and no host configuration removes it except pointing the loader at the
+right library. <code>TEN_PYTHON_LIB_PATH</code> overrides only the loader's
+<code>dlopen</code> target; it does not change which Python
+<code>uv pip install --system</code> writes into, which is a separate trap
+(12.4).</figcaption>
+</figure>
+
+<div class="warn">
+<p><code>tman check env</code> still reports <em>"TEN Framework only supports
+Python 3.10"</em> and suggests <code>pyenv install 3.10.18</code>. On arm64 that
+advice is wrong for the published packages — following it gives a 3.10
+interpreter against a 3.12 binding.</p>
+</div>
+
+<h4>6.3 Distribution compatibility</h4>
+
+<table>
+<thead><tr><th>Distribution</th><th>glibc</th><th>System Python</th><th>Prebuilt arm64 packages</th></tr></thead>
+<tbody>
+<tr><td>Ubuntu 24.04 LTS</td><td>2.39</td><td>3.12</td><td><b>Works</b> — set <code>TEN_PYTHON_LIB_PATH</code></td></tr>
+<tr><td>Ubuntu 24.10 / 25.04</td><td>2.40+</td><td>3.12+</td><td>Works if libpython matches 3.12</td></tr>
+<tr><td>Debian 13 (trixie)</td><td>2.41</td><td>3.13</td><td>Needs a 3.12 libpython installed</td></tr>
+<tr><td>Fedora 39 / 40</td><td>2.38 / 2.39</td><td>3.12</td><td><b>Works</b> — libpython is under <code>/usr/lib64</code></td></tr>
+<tr><td>Fedora 41+</td><td>2.40+</td><td>3.13</td><td><b>Works</b> — needs <code>python3.12</code> alongside</td></tr>
+<tr><td>Lychee 2025 (Fedora rebuild)</td><td>2.41</td><td>3.13</td><td><b>Verified</b> — the platform ch. 12 was written on</td></tr>
+<tr><td>Ubuntu 22.04 LTS</td><td>2.35</td><td>3.10</td><td><b>No</b> — below the floor</td></tr>
+<tr><td>Debian 12 (bookworm)</td><td>2.36</td><td>3.11</td><td><b>No</b></td></tr>
+<tr><td>RHEL / Rocky 9</td><td>2.34</td><td>3.9</td><td><b>No</b></td></tr>
+<tr><td>Amazon Linux 2023</td><td>2.34</td><td>3.9</td><td><b>No</b> — relevant for Graviton</td></tr>
+<tr><td>Alpine (musl)</td><td>—</td><td>—</td><td><b>No</b> — no musl builds exist</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<p>Below the floor, do not fight the prebuilt packages. Build the core from
+source instead (ch. 10): the result links against your own glibc and your own
+Python, which sidesteps both constraints at once.</p>
+</div>
+
+<h3 id="ch7">7. Which shared object does what</h3>
+
+<p>Four questions per row: what it provides, what produces it, what loads or
+links it, and whether an aarch64 build exists.</p>
+
+<table>
+<thead><tr><th><code>.so</code></th><th>Provides</th><th>Produced by</th><th>Loaded / linked by</th><th>aarch64</th></tr></thead>
+<tbody>
+<tr><td><code>libten_utils.so</code></td><td>strings, containers, logging, backtrace, atomics, <code>${env:}</code> resolution</td><td><code>core/src/ten_utils/BUILD.gn</code>, <code>shared_library("ten_utils_shared")</code></td><td>linked by <code>libten_runtime.so</code></td><td>verified</td></tr>
+<tr><td><code>libten_runtime.so</code></td><td>the C runtime: graph parsing, extension lifecycle, <b>message routing</b>, addon loading</td><td><code>core/src/ten_runtime/BUILD.gn</code>, <code>output_name = "ten_runtime"</code></td><td>loaded by the worker; linked by every binding</td><td>verified</td></tr>
+<tr><td><code>libten_runtime_python.so</code></td><td>the Python binding</td><td><code>binding/python/native/BUILD.gn</code>, <code>ten_shared_library</code></td><td>loaded on <code>import ten_runtime</code></td><td>verified</td></tr>
+<tr><td><code>libpython_addon_loader.so</code></td><td>starts the Python interpreter in the worker, <code>dlopen</code>s libpython</td><td><code>packages/core_addon_loaders/python_addon_loader/BUILD.gn</code></td><td><code>dlopen</code>ed by the runtime from <code>addon_loader/*/lib/</code></td><td>verified</td></tr>
+<tr><td><code>libten_runtime_go.so</code></td><td>the Go binding</td><td><code>binding/go/BUILD.gn</code>, <code>ten_package</code></td><td>linked by the Go app through CGO</td><td>verified</td></tr>
+<tr><td><code>libten_runtime_nodejs.so</code></td><td>the Node.js binding</td><td><code>binding/nodejs/native/BUILD.gn</code></td><td><code>nodejs_addon_loader</code></td><td>build system supports it</td></tr>
+<tr><td><code>libagora_rtc.so</code></td><td><b>RTC transport</b> — implements TEN's extension interface over Agora's SDK</td><td>not in this repo; Agora supplies the source</td><td><code>dlopen</code>ed from <code>extension/agora_rtc/lib/</code></td><td>build it — ch. 14</td></tr>
+<tr><td><code>libagora_rtc_sdk.so</code> and four codec libraries</td><td>Agora's SDK</td><td>Agora</td><td>linked by <code>libagora_rtc.so</code></td><td>available; repackage it</td></tr>
+</tbody>
+</table>
+
+<h4>7.1 The only prebuilt</h4>
+
+<p>One binary dependency in the whole build is not compiled from source:</p>
+
+<pre><code>third_party/node/BUILD.gn
+  ten_prebuilt_library("prebuilt_node_shared")
+    node-shared-linux-arm64-gcc.zip / node-shared-linux-arm64-clang.zip</code></pre>
+
+<p><b>It has arm64.</b> Every other <code>third_party</code> entry — curl, zlib,
+mbedtls, msgpack, libuv, libwebsockets, yyjson, nlohmann_json, googletest,
+ffmpeg — is built from source, so nothing else needs a per-architecture
+artefact.</p>
+
+<h3 id="ch8">8. Component inventory and what arm64 changes</h3>
+
+<p><code>BUILD.gn</code> defines one group, <code>ten_framework_all</code>, and
+everything hangs off it:</p>
+
+<table>
+<thead><tr><th>Target</th><th>Contents</th></tr></thead>
+<tbody>
+<tr><td><code>core/src/ten_runtime</code></td><td>the C runtime</td></tr>
+<tr><td><code>core/src/ten_runtime/binding</code></td><td>the go, nodejs and python bindings</td></tr>
+<tr><td><code>core/src/ten_rust</code></td><td>Rust crates, gated on <code>ten_enable_ten_rust</code></td></tr>
+<tr><td><code>core/src/ten_manager</code></td><td><code>tman</code>, gated on <code>ten_enable_ten_manager</code></td></tr>
+<tr><td><code>third_party</code></td><td>fourteen dependencies, all source</td></tr>
+<tr><td><code>packages/core_addon_loaders</code></td><td><code>python_addon_loader</code>, <code>nodejs_addon_loader</code></td></tr>
+<tr><td><code>packages/core_apps</code></td><td><code>default_app_{cpp,go,nodejs,python}</code></td></tr>
+<tr><td><code>packages/core_extensions</code></td><td>nine <code>default_*</code> templates</td></tr>
+<tr><td><code>packages/core_protocols</code></td><td><code>msgpack</code></td></tr>
+<tr><td><code>packages/core_systems</code></td><td><code>pytest_ten</code></td></tr>
+<tr><td><code>packages/example_apps</code></td><td><code>pprof_app_go</code>, <code>transcriber_demo</code></td></tr>
+<tr><td><code>packages/example_extensions</code></td><td>eighteen, including the ffmpeg trio, <code>vosk_asr_cpp</code>, <code>webrtc_vad_cpp</code></td></tr>
+</tbody>
+</table>
+
+<p>Twenty-two feature flags govern it: seven in <code>build/options.gni</code>,
+fifteen in <code>build/ten_runtime/options.gni</code>.</p>
+
+<h4>8.1 What is actually unavailable or disabled on arm64</h4>
+
+<p>Only the first is a functional gap. The rest are listed so they are not
+mistaken for one.</p>
+
+<table>
+<thead><tr><th>Item</th><th>Nature</th></tr></thead>
+<tbody>
+<tr><td>The <code>agora_rtc</code> extension</td><td>The one gap in the registry. Buildable from source — ch. 14.</td></tr>
+<tr><td>Coverage instrumentation</td><td>Cannot be enabled at all. Six <code>assert(is_linux &amp;&amp; target_cpu == "x64")</code> guard it — three in <code>build/ten_runtime/glob.gni</code>, two in <code>build/ten_runtime/ten.gni</code>, one in <code>build/ten_common/rust/rust.gni</code>. All sit inside <code>if (enable_coverage)</code>, so a default build never reaches them.</td></tr>
+<tr><td>Tests</td><td><code>linux_arm64.yml</code> sets <code>ten_enable_tests=false</code> with the rust and manager test flags, so the arm64 job builds no test target.</td></tr>
+<tr><td><code>ten_enable_libwebsockets=false</code></td><td>Costs nothing. The flag is referenced in exactly three places, all under <code>tests/ten_runtime/</code>, and arm64 CI disables tests anyway. It gates no runtime code.</td></tr>
+<tr><td><code>ten_manager_enable_frontend=false</code></td><td>The tman designer's frontend is not built.</td></tr>
+<tr><td><code>ten_enable_go_app_leak_check</code></td><td>Defined x64-only, and only meaningful under a sanitizer debug build.</td></tr>
+<tr><td><code>rustup target add stable x86_64-unknown-linux-gnuasan</code></td><td>Hardcoded in the build Dockerfile, meaningless on arm64.</td></tr>
+<tr><td>ffmpeg extensions</td><td>Off by default everywhere (<code>ten_enable_ffmpeg_extensions = false</code>), not an arm64 restriction.</td></tr>
+</tbody>
+</table>
+
+<p>The fourth row corrects a plausible misreading: turning
+<code>libwebsockets</code> off looks like dropping a transport, and is not.</p>
+
+<h3 id="ch9">9. Build dependencies</h3>
+
+<p><code>tools/docker_for_building/ubuntu/22.04/Dockerfile</code> is the only
+written record of what the core build needs, and it is Ubuntu 22.04 and Debian
+tooling throughout. On any other distribution it must be read as a manifest
+rather than run.</p>
+
+<table>
+<thead><tr><th>Purpose</th><th>Packages (Ubuntu names)</th></tr></thead>
+<tbody>
+<tr><td>Compiler and build</td><td><code>build-essential</code> <code>cmake</code> <code>make</code> <code>autoconf</code> <code>libtool</code> <code>pkg-config</code></td></tr>
+<tr><td>Crypto and network</td><td><code>libssl-dev</code> <code>libcurl4-gnutls-dev</code> <code>libcrypto++-dev</code> <code>libnss3-dev</code></td></tr>
+<tr><td>Parsing</td><td><code>libexpat1-dev</code> <code>libmsgpack-dev</code> <code>zlib1g-dev</code></td></tr>
+<tr><td>System</td><td><code>uuid-dev</code> <code>libunwind-dev</code> <code>libffi-dev</code> <code>libreadline-dev</code> <code>libncurses5-dev</code> <code>libgdbm-dev</code></td></tr>
+<tr><td>Audio</td><td><code>libasound2</code></td></tr>
+<tr><td>ffmpeg extensions only</td><td><code>libavformat-dev</code> <code>libavfilter-dev</code> <code>libx264-dev</code> <code>libdrm-dev</code> <code>libxcomposite-dev</code> <code>libxdamage1</code></td></tr>
+<tr><td>Sanitizer</td><td><code>libasan5</code></td></tr>
+<tr><td>Python</td><td><code>python3</code> <code>python3-dev</code> <code>python3-pip</code> <code>python3-venv</code></td></tr>
+<tr><td>Toolchains</td><td>Go 1.22.3 plus go1.20.12; Rust stable with <code>cbindgen</code>; clang-18 from apt.llvm.org</td></tr>
+<tr><td>Tools</td><td><code>uv</code> <code>task</code> <code>jq</code> <code>git</code> <code>zip</code> <code>unzip</code> <code>p7zip-full</code> <code>tree</code> <code>cpulimit</code> <code>iwyu</code></td></tr>
+</tbody>
+</table>
+
+<h4>9.1 What the build actually links</h4>
+
+<p>GN's <code>libs</code> declarations across <code>core/</code>,
+<code>packages/</code> and <code>build/</code> resolve to libc-level libraries
+only:</p>
+
+<pre><code>stdc++  c++  pthread  gcc  gcc_s  rt  m  dl  c        (bcrypt on Windows)</code></pre>
+
+<p>No <code>ssl</code>, <code>crypto</code>, <code>curl</code>, <code>z</code>,
+<code>expat</code>, <code>uuid</code>, <code>unwind</code>, <code>asound</code> or
+<code>msgpack</code>. Several entries in the table above have <b>no consumer</b>
+in the GN graph, checked by grep over <code>core/</code>, <code>packages/</code>
+and <code>build/</code>:</p>
+
+<table>
+<thead><tr><th>Package</th><th>Finding</th></tr></thead>
+<tbody>
+<tr><td><code>libmysqlclient-dev</code>, <code>libmysqlcppconn-dev</code></td><td>zero references</td></tr>
+<tr><td><code>iwyu</code>, <code>cpulimit</code>, <code>p7zip-full/rar</code></td><td>zero references</td></tr>
+<tr><td><code>libunwind-dev</code></td><td>the hits are <code>#include "unwind.h"</code> and <code>_Unwind_Backtrace</code> — <b>libgcc's unwinder</b>, not libunwind</td></tr>
+<tr><td><code>libssl-dev</code></td><td>the hit is the word "endle<b>ssl</b>y" in a comment</td></tr>
+<tr><td><code>libffi-dev</code></td><td>the hit is "e<b>ffi</b>ciently" in a comment</td></tr>
+<tr><td><code>uuid-dev</code></td><td>TEN implements its own <code>ten_uuid</code>; no <code>#include &lt;uuid/uuid.h&gt;</code></td></tr>
+<tr><td><code>libexpat1-dev</code>, <code>libnss3-dev</code>, <code>libreadline-dev</code>, <code>libncurses5-dev</code>, <code>libgdbm-dev</code>, <code>libasound2</code></td><td>zero references</td></tr>
+</tbody>
+</table>
+
+<p>One entry is genuinely required, conditionally:</p>
+
+<table>
+<thead><tr><th>Package</th><th>Needed by</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>libx264-dev</code></td><td><code>third_party/ffmpeg</code>'s autotool line carries <code>--enable-libx264</code></td><td>only with <code>ten_enable_ffmpeg_extensions=true</code></td></tr>
+</tbody>
+</table>
+
+<p>The source-built dependencies need no system counterpart. <code>curl</code> is
+configured with <code>CURL_ENABLE_SSL=ON</code> <b>and</b>
+<code>CURL_USE_MBEDTLS=ON</code>, so it uses the source-built mbedtls and OpenSSL
+is not involved.</p>
+
+<h4>9.2 Three lines that do not survive a move off Ubuntu x64</h4>
+
+<pre><code>ln -sf /usr/bin/python3.10-config /usr/bin/python3-config   # hardcodes 3.10
+rustup target add stable x86_64-unknown-linux-gnuasan       # hardcodes x86_64
+add-apt-repository "deb http://apt.llvm.org/..."            # Debian-only, for clang-18</code></pre>
+
+<p>The Go install is the counter-example worth copying: it derives the archive
+name from <code>dpkg --print-architecture</code>, so it is already arch-correct —
+though <code>dpkg</code> itself has to be replaced on an RPM distribution.</p>
+<h2 id="part3"><span class="pnum">Part III</span>Building</h2>
+
+<h3 id="ch10">10. The framework core from source</h3>
+
+<p>Needed when the target is below the ABI floor, when the C runtime itself has
+to change, when the core tests must run, or to build a C++ extension.</p>
+
+<p><code>core/ten_gn</code> is a submodule and <b>is not populated on a fresh
+clone</b> — nothing builds until it is initialised, and <code>tgn</code> comes
+from there:</p>
+
+<pre><code>git submodule update --init --recursive --depth 1 core/ten_gn
+export PATH=$(pwd)/core/ten_gn:$PATH</code></pre>
+
+<p>It ships aarch64 <code>gn</code> and <code>ninja</code> binaries, so the build
+tools themselves need no compiling. <code>build.py:87</code> selects them from
+<code>platform.machine()</code>, and <code>validate_cpu</code> accepts
+<code>linux/arm64</code>, so no flag is required on an arm64 host.</p>
+
+<p>Toolchain: clang or gcc, cmake, Go ≥ 1.20, Rust stable with
+<code>cbindgen</code>, Python 3 with <code>python-dotenv</code> and
+<code>jinja2</code>, Node only for the tman designer frontend. Chapter 9 is the
+dependency list.</p>
+
+<p>The root <code>Taskfile.yml</code> detects the host architecture, so on arm64
+this targets arm64 with no extra flags:</p>
+
+<pre><code>task gen
+task build
+# output: out/linux/arm64/</code></pre>
+
+<p>To match CI exactly (<code>.github/workflows/linux_arm64.yml</code>, gcc +
+release):</p>
+
+<pre><code>tgn gen linux arm64 release -- \
+  is_clang=false log_level=1 enable_serialized_actions=true \
+  ten_enable_tests=false ten_rust_enable_tests=false ten_manager_enable_tests=false \
+  ten_enable_libwebsockets=false ten_enable_cargo_clean=true \
+  ten_enable_rust_incremental_build=false ten_manager_enable_frontend=false
+tgn build linux arm64 release</code></pre>
+
+<p>Two differences from x64: arm64 CI does not enable
+<code>ten_enable_ffmpeg_extensions</code> and turns
+<code>ten_enable_libwebsockets</code> off. Re-enable either only with time
+budgeted to debug it. Coverage cannot be enabled at all — see 8.1.</p>
+
+<div class="bad">
+<p><b>Cross-compiling is not set up.</b> <code>toolchain/clang_cross/</code>
+contains only <code>win</code>; Linux targets have
+<code>platform/linux:clang</code> and <code>platform/linux:gcc</code>, both
+native. A cross build would need <code>is_clang=true</code> (only that branch
+adds <code>--target=aarch64-linux-gnu</code>) plus a complete aarch64 sysroot via
+<code>AG_SYSROOT</code>, and it would no longer be the configuration Agora and CI
+use. Build on an arm64 host instead.</p>
+</div>
+
+<h3 id="ch11">11. AI agents on Ubuntu 24.04</h3>
+
+<p>The path of least resistance, and what CI uses.</p>
+
+<pre><code># 1. System packages
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential cmake pkg-config git curl unzip jq \
+  python3 python3-dev python3-pip python3-venv \
+  libasound2t64 libunwind-dev libssl-dev libc++1 libgstreamer1.0-dev
+
+# 2. The Python ABI redirect — see 6.2
+export TEN_PYTHON_LIB_PATH=/usr/lib/aarch64-linux-gnu/libpython3.12.so
+test -e "$TEN_PYTHON_LIB_PATH"
+
+# 3. Go, Node, Bun
+curl -fsSLO https://go.dev/dl/go1.24.3.linux-arm64.tar.gz
+sudo tar -C /usr/local -xzf go1.24.3.linux-arm64.tar.gz
+export PATH=/usr/local/go/bin:$PATH
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs
+curl -fsSL https://bun.sh/install | bash &amp;&amp; export PATH="$HOME/.bun/bin:$PATH"
+
+# 4. uv, task, tman — all have arm64 builds
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+curl -fsSL -o /tmp/tman.zip \
+  https://github.com/TEN-framework/ten-framework/releases/download/0.11.71/tman-linux-release-arm64.zip
+unzip -q /tmp/tman.zip -d /tmp/tman
+sudo install -m 0755 /tmp/tman/ten_manager/bin/tman /usr/local/bin/tman
+
+# 5. Confirm before building anything
+tman check env</code></pre>
+
+<p>Then an example:</p>
+
+<pre><code>cd ai_agents
+cp .env.example .env      # fill in provider keys
+cd agents/examples/websocket-example
+task install
+task run</code></pre>
+
+<p><code>task install</code> rewrites <code>tenapp/manifest-lock.json</code> with
+arm64 entries. That is expected — see 16.3.</p>
+
+<h4>11.1 Python dependencies</h4>
+
+<p>Every extension in <code>ai_agents/agents/ten_packages/extension/</code> is
+pure Python with no bundled binaries, so nothing there needs compiling for arm64.
+The aggregate set includes <code>numpy</code>, <code>scipy</code>,
+<code>torch</code>, <code>pillow</code>, <code>cryptography</code> and
+<code>soundfile</code>, all of which publish <code>manylinux</code> aarch64
+wheels.</p>
+
+<p><code>install_python_deps</code> installs requirements for <b>every</b>
+extension in the tenapp, not just the ones a graph uses.</p>
+
+<h3 id="ch12">12. AI agents on RPM-based distributions</h3>
+
+<p>Verified end to end on an aarch64 Fedora rebuild — Lychee 2025, glibc 2.41,
+gcc 14.3.1, dnf5 — as an ordinary non-root user, with no container anywhere.
+Everything below applies to stock Fedora, which shares the layout the differences
+are about. One item is specific to a rebuild and is marked as such.</p>
+
+<h4>12.1 What carried over unchanged</h4>
+
+<p>The parts that looked riskiest turned out to be portable. <code>tman
+install</code> resolved the arm64 packages straight from the registry. The Go
+binding linked against the arm64 <code>libten_runtime.so</code> and built clean
+(<code>GOARCH=arm64</code>, <code>GOARM64=v8.0</code>). And every Python
+dependency resolved to an aarch64 wheel — <code>pydantic_core</code>,
+<code>aiohttp</code>, <code>awscrt</code> and the rest arrived as
+<code>manylinux_*_aarch64</code>, with nothing falling back to a source
+build.</p>
+
+<h4>12.2 libpython lives in /usr/lib64</h4>
+
+<p>RPM distributions do not use Debian's multiarch layout:</p>
+
+<pre><code>export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so</code></pre>
+
+<p>The symlink comes from <code>python3.12-devel</code>;
+<code>python3.12-libs</code> supplies the <code>libpython3.12.so.1.0</code> it
+points at.</p>
+
+<h4>12.3 Fedora 41+ ships Python 3.13, not 3.12</h4>
+
+<p>Ubuntu 24.04 happens to ship exactly the 3.12 the arm64 binding was compiled
+against, which is why the Ubuntu path needs no version work. Fedora 41 and later
+default to 3.13, so 3.12 has to be installed alongside:</p>
+
+<pre><code>sudo dnf -y install python3.12 python3.12-devel</code></pre>
+
+<p>Parallel Python versions are installable, so this leaves the system
+interpreter alone.</p>
+
+<h4>12.4 UV_PYTHON must be pinned</h4>
+
+<div class="warn">
+<p>The failure with the least helpful symptom, and it does not exist on Ubuntu.
+Both dependency installers hardcode <code>uv pip install --system</code> —
+<code>install_python_deps.py</code> in the tenapp, and
+<code>PIP_INSTALL_CMD</code> in <code>install_deps_and_build.sh</code> — and
+<code>--system</code> selects the <em>default</em> interpreter, 3.13 here. The
+dependencies land in 3.13's site-packages while the runtime loads 3.12 through
+<code>TEN_PYTHON_LIB_PATH</code>. Nothing fails at install time; it surfaces much
+later as <code>ModuleNotFoundError</code> inside an extension.</p>
+<pre><code>export UV_PYTHON=/usr/bin/python3.12</code></pre>
+</div>
+
+<h4>12.5 <code>uv pip install --system</code> needs root</h4>
+
+<p><code>--system</code> writes to
+<code>/usr/local/lib/python3.12/site-packages</code> and its <code>lib64</code>
+sibling. Inside the container this is invisible because the container runs as
+root; on bare metal as an ordinary user, <code>task install</code> fails three
+retries deep on every extension with <code>Permission denied (os error
+13)</code>.</p>
+
+<p>Elevate only that step. Do <b>not</b> <code>sudo task install</code> — that
+runs <code>bun install</code> and <code>go build</code> as root too, leaving
+root-owned artefacts in the user's home:</p>
+
+<pre><code>cd ai_agents/agents/examples/&lt;example&gt;/tenapp
+sudo env "PATH=$PATH" UV_PYTHON=/usr/bin/python3.12 python3 scripts/install_python_deps.py</code></pre>
+
+<p><code>task install</code> aborts at that step, so the two after it have to be
+finished by hand — or use <code>finish_example_install_arm64.sh</code>
+(19.5).</p>
+
+<p>Both <code>/usr/local/lib/python3.12/site-packages</code> and its
+<code>lib64</code> sibling are on <code>/usr/bin/python3.12</code>'s default
+<code>sys.path</code>, so the embedded interpreter finds what lands there.</p>
+
+<h4>12.6 Package names</h4>
+
+<table>
+<thead><tr><th>Ubuntu</th><th>Fedora</th></tr></thead>
+<tbody>
+<tr><td><code>build-essential</code></td><td><code>dnf group install "Development Tools"</code></td></tr>
+<tr><td><code>python3-dev</code></td><td><code>python3.12-devel</code></td></tr>
+<tr><td><code>libasound2t64</code></td><td><code>alsa-lib-devel</code></td></tr>
+<tr><td><code>libunwind-dev</code></td><td><code>libunwind-devel</code></td></tr>
+<tr><td><code>libssl-dev</code></td><td><code>openssl-devel</code></td></tr>
+<tr><td><code>libc++1</code></td><td><code>libcxx</code></td></tr>
+<tr><td><code>libgstreamer1.0-dev</code></td><td><code>gstreamer1-devel</code></td></tr>
+<tr><td><code>pkg-config</code></td><td><code>pkgconf-pkg-config</code></td></tr>
+</tbody>
+</table>
+
+<h4>12.7 Installers keyed on os-release (rebuilds only)</h4>
+
+<p>Does not apply to stock Fedora.
+<code>https://rpm.nodesource.com/setup_20.x</code> exits with <code>Error: This
+script is intended for RPM-based systems.</code> on a rebuild whose
+<code>/etc/os-release</code> carries its own <code>ID</code> and leaves
+<code>ID_LIKE</code> unset — the script enumerates distributions by that field
+and never checks whether <code>rpm</code> is present. Lychee 2025 reports
+<code>ID=lychee</code> with no <code>ID_LIKE</code>, so it is refused despite
+being an RPM distribution with <code>dnf5</code>.</p>
+
+<p>Use the distribution's own package; the playground runs under <code>bun</code>
+rather than Node, so the Node major version is not load-bearing:</p>
+
+<pre><code>sudo dnf -y install nodejs npm</code></pre>
+
+<h4>12.8 Reading <code>tman check env</code> here</h4>
+
+<p>Two findings are expected and neither blocks an agents build:</p>
+
+<table>
+<thead><tr><th>Report</th><th>Reality</th></tr></thead>
+<tbody>
+<tr><td><code>⚠️ python3 3.13.9 … only supports Python 3.10</code></td><td>It inspects <code>python3</code>, the system 3.13. The interpreter that runs extensions is the 3.12 behind <code>TEN_PYTHON_LIB_PATH</code>. Taking its <code>pyenv install 3.10.18</code> advice breaks the build.</td></tr>
+<tr><td><code>❌ tgn Not installed</code></td><td><code>tgn</code> is only needed to build the core or a C++ extension. A Python example's <code>task install</code> runs <code>tman install</code>, <code>install_python_deps.py</code>, <code>bun install</code> and <code>go build</code>, none of which invoke it.</td></tr>
+</tbody>
+</table>
+
+<h4>12.9 Firewall and SELinux</h4>
+
+<p>Fedora runs firewalld by default. Browsing from the machine itself is
+unaffected; reaching the services from elsewhere needs the ports opened:</p>
+
+<pre><code>sudo firewall-cmd --add-port=3000/tcp --add-port=8080/tcp --add-port=49483/tcp</code></pre>
+
+<p>SELinux is relevant only to the container path. Under enforcing, the five bind
+mounts in <code>docker-compose.yml</code> carry no <code>:z</code> label and the
+container cannot read <code>/app</code>; add the labels through a local
+<code>docker-compose.override.yml</code> rather than editing the tracked compose
+file. A host in permissive mode is unaffected.</p>
+
+<h4>12.10 Verification result</h4>
+
+<p>Verified with <code>verify_arm64_install.sh --probe-worker</code>:
+<b>31 passed, 0 failed, 2 skipped.</b></p>
+
+<p>Read that as a floor, not a verdict. It says one example installs and starts
+correctly — a single graph, a single throwaway session, no conversation. The
+scope block the script prints lists what it leaves alone.</p>
+
+<p>Within that scope, the two findings that matter are dynamic; no static check
+reaches them:</p>
+
+<pre><code>8b. Worker probe
+  POST /start accepted
+  worker for verify-&lt;pid&gt; is registered
+
+9. Worker logs
+  no libpython load failure in worker logs
+  no ModuleNotFoundError in worker logs</code></pre>
+
+<div class="ok">
+<p>A clean worker log settles the architecture question specifically: it means
+<code>python_addon_loader</code> resolved <code>libpython3.12</code> through
+<code>TEN_PYTHON_LIB_PATH</code> instead of its built-in
+<code>libpython3.10.so</code>, and that the dependencies <code>uv</code>
+installed are visible to the interpreter the runtime embedded. It says nothing
+about whether any particular graph does useful work.</p>
+</div>
+
+<h3 id="ch13">13. AI agents in a container</h3>
+
+<p>The default image <code>ghcr.io/ten-framework/ten_agent_build:0.7.14</code> is
+a single-arch <code>linux/amd64</code> manifest, so
+<code>docker-compose.yml</code> pins <code>platform: linux/amd64</code> and runs
+under emulation on arm64.</p>
+
+<p><code>ai_agents/Dockerfile.dev</code> builds an arm64 replacement on
+<code>ubuntu:24.04</code>:</p>
+
+<pre><code>cd ai_agents
+docker build -f Dockerfile.dev -t ten_agent_dev:local .</code></pre>
+
+<p>Then set both variables in <code>ai_agents/.env</code>:</p>
+
+<pre><code>TEN_AGENT_DEV_IMAGE=ten_agent_dev:local
+TEN_AGENT_DEV_PLATFORM=linux/arm64</code></pre>
+
+<p>It is deliberately arm64-only and fails the build on amd64. A single image
+cannot serve both: x64 packages need Python 3.10 (Ubuntu 22.04) while arm64
+packages need glibc 2.38 (Ubuntu 24.04, Python 3.12), and those are mutually
+exclusive on one base.</p>
+
+<div class="bad">
+<p>Do not run the amd64 image on arm64. It trips the AVX2 probe in
+<code>agents/scripts/install_deps_and_build.sh</code>, which exists to catch
+exactly that, and aborts with <code>FATAL: unsupported platform.</code></p>
+</div>
+
+<p>The container removes three of the four RPM-specific problems, because the
+container is Ubuntu regardless of the host. It does not remove the fourth
+(SELinux bind-mount labels), and it answers nothing about whether the framework
+runs natively on the host distribution.</p>
+<h3 id="ch14">14. Building <code>agora_rtc</code> for aarch64</h3>
+
+<p>The published <code>agora_rtc</code> extension is a linux/x64 package, and
+that is what blocks 24 of the 26 examples on arm64. The extension is not open
+source, but Agora supplies the source on request, and it builds for aarch64 with
+<b>no change to its logic</b> — three environmental edits and the ordinary build
+command.</p>
+
+<div class="ok">
+<p>Verified end to end: the built extension connects to Agora, publishes an audio
+track and opens a data stream on an aarch64 host.</p>
+</div>
+
+<h4>14.1 RTC is two packages, not one</h4>
+
+<p>This distinction causes more confusion than anything else here. The SDK having
+an aarch64 build does not, on its own, get you anywhere: the object the runtime
+loads is the wrapper, and the wrapper is the piece that does not exist for
+aarch64 until you build it.</p>
+
+<figure id="fig6">
+<svg viewBox="0 0 880 420" role="img" aria-label="The TEN runtime dlopens libagora_rtc.so, the wrapper that implements TEN's extension interface. The wrapper resolves only two symbols from Agora's SDK, which itself knows nothing about TEN and links four further codec libraries. The wrapper must be built from source for aarch64; the SDK only needs repackaging.">
+  <defs><marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="170" y="20" width="440" height="50"/>
+  <text class="d-label" x="390" y="42" text-anchor="middle" fill="currentColor">TEN runtime — libten_runtime.so</text>
+  <text class="d-sub"   x="390" y="59" text-anchor="middle">knows nothing about Agora</text>
+
+  <line class="d-line" x1="390" y1="72" x2="390" y2="112" marker-end="url(#a6)"/>
+  <text class="d-edge" x="404" y="90">dlopen — scans extension/agora_rtc/lib/</text>
+  <text class="d-sub"  x="404" y="105">addon_autoload.c:441</text>
+
+  <rect class="d-hot-b" x="170" y="116" width="440" height="62"/>
+  <text class="d-label d-hot-t" x="390" y="140" text-anchor="middle">libagora_rtc.so — the wrapper</text>
+  <text class="d-sub"   x="390" y="157" text-anchor="middle">implements TEN's extension interface over Agora's SDK</text>
+  <text class="d-sub"   x="390" y="171" text-anchor="middle">Agora's source · version 0.23.9-t1 in the shipped examples</text>
+
+  <line class="d-line" x1="390" y1="180" x2="390" y2="224" marker-end="url(#a6)"/>
+  <text class="d-edge" x="404" y="198">resolves exactly TWO symbols:</text>
+  <text class="d-sub"  x="404" y="213">createAgoraService, getAgoraSdkVersion</text>
+
+  <rect class="d-box" x="170" y="228" width="440" height="62"/>
+  <text class="d-label" x="390" y="252" text-anchor="middle" fill="currentColor">libagora_rtc_sdk.so — Agora's SDK</text>
+  <text class="d-sub"   x="390" y="269" text-anchor="middle">348 exported agora_* C functions; zero C++ mangled symbols or vtables</text>
+  <text class="d-sub"   x="390" y="283" text-anchor="middle">everything else dispatches through the returned object's own vptr</text>
+
+  <line class="d-line" x1="390" y1="292" x2="390" y2="326" marker-end="url(#a6)"/>
+  <text class="d-edge" x="404" y="312">links</text>
+
+  <rect class="d-box" x="170" y="330" width="100" height="42"/>
+  <rect class="d-box" x="282" y="330" width="100" height="42"/>
+  <rect class="d-box" x="394" y="330" width="106" height="42"/>
+  <rect class="d-box" x="512" y="330" width="98"  height="42"/>
+  <text class="d-sub" x="220" y="356" text-anchor="middle">libaosl</text>
+  <text class="d-sub" x="332" y="356" text-anchor="middle">agora-fdkaac</text>
+  <text class="d-sub" x="447" y="356" text-anchor="middle">agora-ffmpeg</text>
+  <text class="d-sub" x="561" y="356" text-anchor="middle">agora-soundtouch</text>
+
+  <path class="d-hot" d="M622 116 L646 116 L646 178 L622 178"/>
+  <text class="d-hot-t" x="656" y="140">build this yourself</text>
+  <text class="d-sub"   x="656" y="156">ch. 14.4 — 3 edits, on an</text>
+  <text class="d-sub"   x="656" y="170">aarch64 host (no cross-compile)</text>
+
+  <path class="d-line" d="M622 228 L646 228 L646 372 L622 372"/>
+  <text class="d-label" x="656" y="292" fill="currentColor">repackage the tarball</text>
+  <text class="d-sub"   x="656" y="308">package_agora_rtc_sdk_arm64.sh</text>
+  <text class="d-sub"   x="656" y="322">Agora already publishes aarch64</text>
+
+  <text class="d-sub" x="158" y="252" text-anchor="end">this layer does not</text>
+  <text class="d-sub" x="158" y="266" text-anchor="end">know TEN exists</text>
+
+  <text class="d-hot-t" x="390" y="404" text-anchor="middle">An aarch64 SDK alone changes nothing. The bridge is the wrapper, and the wrapper is what the runtime loads.</text>
+</svg>
+<figcaption><b>Figure 6 — two packages, one of which you have to build.</b> The
+narrow interface is what makes the aarch64 port cheap: only
+<code>createAgoraService</code> and <code>getAgoraSdkVersion</code> are resolved
+at link time, and both are exported by the aarch64 build (confirmed with
+<code>nm -D</code>). Everything else the wrapper calls goes through virtual
+dispatch on objects the SDK hands back, so no class symbol has to
+match.</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>Package</th><th>What it is</th><th>aarch64</th></tr></thead>
+<tbody>
+<tr><td><code>agora_rtc_sdk</code> (system)</td><td>Agora's own SDK</td><td>Agora publishes it; repackage with <code>package_agora_rtc_sdk_arm64.sh</code></td></tr>
+<tr><td><code>agora_rtc</code> (extension)</td><td>the wrapper the runtime actually <code>dlopen</code>s</td><td>build from source</td></tr>
+</tbody>
+</table>
+
+<h4>14.2 The aarch64 SDK is the right SDK</h4>
+
+<p>At first glance the aarch64 tarball looks like a different product: 45 of the
+x64 package's 109 headers are absent, including <code>IAgoraRtcEngine.h</code>,
+<code>IAgoraRtcEngineEx.h</code> and <code>IAgoraMediaEngine.h</code>. The x64
+package is assembled from the full RTC SDK; the aarch64 tarball is the RTSA /
+server SDK.</p>
+
+<p>Symbol analysis says that does not matter. The x64
+<code>libagora_rtc.so</code> resolves exactly <b>two</b> symbols from the
+SDK:</p>
+
+<pre><code>createAgoraService      the low-level / server entry point (IAgoraService.h)
+getAgoraSdkVersion</code></pre>
+
+<p>It references no <code>agora::</code> class symbols directly — everything else
+goes through vtables — and never touches <code>createAgoraRtcEngine</code> or
+<code>IRtcEngine</code>. Both symbols are exported by the aarch64 build,
+confirmed with <code>nm -D</code>. The wrapper uses the low-level API
+exclusively, which is precisely what the aarch64 tarball provides.</p>
+
+<p>The tarball ships both header sets over one library, and the library's
+exported ABI is C: 348 <code>agora_*</code> functions, nine
+<code>create*</code>/<code>get*</code> factories, and <b>zero</b> C++ mangled
+symbols, vtables or typeinfo. The C++ interface still works —
+<code>createAgoraService()</code> returns a pointer whose virtual calls dispatch
+through the object's own vptr — which is why only two symbols need
+resolving.</p>
+
+<h4>14.3 The version pairing</h4>
+
+<p>Two versions are pinned against each other, and getting this wrong costs more
+time than anything else in this chapter.</p>
+
+<table>
+<thead><tr><th>wrapper</th><th>requires SDK</th></tr></thead>
+<tbody>
+<tr><td><code>0.23.9-t1</code> — the version the examples pin</td><td><code>=4.4.32-141</code></td></tr>
+<tr><td><code>0.26.0-rc14</code> — master at the time of writing</td><td><code>=4.4.32-175</code></td></tr>
+</tbody>
+</table>
+
+<div class="bad">
+<p>The pin is exact for a reason. <code>0.26</code> calls
+<code>setTotalExtraSendMs</code> and overrides
+<code>onCustomUserInfoUpdated</code>; neither exists in the 141 headers, so
+building it against 141 fails at compile time. <b>Editing the pin does not
+help</b> — a version number is not what is missing.</p>
+</div>
+
+<p>Ask Agora for the wrapper source <b>and</b> the SDK build its manifest pins,
+then check the pairing before building anything:</p>
+
+<pre><code>python3 -c "import json;m=json.load(open('manifest.json'));print(m['version'],
+  [d['version'] for d in m['dependencies'] if d['name']=='agora_rtc_sdk'])"
+strings &lt;sdk&gt;/agora_sdk/libagora_rtc_sdk.so | grep -oE '4\.4\.32\.[0-9]+' | sort -u</code></pre>
+
+<p><code>0.26</code> also adds two features worth knowing about, since they
+explain the new API calls: an audio-track selection refactor (three send modes
+chosen from <code>audio_scenario</code>, <code>extra_send_ms</code> and a
+fallback flag) and a fine-grained reporting transformation. Mode #3 — Extra Audio
+Send — is reachable only when <code>extra_send_ms != 0</code>, which no shipped
+graph sets.</p>
+
+<h4>14.4 The three edits</h4>
+
+<p>None of them touches the extension's behaviour.</p>
+
+<h5>1. Declare arm64</h5>
+<p>The manifest ships <code>supports</code> as x64 only, so tman will not install
+the result on arm64. Add the entry, keeping x64:</p>
+
+<pre><code>"supports": [
+  { "os": "linux", "arch": "x64" },
+  { "os": "linux", "arch": "arm64" }
+]</code></pre>
+
+<h5>2. Drop the x86-64 object from <code>resources</code></h5>
+<p><code>BUILD.gn</code> packages
+<code>lib/liblinux_audio_hy_extension.so</code>, which ships as x86-64 only. The
+runtime <code>dlopen</code>s every <code>.so</code> under an addon's
+<code>lib/</code>, so an object of the wrong architecture fails the load rather
+than being skipped (<a href="#fig4">Figure 4</a>). Remove that line for an arm64
+build; restore it for x64.</p>
+
+<h5>3. Add <code>#include &lt;cstdint&gt;</code></h5>
+<p>GCC 13 stopped including <code>&lt;cstdint&gt;</code> transitively, and the
+source relies on it in 27 files (<code>0.23.9-t1</code>) or 29
+(<code>0.26.0-rc14</code>). <b>This is not an arm64 issue</b> — the same build
+fails on x64 with GCC 14 — and is worth reporting upstream. To find them:</p>
+
+<pre><code>for f in $(find src -name '*.h' -o -name '*.cc'); do
+  grep -qE '\b(u?int(8|16|32|64)_t|uintptr_t|intptr_t)\b' "$f" &amp;&amp;
+  ! grep -qE '#include\s*&lt;c?stdint\.?h?&gt;' "$f" &amp;&amp; echo "$f"
+done</code></pre>
+
+<h4>14.5 The sequence</h4>
+
+<p>Four scripts, documented individually in ch. 19. Each verifies its own output
+and stops rather than passing a broken artefact on. Only the first can run
+anywhere; the rest need an aarch64 host, because there is no cross-compile path
+(ch. 10).</p>
+
+<figure id="fig7">
+<svg viewBox="0 0 974 288" role="img" aria-label="A four-step pipeline: the SDK tarball is repackaged into a TEN system package anywhere, then on an aarch64 host the wrapper is built, installed into an example's tenapp, and the remainder of task install is finished. Only the first step is architecture-independent.">
+  <defs><marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-hot" x="248" y="56" width="700" height="160" fill="none" stroke-dasharray="5 4" rx="8"/>
+  <text class="d-hot-t" x="598" y="48" text-anchor="middle">must run ON an aarch64 host — no cross-compile path exists (ch. 10)</text>
+
+  <rect class="d-box-soft" x="14" y="96" width="200" height="72"/>
+  <text class="d-label" x="114" y="120" text-anchor="middle" fill="currentColor">1 · package SDK</text>
+  <text class="d-sub"   x="114" y="137" text-anchor="middle">package_agora_rtc_</text>
+  <text class="d-sub"   x="114" y="151" text-anchor="middle">sdk_arm64.sh</text>
+  <text class="d-sub"   x="114" y="184" text-anchor="middle">runs anywhere</text>
+
+  <rect class="d-box-soft" x="264" y="96" width="200" height="72"/>
+  <text class="d-label" x="364" y="120" text-anchor="middle" fill="currentColor">2 · build wrapper</text>
+  <text class="d-sub"   x="364" y="137" text-anchor="middle">build_agora_rtc_</text>
+  <text class="d-sub"   x="364" y="151" text-anchor="middle">arm64.sh</text>
+
+  <rect class="d-box-soft" x="514" y="96" width="200" height="72"/>
+  <text class="d-label" x="614" y="120" text-anchor="middle" fill="currentColor">3 · install</text>
+  <text class="d-sub"   x="614" y="137" text-anchor="middle">install_agora_rtc_</text>
+  <text class="d-sub"   x="614" y="151" text-anchor="middle">arm64.sh</text>
+
+  <rect class="d-box-soft" x="748" y="96" width="200" height="72"/>
+  <text class="d-label" x="848" y="120" text-anchor="middle" fill="currentColor">4 · finish install</text>
+  <text class="d-sub"   x="848" y="137" text-anchor="middle">finish_example_</text>
+  <text class="d-sub"   x="848" y="151" text-anchor="middle">install_arm64.sh</text>
+
+  <line class="d-line" x1="216" y1="132" x2="260" y2="132" marker-end="url(#a7)"/>
+  <line class="d-line" x1="466" y1="132" x2="510" y2="132" marker-end="url(#a7)"/>
+  <line class="d-line" x1="716" y1="132" x2="744" y2="132" marker-end="url(#a7)"/>
+
+  <text class="d-sub" x="238" y="82"  text-anchor="middle">.tpkg</text>
+  <text class="d-sub" x="488" y="82"  text-anchor="middle">out/linux/arm64/</text>
+  <text class="d-sub" x="488" y="96"  text-anchor="middle">…/agora_rtc/</text>
+  <text class="d-sub" x="730" y="82"  text-anchor="middle">tenapp populated</text>
+
+  <text class="d-sub" x="14" y="42">inputs:</text>
+  <text class="d-sub" x="14" y="58">Agora SDK tarball (.tgz)&#160;&#160;→ step 1</text>
+  <text class="d-sub" x="14" y="74">wrapper source 0.23.9-t1&#160;&#160;→ step 2</text>
+
+  <path class="d-dash" d="M114 170 L114 200 L614 200 L614 172" />
+  <text class="d-sub" x="364" y="216" text-anchor="middle">the .tpkg is consumed twice: step 2 builds against it, step 3 places it into ten_packages/system/</text>
+
+  <text class="d-sub" x="848" y="184" text-anchor="middle">bin/main · python deps · playground</text>
+  <text class="d-sub" x="848" y="198" text-anchor="middle">— what step 3 deliberately leaves out</text>
+
+  <text class="d-sub" x="14" y="256">The build command differs from Agora's own Taskfile by one word:</text>
+  <text class="d-sub" x="14" y="272">theirs&#160;&#160;tgn gen linux x64&#160;&#160;&#160;release -- is_clang=false</text>
+  <text class="d-sub" x="470" y="272">arm64&#160;&#160;tgn gen linux <tspan class="d-hot-t" fill-opacity="1">arm64</tspan> release -- is_clang=false</text>
+</svg>
+<figcaption><b>Figure 7 — where the architecture boundary falls in the build.</b>
+Step 1 only rewrites a tarball into TEN's package layout, so it runs on any
+machine; steps 2–4 invoke <code>tgn</code>, <code>go build</code> and
+<code>bun</code> against the target and must run natively. The
+<code>.tpkg</code> crosses the boundary twice — once as a build input, once as an
+installed artefact — which is why both step 2 and step 3 take it as an
+argument.</figcaption>
+</figure>
+
+<pre><code># 1. SDK tarball -&gt; TEN system package        (runs anywhere)
+TMAN=/path/to/tman PKG_VERSION=4.4.32-141 \
+  ai_agents/agents/scripts/package_agora_rtc_sdk_arm64.sh &lt;sdk.tgz&gt; /tmp/out
+
+# 2. build the wrapper                        (must run ON an aarch64 host)
+ai_agents/agents/scripts/build_agora_rtc_arm64.sh &lt;wrapper-src&gt; /tmp/out/agora_rtc_sdk-*.tpkg
+
+# 3. place it into an example
+ai_agents/agents/scripts/install_agora_rtc_arm64.sh \
+  &lt;wrapper-src&gt;/out/linux/arm64/ten_packages/extension/agora_rtc \
+  /tmp/out/agora_rtc_sdk-*.tpkg voice-assistant
+
+# 4. finish the rest of `task install`
+ai_agents/agents/scripts/finish_example_install_arm64.sh voice-assistant</code></pre>
+
+<p>The wrapper links five Agora libraries plus three system ones, so
+<code>openssl-devel</code> and <code>zlib-devel</code> must be present:</p>
+
+<pre><code>ten_runtime  ten_utils
+agora_rtc_sdk  agora-fdkaac  agora-ffmpeg  agora-soundtouch  aosl
+z  crypto  ssl</code></pre>
+
+<div class="note">
+<p>The x64 package's SDK directory holds eight libraries, three more than the
+aarch64 tarball. Those three — <code>libagora_stt_ag_extension.so</code>,
+<code>libagora_stt_ms_extension.so</code>,
+<code>libagora_mcc_ysd_extension.so</code> — do <b>not</b> appear in the official
+x64 wrapper's <code>NEEDED</code> list, checked with <code>readelf -d</code>. The
+aarch64 package is complete.</p>
+</div>
+
+<h4>14.6 Two traps worth naming</h4>
+
+<div class="warn">
+<p><b>tman consults only the registry named <code>default</code>.</b>
+<code>registry.get("default")</code> in
+<code>ten_manager/src/registry/mod.rs</code> is the whole selection logic, so a
+local <code>file://</code> registry cannot coexist with the official one —
+pointing <code>default</code> at it would stop <code>ten_runtime</code> and
+everything else from resolving. The scripts install the rest through tman and
+place the SDK by hand.</p>
+</div>
+
+<div class="warn">
+<p><b><code>tman install</code> re-resolves and rewrites the lock.</b> Running it
+on <code>voice-assistant</code> upgraded 58 packages, <code>ten_runtime</code>
+among them. That is expected — no example passes <code>--locked</code> — but it
+means the runtime the extension loads against may not be the one it was compiled
+against. Step 6 of <code>install_agora_rtc_arm64.sh</code> resolves symbols
+against the tenapp's actual <code>ten_runtime</code> for exactly this
+reason.</p>
+</div>
+
+<h4>14.7 Verifying the result</h4>
+
+<p>Loading is not the same as working. A session that reaches Agora logs
+this:</p>
+
+<pre><code>[agora_rtc] on_start() done
+onConnecting:  channelId &lt;channel&gt;, state 2
+onConnected:   localUserId &lt;uid&gt;, state 3, reason 1
+               sid(&lt;session id&gt;)
+custom audio_track created
+audio track published
+onAudioTrackPublishSuccess</code></pre>
+
+<p>The <code>sid</code> comes from Agora's servers, so its presence distinguishes
+a real connection from local initialisation that never reached the network.</p>
+
+<pre><code>curl -s -X POST localhost:8080/start -H 'Content-Type: application/json' \
+  -d '{"request_id":"t1","channel_name":"probe","graph_name":"voice_assistant","user_uid":1234}'
+sleep 10 &amp;&amp; curl -s localhost:8080/list</code></pre>
+
+<p>A worker in <code>/list</code> means the addon loaded. Nothing there, and the
+reason is in the worker's own output — ch. 20.</p>
+<h2 id="part4"><span class="pnum">Part IV</span>Development</h2>
+
+<h3 id="ch15">15. Writing and maintaining an extension</h3>
+
+<p>An extension is four files and three names that must agree.</p>
+
+<pre><code>addon.py / main.cc     @register_addon_as_extension("X")   name 1
+manifest.json          "name": "X"                         name 2
+property.json          defaults
+graph node             "addon": "X"                        name 3</code></pre>
+
+<p>Section 3.3 covers what happens when they disagree. A node's <code>name</code>
+is separate and is what <code>connections</code> routes by (<a href="#fig2">Figure
+2</a>).</p>
+
+<h4>15.1 The manifest is the contract</h4>
+
+<pre><code>"api": {
+  "property": { "properties": { … } },
+  "cmd_in": [], "cmd_out": [],
+  "data_in": [], "data_out": [],
+  "audio_frame_in": [], "audio_frame_out": [],
+  "video_frame_in": [], "video_frame_out": []
+}</code></pre>
+
+<p>The schema is
+<code>core/src/ten_rust/src/json_schema/data/manifest.schema.json</code>. Only
+three top-level fields are required — <code>type</code>, <code>name</code>,
+<code>version</code> — and <code>additionalProperties</code> is <code>false</code>,
+so an unrecognised key is rejected outright. Permitted top-level keys are
+<code>type</code>, <code>name</code>, <code>version</code>,
+<code>description</code>, <code>display_name</code>, <code>readme</code>,
+<code>tags</code>, <code>dependencies</code>, <code>dev_dependencies</code>,
+<code>api</code>, <code>supports</code>, <code>package</code>,
+<code>scripts</code>.</p>
+
+<div class="warn">
+<p>Changing <code>api</code> changes the contract. Adding a property is
+compatible — nothing sets it, so the default applies. <b>Removing one, or
+changing what it means, alters the behaviour of existing graphs without any
+error.</b></p>
+</div>
+
+<p>Real extensions declare all ten arrays, empty ones included, and use
+<code>["**"]</code> for <code>package.include</code>. Property types are
+<code>string</code>, <code>int32</code>, <code>bool</code>, <code>object</code>,
+<code>array</code>.</p>
+
+<h4>15.2 A C++ extension</h4>
+
+<p>Skeleton at <code>packages/core_extensions/default_extension_cpp/</code>:</p>
+
+<pre><code>#include "ten_runtime/binding/cpp/ten.h"
+
+class my_extension_t : public ten::extension_t {
+  void on_init(ten::ten_env_t&amp;) override;
+  void on_start(ten::ten_env_t&amp;) override;
+  void on_cmd(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::cmd_t&gt;) override;
+  void on_data(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::data_t&gt;) override;
+  void on_audio_frame(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::audio_frame_t&gt;) override;
+  void on_stop(ten::ten_env_t&amp;) override;
+};
+TEN_CPP_REGISTER_ADDON_AS_EXTENSION(my_extension, my_extension_t);</code></pre>
+
+<p>Emitting an audio frame:</p>
+
+<pre><code>auto frame = ten::audio_frame_t::create("pcm_frame");
+frame-&gt;set_sample_rate(16000);
+frame-&gt;set_number_of_channels(1);
+frame-&gt;set_bytes_per_sample(2);
+frame-&gt;set_samples_per_channel(n);
+frame-&gt;set_data_fmt(TEN_AUDIO_FRAME_DATA_FMT_INTERLEAVE);
+frame-&gt;alloc_buf(size);
+ten::buf_t buf = frame-&gt;lock_buf();
+std::memcpy(buf.data(), pcm, size);
+frame-&gt;unlock_buf(buf);
+ten_env.send_audio_frame(std::move(frame));</code></pre>
+
+<div class="bad">
+<p><b><code>ten_env</code> may only be touched from the extension thread.</b> A
+vendor SDK that delivers on its own threads has to hop back through
+<code>ten::ten_env_proxy_t</code>. Getting this wrong produces crashes that look
+random and appear under load.</p>
+</div>
+
+<pre><code>ten_env_proxy_ = ten::ten_env_proxy_t::create(ten_env);   // on the extension thread
+…
+// from an SDK thread — copy first, the SDK may reuse its buffer immediately
+auto payload = std::make_shared&lt;std::string&gt;(static_cast&lt;const char*&gt;(pcm), bytes);
+ten_env_proxy_-&gt;notify([payload](ten::ten_env_t &amp;env) { … });
+…
+delete ten_env_proxy_;   // its destructor releases; do this before on_stop_done()</code></pre>
+
+<p><code>ten_package()</code> forwards <code>sources</code>,
+<code>include_dirs</code>, <code>libs</code>, <code>lib_dirs</code>,
+<code>ldflags</code>, <code>cflags*</code>, <code>configs</code>,
+<code>defines</code>, <code>enable_build</code>, <code>output_name</code>,
+<code>resources</code> — but <b>not <code>deps</code></b>. GN loads only
+<code>BUILD.gn</code> files reachable from the root target, so an extension in a
+tenapp also needs a <code>group</code> in the app's
+<code>scripts/BUILD.gn</code> depending on it, or it is silently never built.</p>
+
+<h4>15.3 Native extensions cost more to maintain</h4>
+
+<p>A pure-Python extension is one artefact for every platform. A native one must
+be <b>built and published per architecture</b>:</p>
+
+<pre><code>"supports": [{"os":"linux","arch":"x64"}, {"os":"linux","arch":"arm64"}]</code></pre>
+
+<p>Miss one and <code>dlopen</code> fails there — the extension does not exist on
+that platform, rather than running with less (<a href="#fig4">Figure 4</a>). That
+asymmetry is the whole reason ch. 14 exists.</p>
+
+<p>Write native code when wrapping an existing C/C++ library, or when the GIL
+genuinely blocks an audio path. The 89 vendor extensions are Python because they
+speak HTTP and WebSocket, where it buys nothing.</p>
+
+<h3 id="ch16">16. Version management</h3>
+
+<p>Versions are declared in four places, and only one of the arrows between them
+is doing load-bearing work.</p>
+
+<figure id="fig8">
+<svg viewBox="0 0 920 372" role="img" aria-label="Four version declaration sites: the tenapp manifest selects an extension version, the extension's own manifest pins an exact SDK version, the system package carries that version and its architecture support, and the lockfile records what tman resolved on the host that generated it.">
+  <defs><marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="40" y="20" width="500" height="70"/>
+  <text class="d-label" x="56" y="42" fill="currentColor">① tenapp/manifest.json</text>
+  <text class="d-sub"   x="56" y="62">"dependencies": [ { "name": "agora_rtc",</text>
+  <text class="d-sub"   x="56" y="78">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;"version": "=0.23.9-t1" } ]</text>
+
+  <line class="d-line" x1="290" y1="92" x2="290" y2="122" marker-end="url(#a8)"/>
+  <text class="d-edge" x="302" y="112">selects which extension build is installed</text>
+
+  <rect class="d-box" x="40" y="126" width="500" height="86"/>
+  <text class="d-label" x="56" y="148" fill="currentColor">② &lt;extension&gt;/manifest.json</text>
+  <text class="d-sub"   x="56" y="168">"version": "0.23.9-t1"</text>
+  <text class="d-sub"   x="56" y="184">"dependencies": [ { "name": "agora_rtc_sdk",</text>
+  <text class="d-sub"   x="56" y="200">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;"version": "=4.4.32-141" } ]</text>
+
+  <line class="d-hot" x1="290" y1="214" x2="290" y2="244" marker-end="url(#a8)"/>
+  <text class="d-hot-t" x="302" y="234">exact pin — the only load-bearing arrow</text>
+
+  <rect class="d-box" x="40" y="248" width="500" height="86"/>
+  <text class="d-label" x="56" y="270" fill="currentColor">③ &lt;system package&gt;/manifest.json</text>
+  <text class="d-sub"   x="56" y="290">"version": "4.4.32-141"</text>
+  <text class="d-sub"   x="56" y="306">"supports": [ { "os": "linux", "arch": "arm64" } ]</text>
+  <text class="d-sub"   x="56" y="322">— stamped by package_agora_rtc_sdk_arm64.sh</text>
+
+  <rect class="d-box" x="620" y="126" width="280" height="120"/>
+  <text class="d-label" x="636" y="148" fill="currentColor">④ tenapp/manifest-lock.json</text>
+  <text class="d-sub"   x="636" y="170">what tman actually resolved,</text>
+  <text class="d-sub"   x="636" y="186">on the machine that ran install</text>
+  <text class="d-sub"   x="636" y="210">re-resolved and rewritten on</text>
+  <text class="d-sub"   x="636" y="226">every install — nothing here</text>
+  <text class="d-sub"   x="636" y="242">passes --locked</text>
+
+  <path class="d-dash" d="M542 55 L580 55 L580 150 L616 150" marker-end="url(#a8)"/>
+  <path class="d-dash" d="M542 169 L616 169" marker-end="url(#a8)"/>
+  <path class="d-dash" d="M542 291 L580 291 L580 200 L616 200" marker-end="url(#a8)"/>
+
+  <text class="d-hot-t" x="600" y="290">0.26 calls setTotalExtraSendMs and</text>
+  <text class="d-hot-t" x="600" y="306">overrides onCustomUserInfoUpdated —</text>
+  <text class="d-sub"   x="600" y="322">absent from the 141 headers, so the</text>
+  <text class="d-sub"   x="600" y="336">mismatch is a COMPILE error.</text>
+  <text class="d-sub"   x="600" y="352">Editing the pin cannot conjure them.</text>
+
+  <text class="d-sub" x="40" y="356">Read the registry, not the lock: every example lock in this repo says linux/x64, and the same versions are published for arm64.</text>
+</svg>
+<figcaption><b>Figure 8 — four declarations, one real constraint.</b> ① and ④
+move on their own: ① is a preference and ④ is a record of one resolution on one
+host. ②→③ is the pin that has to be right, because it is checked by the compiler
+rather than by the package manager — a wrong pairing is a build failure with a
+missing-symbol message, not a version warning. A manually placed package
+(16.2) sits outside all four.</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>Syntax</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>"=0.23.9-t1"</code></td><td>exact — only this build</td></tr>
+<tr><td><code>"0.11"</code></td><td>a range — the newest compatible</td></tr>
+</tbody>
+</table>
+
+<p>An exact pin on a native SDK is doing real work: without it tman installs an
+SDK whose API does not match and the failure moves from compile time to run
+time.</p>
+
+<h4>16.1 Upgrading</h4>
+
+<p>There is no <code>tman upgrade</code>. <code>tman install</code>
+<b>re-resolves and rewrites the lock</b> unless <code>--locked</code> is passed,
+so:</p>
+
+<ul>
+<li>version pinned exactly → edit <code>manifest.json</code>, then <code>tman install</code></li>
+<li>version given as a range → <code>tman install</code> alone picks up newer builds</li>
+<li>one package only → <code>tman install extension &lt;name&gt;@&lt;version&gt;</code></li>
+</ul>
+
+<p>Always check what moved:</p>
+
+<pre><code>git diff tenapp/manifest-lock.json</code></pre>
+
+<h4>16.2 Manually placed packages are outside all of this</h4>
+
+<p>An extension placed by hand — as <code>agora_rtc</code> is on arm64 — has no
+<code>.ten/package_info/</code>, so tman does not know it exists. <code>tman
+install</code> will not touch it and <code>tman uninstall</code> will not find
+it. Upgrading means rebuilding and re-copying: new source, matching SDK, re-apply
+the three edits, rebuild, place.</p>
+
+<p>That is the price of stepping outside the package manager, and the reason 14.6
+recommends getting the packages published rather than living here.</p>
+
+<h4>16.3 Lockfiles say less than they appear to</h4>
+
+<p>A committed <code>manifest-lock.json</code> records the platform resolved on
+the machine that generated it, not the package's platform matrix. Every example
+lock in this repo reads <code>{"os": "linux", "arch": "x64"}</code>, which looks
+like a hard arm64 block and is not — the same versions are published for
+arm64.</p>
+
+<p>Nothing here passes <code>tman install --locked</code>, so the lock is
+re-resolved and rewritten against the host on every install. <b>Read the
+registry, not the lock.</b></p>
+
+<h3 id="ch17">17. Configuration: swapping a vendor, pointing at a local model</h3>
+
+<h4>17.1 Where the settings live</h4>
+
+<p>A vendor's settings go in the node's <code>property.params</code>, flat. There
+is no wrapper naming the module or the vendor — nothing in this repo reads a
+<code>{"asr": {"vendor": …}}</code> shape. Each extension's own test configs are
+the authority; <code>soniox_asr_python/tests/configs/property_en.json</code> is
+representative:</p>
+
+<pre><code>{
+    "params": {
+        "api_key": "${env:SONIOX_ASR_API_KEY}",
+        "url": "wss://stt-rt.soniox.com/transcribe-websocket",
+        "model": "stt-rt-v4",
+        "language_hints": ["en"],
+        "sample_rate": 16000
+    }
+}</code></pre>
+
+<p>Swapping a provider means changing <code>addon</code> and replacing
+<code>params</code> on that node. Leave <code>name</code> and
+<code>extension_group</code> alone.</p>
+
+<h4>17.2 <code>${env:VAR}</code> has two failure modes, and they look nothing alike</h4>
+
+<p>The runtime resolves placeholders in
+<code>core/src/ten_utils/lib/sys/general/placeholder.c</code>, recursively through
+objects and arrays (<code>ten_extension_property_resolve_placeholders</code>,
+<code>core/src/ten_runtime/extension/internal/metadata.c</code>), so depth does
+not matter. What matters is whether the variable exists.</p>
+
+<figure id="fig9">
+<svg viewBox="0 0 920 300" role="img" aria-label="Three states of an environment variable referenced by a placeholder: absent with no default kills the process, present but empty resolves to an empty string and fails much later inside the vendor extension, and present with a value works normally.">
+  <defs><marker id="a9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <text class="d-label" x="30"  y="34" fill="currentColor">state of the variable</text>
+  <text class="d-label" x="360" y="34" fill="currentColor">getenv()</text>
+  <text class="d-label" x="530" y="34" fill="currentColor">what the runtime does — placeholder.c</text>
+  <line class="d-line" x1="30" y1="44" x2="890" y2="44"/>
+
+  <rect class="d-hot-b" x="20" y="60" width="300" height="56"/>
+  <text class="d-label d-hot-t" x="34" y="82">not set, and no "|" default</text>
+  <text class="d-sub" x="34" y="102">"${env:DEEPGRAM_API_KEY}"</text>
+  <text class="d-sub" x="360" y="92">NULL</text>
+  <line class="d-hot" x1="440" y1="88" x2="516" y2="88" marker-end="url(#a9)"/>
+  <rect class="d-hot-b" x="520" y="60" width="370" height="56"/>
+  <text class="d-label d-hot-t" x="534" y="82">exit(EXIT_FAILURE) — line 207</text>
+  <text class="d-sub" x="534" y="102">TEN_LOGE at line 196, then the worker dies mid-resolution</text>
+
+  <rect class="d-box" x="20" y="128" width="300" height="56"/>
+  <text class="d-label" x="34" y="150" fill="currentColor">set, but empty</text>
+  <text class="d-sub" x="34" y="170">what copying .env.example gives every key</text>
+  <text class="d-sub" x="360" y="160">""</text>
+  <line class="d-line" x1="440" y1="156" x2="516" y2="156" marker-end="url(#a9)"/>
+  <rect class="d-box" x="520" y="128" width="370" height="56"/>
+  <text class="d-label" x="534" y="150" fill="currentColor">resolves to an empty string — no complaint</text>
+  <text class="d-sub" x="534" y="170">the vendor rejects it much later, deep in the session log</text>
+
+  <rect class="d-box" x="20" y="196" width="300" height="56"/>
+  <text class="d-label" x="34" y="218" fill="currentColor">set, with a value</text>
+  <text class="d-sub" x="34" y="238">— or absent with a "|" default supplied</text>
+  <text class="d-sub" x="360" y="228">value</text>
+  <line class="d-line" x1="440" y1="224" x2="516" y2="224" marker-end="url(#a9)"/>
+  <rect class="d-box" x="520" y="196" width="370" height="56"/>
+  <text class="d-label" x="534" y="218" fill="currentColor">normal</text>
+  <text class="d-sub" x="534" y="238">"${env:OPENAI_PROXY_URL|}" makes a variable optional</text>
+
+  <text class="d-hot-t" x="20" y="282">The middle row wastes the most time: an unfilled key is PRESENT, not absent — so nothing stops, and the only symptom is a vendor error.</text>
+</svg>
+<figcaption><b>Figure 9 — absent and empty are different failures.</b> The
+asymmetry is deliberate: a required key that is simply missing should stop the
+process rather than let it run misconfigured. But <code>.env.example</code> sets
+every key to the empty string, so the common mistake produces the middle row,
+which the runtime treats as a legitimate value. The <code>|</code> suffix is the
+only way to make a variable genuinely optional.</figcaption>
+</figure>
+
+<h4>17.3 Nothing warns about a nested key</h4>
+
+<p><code>ai_agents/server/internal/http_server.go</code> validates
+<code>${env:…}</code> before spawning a worker, but the loop reads only a node's
+<b>top-level</b> properties and skips any value that is not a string. Every
+vendor key in these examples lives under <code>params</code>, which is an object,
+so it is never examined. A missing or empty vendor key produces no
+<code>Environment variable not found</code> line anywhere.</p>
+
+<p><code>verify_arm64_install.sh</code> covers that gap — run it before starting a
+session rather than diagnosing from logs afterwards.</p>
+
+<h4>17.4 A local LLM usually needs no code</h4>
+
+<p><code>openai_llm2_python</code>'s first property is <code>base_url</code>:</p>
+
+<pre><code>{ "base_url": "https://api.openai.com/v1", "api_key": "${env:OPENAI_API_KEY}", … }</code></pre>
+
+<p>Any local server exposing an OpenAI-compatible
+<code>/v1/chat/completions</code> — vLLM, Ollama's <code>/v1</code> layer,
+llama.cpp's <code>llama-server</code>, LM Studio, Xinference — is a one-field
+change:</p>
+
+<pre><code>"property": {
+  "base_url": "http://127.0.0.1:11434/v1",
+  "api_key": "not-needed",
+  "model": "qwen2.5:14b"
+}</code></pre>
+
+<p><code>api_key</code> cannot be omitted or empty: most local servers ignore its
+value, but an empty string makes the extension reject it — the middle row of
+<a href="#fig9">Figure 9</a> again.</p>
+
+<p>Write a new extension only when the protocol is genuinely incompatible. The
+skeleton is
+<code>packages/core_extensions/default_llm_extension_python/</code> — 28 lines,
+of which the only required method is <code>on_call_chat_completion</code>
+returning an <code>AsyncGenerator[LLMResponse, None]</code>. The base class
+handles message routing, the tool protocol and the exchange with
+<code>main_control</code>.</p>
+
+<h4>17.5 When a change takes effect</h4>
+
+<table>
+<thead><tr><th>Changed</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>a value inside <code>params</code> (voice id, model, language)</td><td>next session — the server re-reads <code>property.json</code> per worker</td></tr>
+<tr><td><code>addon</code>, the node set, or <code>connections</code></td><td>full restart of <code>task run</code></td></tr>
+<tr><td><code>.env</code></td><td>full restart — read once at startup</td></tr>
+</tbody>
+</table>
+
+<h3 id="ch18">18. Testing</h3>
+
+<p>Two harnesses with the same shape and opposite requirements. The distinction
+that matters is whether the vendor client is real.</p>
+
+<table>
+<thead><tr><th></th><th>Standalone</th><th>Guarder</th></tr></thead>
+<tbody>
+<tr><th>Command</th><td><code>task test-extension EXTENSION=agents/ten_packages/extension/&lt;ext&gt;</code></td><td><code>task asr-guarder-test EXTENSION=&lt;ext&gt;</code> / <code>tts-guarder-test</code></td></tr>
+<tr><th>Lives in</th><td><code>&lt;ext&gt;/tests/</code></td><td><code>agents/integration_tests/{asr,tts}_guarder/</code></td></tr>
+<tr><th>Vendor client</th><td><b>mocked</b> — the client class is patched out</td><td><b>real</b></td></tr>
+<tr><th>Credentials</th><td>none</td><td>the vendor key</td></tr>
+<tr><th>Network</th><td>none</td><td>yes</td></tr>
+<tr><th>arm64</th><td><b>runs today</b> — depends only on runtime libraries that have aarch64 builds</td><td>architecture-correct, but never exercised there</td></tr>
+</tbody>
+</table>
+
+<p>Both run a real TEN app rather than a stub: each <code>conftest.py</code>
+starts a <code>FakeApp</code> subclass of <code>App</code> on its own thread and
+blocks the fixture until <code>on_init</code> fires, so the C runtime, the Python
+binding and the addon manager are live throughout. A standalone test is a unit
+test of the extension, not of a mock.</p>
+
+<h4>18.1 How a standalone run works</h4>
+
+<p><code>&lt;ext&gt;/tests/bin/start</code>:</p>
+
+<pre><code>export PYTHONPATH=.ten/app:.ten/app/ten_packages/system/ten_runtime_python/lib:…
+export TEN_APP_BASE_DIR=.ten/app
+pytest -s tests/ "$@"</code></pre>
+
+<p><code>.ten/app</code> is a throwaway app tree from <code>tman -y install
+--standalone</code>, which <code>task test-extension</code> creates and deletes.
+<code>test-extension-no-install</code> skips both — the faster loop while
+iterating, and the reason a stale <code>.ten/</code> causes confusing failures
+later (<code>rm -rf &lt;ext&gt;/.ten</code>).</p>
+
+<p>The mock patches the vendor client where the extension imports it. For
+<code>soniox_asr_python</code> that is
+<code>soniox_asr_python.extension.SonioxWebsocketClient</code>, replaced by a
+<code>MagicMock</code> whose <code>connect</code>, <code>send_audio</code>,
+<code>finalize</code> and <code>stop</code> are <code>AsyncMock</code>s, plus
+<code>trigger_open</code>, <code>trigger_transcript</code>,
+<code>trigger_error</code>, <code>trigger_close</code> and
+<code>trigger_finished</code> helpers the test calls to drive the extension
+through states the real vendor would produce. Sixteen files exercise finalize
+modes, reconnection, confidence, multilingual output, sentence termination,
+invalid params and vendor errors — none needing a key.</p>
+
+<p>Anything after <code>--</code> goes to pytest:</p>
+
+<pre><code>task test-extension-no-install EXTENSION=agents/ten_packages/extension/soniox_asr_python -- -k test_finalize -s -v</code></pre>
+
+<h4>18.2 How a guarder run works</h4>
+
+<p>One harness parameterised by extension name. It rewrites its own manifest
+first:</p>
+
+<pre><code>sed "s/{{extension_name}}/$EXT_NAME/g" manifest-tmpl.json &gt; manifest.json
+./scripts/install_deps_and_build.sh &lt;os&gt; &lt;arch&gt;
+./tests/bin/start --extension_name &lt;ext&gt; --config_dir &lt;ext&gt;/tests/configs</code></pre>
+
+<p><code>install_deps_and_build.sh</code> detects the host architecture when
+called without arguments, and the Taskfile passes it explicitly, so this path is
+arch-correct on arm64 — though CI has never exercised it there.</p>
+
+<p><code>--config_dir</code> points at the extension's own
+<code>tests/configs/</code>, the authoritative property shape for that vendor.
+Those files carry real <code>${env:…}</code> placeholders, so the corresponding
+key must be set.</p>
+
+<p>Audio fixtures are 16 kHz PCM under <code>tests/test_data/</code>:
+<code>16k_en_us.pcm</code>, <code>16k_en_us_helloworld.pcm</code>,
+<code>16k_zh_cn.pcm</code>, <code>16k_es_es.pcm</code>.</p>
+
+<p><code>tests/bin/start</code> excludes <code>test_long_duration_stream</code> by
+default. Do not run the ASR and TTS guarders concurrently in one container —
+their build scripts collide on shared temp paths.</p>
+
+<h4>18.3 Core tests</h4>
+
+<p>The arm64 job sets <code>ten_enable_tests=false</code> along with the rust and
+manager test flags, so <b>no test target has ever been built on arm64</b>.
+Building them means building the core from source (ch. 10); the binaries land in
+<code>out/linux/arm64/tests/</code>. Coverage cannot be enabled — see 8.1.</p>
+
+<h4>18.4 Where test logs go</h4>
+
+<p>Neither harness writes a file. Both <code>conftest.py</code> files configure
+<code>{"emitter": {"type": "console", "config": {"stream": "stdout"}}}</code> at
+debug level, so capture it if you want one:</p>
+
+<pre><code>task test-extension EXTENSION=… 2&gt;&amp;1 | tee /tmp/ext_test.log</code></pre>
+
+<p>This is a different destination from a running agent, where the API server
+gives each worker its own file under <code>LOG_PATH</code>. Test runs never write
+there.</p>
+<h2 id="part5"><span class="pnum">Part V</span>Operations</h2>
+
+<h3 id="ch19">19. The scripts</h3>
+
+<p>Five scripts under <code>ai_agents/agents/scripts/</code>. Each verifies its
+own output and stops rather than passing a broken artefact to the next one.</p>
+
+<h4>19.1 <code>verify_arm64_install.sh</code></h4>
+
+<p>Checks an <b>installed</b> tenapp: what <code>tman install</code> pulled from
+the registry plus what <code>task install</code> built locally. It does not check
+a from-source core build. Exits with the number of failed checks, so it is usable
+in CI.</p>
+
+<pre><code>./verify_arm64_install.sh                  # static only
+./verify_arm64_install.sh --probe-worker   # also exercises the Python binding
+./verify_arm64_install.sh voice-assistant  # a different example</code></pre>
+
+<table>
+<thead><tr><th>Section</th><th>Checks</th></tr></thead>
+<tbody>
+<tr><td>0 Host</td><td>arch, kernel, <code>ID</code>/<code>ID_LIKE</code>/<code>VERSION_ID</code>, release package, glibc, gcc, package manager, SELinux, container detection, CPU, every <code>python3.x</code>, every libpython. Asserts the glibc floor and the package family — from the rpm database when <code>os-release</code> does not say.</td></tr>
+<tr><td>1 Environment</td><td><code>TEN_PYTHON_LIB_PATH</code> and <code>UV_PYTHON</code>, and derives the interpreter the runtime will embed</td></tr>
+<tr><td>2 Inventory</td><td>every system package and extension with its manifest version, which addons a graph instantiates, and each extension's language. An addon a graph names but that is not installed is a failure of its own.</td></tr>
+<tr><td>3 Architecture</td><td>the ELF architecture of <b>every</b> shared object, not a sample</td></tr>
+<tr><td>4 Linkage</td><td>unresolved <code>NEEDED</code> entries, separating a library absent from the tree (a failure) from one present but off the search path (expected for a <code>dlopen</code>ed addon — reports the RUNPATH and says why)</td></tr>
+<tr><td>5 glibc</td><td>what <code>libten_runtime.so</code> actually requires, against the host's</td></tr>
+<tr><td>6 Python ABI</td><td>the libpython name the loader defaults to; probes <code>ten_runtime</code> and <code>ten_ai_base</code> <b>separately</b> so a failure is attributed to the layer that broke, printing the exception verbatim</td></tr>
+<tr><td>7 Artefacts</td><td>the two locally built Go binaries</td></tr>
+<tr><td>7b Placeholders</td><td>walks the graph for <code>${env:…}</code>, resolves each against <code>ai_agents/.env</code>, separates absent-and-required from present-but-empty (<a href="#fig9">Figure 9</a>), and reports a disagreement between <code>.env</code> and the environment rather than picking a winner. Never prints a value.</td></tr>
+<tr><td>8 Services</td><td>the three ports, <code>/health</code>, <code>/graphs</code>, and <b>processes in <code>T</code> state</b></td></tr>
+<tr><td>8b Worker probe</td><td>with <code>--probe-worker</code>, starts a throwaway session through the API and stops it. Needs no credentials: a worker that fails to authenticate has still loaded libpython and instantiated its extensions.</td></tr>
+<tr><td>9 Worker logs</td><td>the libpython load failure and <code>ModuleNotFoundError</code>; reports <b>skip</b> rather than pass when no session has run</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<p>Two checks exist because the failures they catch are otherwise silent. Section
+8 detects processes in <code>T</code> state — a backgrounded <code>task run</code>
+stopped by SIGTTOU keeps its listening socket and looks healthy to a port check
+while accepting nothing. Section 9 refuses to report a pass it has not earned: an
+unexercised Python binding is not evidence of a working one.</p>
+</div>
+
+<p>The summary states its scope before the result. A green run means one example
+installs and starts on this architecture — one graph, one throwaway session, no
+conversation.</p>
+
+<h4>19.2 <code>package_agora_rtc_sdk_arm64.sh</code></h4>
+
+<p>Converts Agora's aarch64 tarball into a TEN <code>agora_rtc_sdk</code> system
+package.</p>
+
+<pre><code>TMAN=/path/to/tman PKG_VERSION=4.4.32-141 \
+  ./package_agora_rtc_sdk_arm64.sh &lt;sdk.tgz&gt; [output-dir]</code></pre>
+
+<p>Refuses to run unless the libraries really are aarch64, maps the flat
+<code>include/</code> tree onto the
+<code>include/rtc/low_level_api/include/</code> layout the x64 package uses,
+stamps <code>supports: linux/arm64</code>, and writes a <code>PROVENANCE.md</code>
+recording where the package came from and how it differs from the published x64
+one.</p>
+
+<p><code>PKG_VERSION</code> must match what the wrapper's manifest pins — see
+14.3 and <a href="#fig8">Figure 8</a>.</p>
+
+<h4>19.3 <code>build_agora_rtc_arm64.sh</code></h4>
+
+<p>Builds the wrapper. <b>Must run on an aarch64 host</b>; there is no
+cross-compile path (ch. 10).</p>
+
+<pre><code>./build_agora_rtc_arm64.sh &lt;wrapper-src-dir&gt; &lt;sdk.tpkg&gt;</code></pre>
+
+<table>
+<thead><tr><th>Step</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>installs <code>openssl-devel</code> and <code>zlib-devel</code>, checks <code>tgn</code> and <code>tman</code></td></tr>
+<tr><td>2</td><td>drops the <code>agora_rtc_sdk</code> dependency for the resolve, runs <code>tman -y install --standalone</code>, restores the manifest</td></tr>
+<tr><td>3</td><td>unpacks the SDK into <code>.ten/app</code>, verifies five aarch64 libraries and the header layout</td></tr>
+<tr><td>4</td><td><code>tgn gen linux arm64 release -- is_clang=false</code></td></tr>
+<tr><td>5</td><td><code>tgn build</code>, with <code>NINJAFLAGS</code> capped — 16k lines of C++ against this SDK is memory-hungry</td></tr>
+<tr><td>6</td><td>reports the ELF architecture, the <code>NEEDED</code> list and unresolved symbols</td></tr>
+</tbody>
+</table>
+
+<p>Step 2 exists because tman resolves the whole tree or fails, and the registry
+has no arm64 <code>agora_rtc_sdk</code> — see 14.6.</p>
+
+<h4>19.4 <code>install_agora_rtc_arm64.sh</code></h4>
+
+<p>Places the built extension and the SDK into an example's tenapp.</p>
+
+<pre><code>./install_agora_rtc_arm64.sh &lt;built-extension-dir&gt; &lt;sdk.tpkg&gt; [example]</code></pre>
+
+<p>The layout it produces was read off an official x64 <code>tman install</code>,
+not inferred:</p>
+
+<pre><code>ten_packages/extension/agora_rtc/{manifest.json,property.json,lib/*.so}
+ten_packages/system/agora_rtc_sdk/{include,lib}/</code></pre>
+
+<p>Step 5 scans every <code>.so</code> and <b>aborts on any x86-64 object</b>
+(<a href="#fig4">Figure 4</a>); step 6 resolves symbols with
+<code>LD_LIBRARY_PATH</code> set the way the runtime will have it.</p>
+
+<h4>19.5 <code>finish_example_install_arm64.sh</code></h4>
+
+<p>What <code>install_agora_rtc_arm64.sh</code> deliberately leaves out — the rest
+of <code>task install</code>.</p>
+
+<pre><code>./finish_example_install_arm64.sh [example]</code></pre>
+
+<table>
+<thead><tr><th>Step</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>builds <code>tenapp/bin/main</code>, which <code>scripts/start.sh</code> execs. Without it <code>tman run start</code> fails with exit 127</td></tr>
+<tr><td>3</td><td>installs each extension's <code>requirements.txt</code>, elevated — and only this step</td></tr>
+<tr><td>4</td><td><code>bun install</code> in the <b>shared</b> <code>ai_agents/playground</code>, which is what <code>voice-assistant</code> runs</td></tr>
+<tr><td>5</td><td>resolves <code>bin/main</code>'s libraries the way <code>start.sh</code> will, and imports the core third-party packages</td></tr>
+</tbody>
+</table>
+
+<p>The two halves of <code>scripts/install_python_deps.sh</code> need different
+privileges, so they run separately here: the Go build stays as the invoking user,
+while <code>uv pip install --system</code> writes under <code>/usr/local</code>
+and needs root (12.5).</p>
+
+<p>Step 4's check is not decoration. Without
+<code>node_modules/.bin/next</code>, <code>bun run dev</code> falls back to
+<code>PATH</code> and finds nmh's <code>/usr/bin/next</code>, which exits 1 with a
+message about mail being unconfigured.</p>
+
+<h3 id="ch20">20. Where the logs are</h3>
+
+<p>Three places, and choosing the wrong one wastes the most time. Which of them
+carries a worker's output is decided at run time by a flag, not by
+configuration you can read off disk.</p>
+
+<figure id="fig10">
+<svg viewBox="0 0 920 392" role="img" aria-label="task run puts three services in one terminal whose stdout becomes task_run.log. The API server spawns one worker per session; whether that worker's output lands in its own file under LOG_PATH or is merged into task_run.log depends on the Log2Stdout flag the server prints in its handlerStart line.">
+  <defs><marker id="a10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="24" y="34" width="512" height="98" stroke-dasharray="5 4"/>
+  <text class="d-label" x="40" y="54" fill="currentColor">task run — one terminal, three services</text>
+  <rect class="d-box-soft" x="40"  y="66" width="152" height="50"/>
+  <rect class="d-box-soft" x="204" y="66" width="152" height="50"/>
+  <rect class="d-box-soft" x="368" y="66" width="152" height="50"/>
+  <text class="d-sub" x="116" y="88"  text-anchor="middle">bin/api</text>
+  <text class="d-sub" x="116" y="104" text-anchor="middle">:8080</text>
+  <text class="d-sub" x="280" y="88"  text-anchor="middle">playground</text>
+  <text class="d-sub" x="280" y="104" text-anchor="middle">:3000</text>
+  <text class="d-sub" x="444" y="88"  text-anchor="middle">tman designer</text>
+  <text class="d-sub" x="444" y="104" text-anchor="middle">:49483</text>
+
+  <line class="d-line" x1="280" y1="134" x2="280" y2="176" marker-end="url(#a10)"/>
+  <text class="d-edge" x="292" y="160">stdout ─ tee</text>
+
+  <rect class="d-box-soft" x="150" y="180" width="260" height="50"/>
+  <text class="d-label" x="280" y="202" text-anchor="middle" fill="currentColor">/tmp/task_run.log</text>
+  <text class="d-sub"   x="280" y="219" text-anchor="middle">service startup · /start failures · proxy errors</text>
+
+  <line class="d-line" x1="194" y1="91" x2="614" y2="91" marker-end="url(#a10)"/>
+  <text class="d-edge" x="404" y="83" text-anchor="middle">POST /start → spawns one worker per session</text>
+
+  <rect class="d-box-soft" x="618" y="66" width="278" height="50"/>
+  <text class="d-label" x="757" y="88"  text-anchor="middle" fill="currentColor">worker — tman run start</text>
+  <text class="d-sub"   x="757" y="104" text-anchor="middle">the graph, the extensions, the conversation</text>
+
+  <line class="d-hot" x1="757" y1="120" x2="757" y2="156" marker-end="url(#a10)"/>
+  <rect class="d-hot-b" x="620" y="160" width="274" height="42"/>
+  <text class="d-label d-hot-t" x="757" y="186" text-anchor="middle">Log2Stdout ?</text>
+
+  <path class="d-line" d="M620 181 L470 181 L470 178" marker-end="url(#a10)"/>
+  <text class="d-edge" x="546" y="174" text-anchor="middle">true</text>
+
+  <line class="d-line" x1="757" y1="206" x2="757" y2="238" marker-end="url(#a10)"/>
+  <text class="d-edge" x="769" y="228">false</text>
+
+  <rect class="d-box" x="620" y="242" width="274" height="52"/>
+  <text class="d-label" x="757" y="264" text-anchor="middle" fill="currentColor">$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</text>
+  <text class="d-sub"   x="757" y="281" text-anchor="middle">one file per worker · LOG_PATH → /tmp/ten_agent</text>
+
+  <rect class="d-box" x="620" y="306" width="274" height="52"/>
+  <text class="d-label" x="757" y="328" text-anchor="middle" fill="currentColor">$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</text>
+  <text class="d-sub"   x="757" y="345" text-anchor="middle">the graph configuration that session actually used</text>
+  <path class="d-dash" d="M757 296 L757 302"/>
+
+  <text class="d-hot-t" x="24" y="264">Do not guess which. The server records both in its own handlerStart line:</text>
+  <text class="d-sub"   x="24" y="286">grep -o 'LogFile:[^ ]*'&#160;&#160;&#160;&#160;/tmp/task_run.log | tail -1</text>
+  <text class="d-sub"   x="24" y="302">grep -o 'Log2Stdout:[a-z]*' /tmp/task_run.log | tail -1</text>
+  <text class="d-sub"   x="24" y="326">With Log2Stdout:true the per-worker file may not exist at</text>
+  <text class="d-sub"   x="24" y="342">all while the worker runs perfectly normally — an empty</text>
+  <text class="d-sub"   x="24" y="358">LOG_PATH is not evidence that anything failed.</text>
+</svg>
+<figcaption><b>Figure 10 — one flag decides where half the evidence lands.</b> A
+worker that fails before it ever opens its own log file leaves its only trace in
+<code>task_run.log</code>, which is also where everything looks fine. Resolve the
+destination from the server's own <code>handlerStart</code> line before reading
+anything, and fall back to <code>task_run.log</code> when the named file is
+empty.</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>Location</th><th>Contents</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>/tmp/task_run.log</code></td><td>the three services' stdout. <b>With <code>LOG_STDOUT=true</code> the workers' output is here too</b></td><td>services will not start, <code>/start</code> fails, WebSocket proxy errors</td></tr>
+<tr><td><code>$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</code></td><td>one file per worker (<code>LOG_PATH</code> defaults to <code>/tmp/ten_agent</code>)</td><td>conversation behaviour — most problems</td></tr>
+<tr><td><code>$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</code></td><td>the graph configuration that session used</td><td>confirming an injected value</td></tr>
+</tbody>
+</table>
+
+<p>This resolves it either way:</p>
+
+<pre><code>L=$(F=$(grep -o 'LogFile:[^ ]*' /tmp/task_run.log | tail -1 | cut -d: -f2); \
+    [ -s "$F" ] &amp;&amp; echo "$F" || echo /tmp/task_run.log)</code></pre>
+
+<p>Pipeline sections are keyed by <b>node name</b>, which does not change when a
+vendor is swapped:</p>
+
+<pre><code>grep -E '\[stt\]|asr_result|asr_error'          "$L" | tail -20
+grep -E '\[llm\]|main_control'                  "$L" | tail -20
+grep -E '\[tts\]|tts_audio_start|tts_audio_end' "$L" | tail -20</code></pre>
+
+<div class="note">
+<p>The first line to read in each is <code>config:</code> — what the extension
+actually received. An empty credential looks identical to a working one
+everywhere else.</p>
+</div>
+
+<p><code>key_point</code> is a log category extensions use to mark significant
+events (<code>LOG_CATEGORY_KEY_POINT</code>); grepping it yields the pipeline's
+skeleton. Test runs write to neither — see 18.4.</p>
+
+<h3 id="ch21">21. Diagnosing by symptom</h3>
+
+<p>One command to locate the failing stage:</p>
+
+<pre><code>L=$(F=$(grep -o 'LogFile:[^ ]*' /tmp/task_run.log | tail -1 | cut -d: -f2); \
+    [ -s "$F" ] &amp;&amp; echo "$F" || echo /tmp/task_run.log)
+grep -E 'key_point|_error:|connection_status_changed|Failed to|Traceback|Worker process failed' "$L" | tail -40</code></pre>
+
+<table>
+<thead><tr><th>Seen</th><th>Broken</th><th>Go to</th></tr></thead>
+<tbody>
+<tr><td>nothing, and no log file</td><td>the worker never started</td><td>21.2</td></tr>
+<tr><td><code>Worker process failed</code></td><td>the worker exited</td><td>21.2</td></tr>
+<tr><td><code>proxy error … ECONNREFUSED</code></td><td>WebSocket</td><td>21.3</td></tr>
+<tr><td>ASR <code>connection_status_changed … 'disconnected'</code></td><td>ASR</td><td>21.5</td></tr>
+<tr><td><code>asr_result</code> but no <code>[llm]</code></td><td>routing, or <code>main_control</code></td><td>21.6</td></tr>
+<tr><td><code>[llm]</code> but no TTS audio</td><td>TTS</td><td>21.7</td></tr>
+<tr><td><code>Failed to find destination of a … message</code></td><td>the graph is missing a connection</td><td>3.4</td></tr>
+</tbody>
+</table>
+
+<h4>21.1 Services will not start</h4>
+
+<p><b>Stopped by SIGTTOU.</b> A backgrounded <code>task run</code> gets stopped
+when it touches the terminal. <code>nohup</code> blocks SIGHUP, not this.</p>
+
+<pre><code>ps -o pid,stat,cmd -p $(pgrep -f 'task run|bin/api|tman designer' | tr '\n' ',' | sed 's/,$//')</code></pre>
+
+<div class="warn">
+<p><code>T</code> in <code>STAT</code> means stopped. <b>A stopped process keeps
+its listening socket</b>, so a port check reports it as healthy while it accepts
+nothing.</p>
+</div>
+
+<p>Use tmux:</p>
+
+<pre><code>tmux new -d -s ten 'cd &lt;example&gt; &amp;&amp; task run 2&gt;&amp;1 | tee /tmp/task_run.log'</code></pre>
+
+<p>Detach with <kbd>Ctrl+B</kbd> then <kbd>D</kbd> — never
+<kbd>Ctrl+C</kbd>.</p>
+
+<p><b>Port 3000 taken.</b> Check <code>ss -tlnp | grep :3000</code> and
+<code>docker ps</code>. A container publishing 3000 on the same host — or
+reachable through WSL2's localhost forwarding — serves a different application at
+the address you expect.</p>
+
+<p><b>The frontend exits immediately</b> with a message about nmh: the
+playground's <code>node_modules</code> is missing. See 19.5.</p>
+
+<h4>21.2 The worker will not start</h4>
+
+<pre><code>curl -s localhost:8080/list          # "data":[] means none
+grep -E 'handlerStart|Worker (start|stop|process)|placeholder' /tmp/task_run.log | tail -12</code></pre>
+
+<p>A worker that dies early <b>produces no log file of its own</b>, and the only
+record is <code>task_run.log</code> (<a href="#fig10">Figure 10</a>).</p>
+
+<figure id="fig11">
+<svg viewBox="0 0 920 264" role="img" aria-label="After starting the worker process the Go server runs pgrep to find its child, retrying ten times one second apart. Ten failed attempts take ten seconds and then report Worker process failed, but the child was already gone at the first attempt — the ten seconds are a retry budget, not a timeout.">
+  <defs><marker id="a11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="24" y="86" width="200" height="58"/>
+  <text class="d-label" x="124" y="110" text-anchor="middle" fill="currentColor">cmd.Start()</text>
+  <text class="d-sub"   x="124" y="127" text-anchor="middle">worker_linux.go:71</text>
+
+  <line class="d-line" x1="226" y1="115" x2="292" y2="115" marker-end="url(#a11)"/>
+
+  <rect class="d-box" x="296" y="86" width="240" height="58"/>
+  <text class="d-label" x="416" y="110" text-anchor="middle" fill="currentColor">pgrep -P &lt;pid&gt;</text>
+  <text class="d-sub"   x="416" y="127" text-anchor="middle">find the child — worker_linux.go:83–93</text>
+
+  <path class="d-line" d="M336 84 C336 44, 496 44, 496 84" marker-end="url(#a11)"/>
+  <text class="d-edge" x="416" y="46" text-anchor="middle">retry ×10, sleep 1 s between attempts</text>
+
+  <path class="d-line" d="M538 100 L580 68" marker-end="url(#a11)"/>
+  <path class="d-hot"  d="M538 130 L580 166" marker-end="url(#a11)"/>
+
+  <rect class="d-box" x="584" y="40" width="312" height="52"/>
+  <text class="d-label" x="740" y="62" text-anchor="middle" fill="currentColor">child found → worker registered</text>
+  <text class="d-sub"   x="740" y="79" text-anchor="middle">appears in GET /list</text>
+
+  <rect class="d-hot-b" x="584" y="142" width="312" height="66"/>
+  <text class="d-label d-hot-t" x="740" y="164" text-anchor="middle">all ten fail → "Worker process failed"</text>
+  <text class="d-sub"   x="740" y="181" text-anchor="middle">reported ~10 s after /start returned</text>
+  <text class="d-sub"   x="740" y="197" text-anchor="middle">no per-worker log file was ever created</text>
+
+  <text class="d-hot-t" x="24" y="180">Those ten seconds are a retry budget, not a timeout.</text>
+  <text class="d-sub"   x="24" y="200">A process that died immediately fails all ten attempts, so</text>
+  <text class="d-sub"   x="24" y="216">the delay says nothing about how long the worker lived.</text>
+  <text class="d-sub"   x="24" y="240">Reproduce it in the foreground: cd &lt;example&gt;/tenapp &amp;&amp; tman run start</text>
+</svg>
+<figcaption><b>Figure 11 — why "it ran for ten seconds" is the wrong
+conclusion.</b> The interval between <code>/start</code> and <code>Worker process
+failed</code> is fixed by the retry loop, so it is identical whether the worker
+died on its first instruction or survived nine seconds. Anything that infers a
+timeout, a hang, or a slow start from that number is reading the loop rather than
+the worker. Run it in the foreground and the real error appears
+immediately.</figcaption>
+</figure>
+
+<p><code>No such file or directory … bin/main</code> with exit 127 means the Go
+app was never built — see 19.5.</p>
+
+<p><b><code>${env:}</code> with no default.</b> <code>Environment variable X is
+not found, neither default value is provided</code> followed by <code>exit status
+1</code> is <code>placeholder.c:196</code>, and the process death that follows is
+line 207 (<a href="#fig9">Figure 9</a>). The usual cause is that <code>.env</code>
+was filled <em>after</em> <code>task run</code> started; it is read once at
+startup.</p>
+
+<pre><code>stat -c '%y' ~/ten-framework/ai_agents/.env
+ps -o lstart= -p $(pgrep -f 'bin/api' | head -1)</code></pre>
+
+<p><code>.env</code> newer than the process means restart, and try nothing else
+first.</p>
+
+<h4>21.3 WebSocket will not connect</h4>
+
+<p><code>ws.onerror</code> carries no detail — the browser's error event never
+does. Check the server side.</p>
+
+<pre><code>browser  ws://localhost:3000/ws/{port}      port is random 8000-9000, kept in localStorage
+   ↓     frontend/server.js proxies
+         ws://127.0.0.1:{port}
+   ↓     the API server injects it into the graph
+         websocket_server binds it</code></pre>
+
+<p>The client connects only after <code>/start</code> returns, and then after a
+fixed two-second delay; failures retry every three seconds indefinitely.</p>
+
+<pre><code>grep 'WebSocket upgrade'     /tmp/task_run.log | tail -2   # the port the browser wants
+grep 'WebSocket proxy error' /tmp/task_run.log | tail -2
+grep -o "\[websocket_server\] Loaded config: {[^}]*}" "$L"  # the port the extension bound</code></pre>
+
+<table>
+<thead><tr><th>Seen</th><th>Means</th></tr></thead>
+<tbody>
+<tr><td>the third command prints nothing</td><td>the worker never started — 21.2</td></tr>
+<tr><td>the ports differ</td><td>injection failed</td></tr>
+<tr><td>one or two <code>ECONNREFUSED</code>, then quiet</td><td><b>normal</b> — the browser knocked a few hundred ms early and the retry connected</td></tr>
+<tr><td><code>ECONNREFUSED</code> forever</td><td>the worker died — 21.2</td></tr>
+</tbody>
+</table>
+
+<h4>21.4 No microphone</h4>
+
+<p><code>Cannot read properties of undefined (reading 'getUserMedia')</code> at
+<code>audioUtils.ts:178</code> means <code>navigator.mediaDevices</code> is
+<code>undefined</code>. <b>The whole API is absent, not blocked</b>: browsers
+expose it only in a secure context — HTTPS, or <code>localhost</code>. An IP
+address never qualifies.</p>
+
+<pre><code>[location.href, window.isSecureContext, !!navigator.mediaDevices]</code></pre>
+
+<p>Tunnel from the machine running the browser, then open
+<code>http://localhost:3000</code> — not the IP. Any port on
+<code>localhost</code> is a secure context, so a busy 3000 is no obstacle:</p>
+
+<pre><code>ssh -L 3100:localhost:3000 &lt;user&gt;@&lt;host&gt;</code></pre>
+
+<h4>21.5 No ASR results</h4>
+
+<pre><code>grep -E '\[stt\]|asr_result|asr_error|connection_status_changed' "$L" | tail -25</code></pre>
+
+<table>
+<thead><tr><th>Line</th><th>Means</th></tr></thead>
+<tbody>
+<tr><td><code>[stt] config: {…'params':{…}}</code></td><td><b>read this first</b> — <code>'api_key': ''</code> is an unfilled key</td></tr>
+<tr><td><code>connection_status_changed … 'connected'</code></td><td>the vendor accepted the connection</td></tr>
+<tr><td><code>send asr_error: {"code": …, "message": …}</code></td><td>the vendor's own reason</td></tr>
+</tbody>
+</table>
+
+<p><code>_send_asr_metrics … 'actual_send': 0</code> means <b>no audio bytes were
+sent at all</b> — look upstream at the microphone (21.4) or the WebSocket (21.3),
+not at the ASR.</p>
+
+<p>If the interface shows nothing while the log has the error, the graph is not
+routing <code>error</code> — see 3.4 and <a href="#fig3">Figure 3</a>.</p>
+
+<h4>21.6 No LLM response</h4>
+
+<pre><code>grep -E '\[llm\]|asr_result|main_control' "$L" | tail -25</code></pre>
+
+<table>
+<thead><tr><th>Seen</th><th>Broken</th></tr></thead>
+<tbody>
+<tr><td>no <code>asr_result</code> at all</td><td>ASR — 21.5</td></tr>
+<tr><td><code>asr_result</code> but never <code>[llm]</code></td><td><code>main_control</code> is not forwarding; check <code>connections</code></td></tr>
+<tr><td><code>[llm]</code> then an HTTP status</td><td>the vendor: 401 key, 404 model name, 429 quota</td></tr>
+<tr><td><code>[llm]</code> then silence</td><td>cannot reach the vendor; <code>OPENAI_PROXY_URL</code> exists for this</td></tr>
+</tbody>
+</table>
+
+<p><code>_run_stream … stream error (rid=…)</code> comes from
+<code>ten_ai_base</code>'s LLM base class wrapping the vendor exception — <b>the
+reason follows on the next lines</b>, so read past the first.</p>
+
+<h4>21.7 No TTS audio</h4>
+
+<pre><code>grep -E '\[tts\]|tts_audio_start|tts_audio_end|pcm_frame' "$L" | tail -25</code></pre>
+
+<p><code>tts_audio_start</code>, a <code>tts_ttfb</code> metric and
+<code>tts_audio_end</code> with a non-zero
+<code>request_total_audio_duration_ms</code> mean synthesis succeeded and the
+problem is downstream. Confirm the audio left the server:</p>
+
+<pre><code>grep 'Forwarded .* bytes of audio' "$L" | tail -3</code></pre>
+
+<p>That line is <code>log_debug</code>, so its absence proves nothing unless debug
+is enabled. Turn it on in <code>tenapp/property.json</code>, restart the session,
+and turn it back afterwards — it is very loud:</p>
+
+<pre><code>sed -i 's/"level": "info"/"level": "debug"/' &lt;example&gt;/tenapp/property.json</code></pre>
+
+<p>Audio forwarded but nothing audible is a browser-side problem.
+<code>AudioPlayer</code> creates its <code>AudioContext</code> in a mount effect,
+before any user gesture, so browsers return it suspended; <code>start()</code> on
+a buffer source then produces no sound and raises nothing, and because
+<code>onended</code> never fires the queue stalls on the first buffer. The capture
+side already resumes; the player did not until <code>aa98a8ffc</code>.</p>
+
+<div class="warn">
+<p>Leave <code>output_format</code> at <code>pcm_16000</code>. It is what the
+pipeline agreed on, and changing it corrupts audio downstream without any
+error.</p>
+</div>
+
+<h3 id="ch22">22. Quick reference</h3>
+
+<table>
+<thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td><code>Environment variable X is not found, neither default value is provided</code></td><td>absent from <code>.env</code>, or <code>task run</code> older than <code>.env</code></td><td>fill it, then <b>restart</b></td></tr>
+<tr><td><code>config: {…'api_key': ''}</code></td><td>present but empty</td><td>fill it, then restart</td></tr>
+<tr><td><code>STAT</code> shows <code>T</code></td><td>backgrounded, stopped by SIGTTOU</td><td>use tmux</td></tr>
+<tr><td><code>Cannot read properties of undefined (reading 'getUserMedia')</code></td><td>not a secure context</td><td>SSH tunnel, <code>localhost</code></td></tr>
+<tr><td><code>proxy error … ECONNREFUSED</code> continuing</td><td>the worker is not running</td><td>21.2</td></tr>
+<tr><td><code>Failed to find destination of a … message</code></td><td>the graph lacks a connection</td><td>add it to <code>connections</code></td></tr>
+<tr><td><code>actual_send: 0</code></td><td>no audio is reaching ASR</td><td>21.3, 21.4</td></tr>
+<tr><td>exit 127, <code>bin/main</code> not found</td><td>the Go app was never built</td><td>19.5</td></tr>
+<tr><td><code>next: Doesn't look like nmh is installed</code></td><td>playground <code>node_modules</code> missing</td><td>19.5</td></tr>
+<tr><td>the UI is silent while the log has the error</td><td><code>error</code> is unrouted</td><td><b>trust the log</b></td></tr>
+<tr><td>a vendor swap changed nothing</td><td><code>addon</code> edited without a restart</td><td>17.5</td></tr>
+<tr><td>the browser shows a different application</td><td>port 3000 taken by something else</td><td><code>ss -tlnp | grep :3000</code></td></tr>
+</tbody>
+</table>
+<h2 id="part6"><span class="pnum">Part VI</span>Status</h2>
+
+<h3 id="ch23">23. Worth fixing upstream</h3>
+
+<ul>
+<li><b>Publish <code>agora_rtc</code> and <code>agora_rtc_sdk</code> for arm64.</b>
+Both build for aarch64 today — the wrapper needs no change to its logic — but
+neither is in the registry, so every consumer builds and places them by hand,
+outside the package manager (16.2). Publishing them unblocks 24 of the 26
+examples with no work on the consumer's side.</li>
+
+<li><b><code>#include &lt;cstdint&gt;</code> in the <code>agora_rtc</code>
+source.</b> GCC 13 stopped including it transitively and the source relies on it
+in 27 files. This breaks the x64 build on a current toolchain too, so it is not
+an arm64 concern.</li>
+
+<li><b>An aarch64 <code>liblinux_audio_hy_extension.so</code>,</b> or confirmation
+that it is no longer used. It currently ships x86-64 only and has to be excluded
+from arm64 packages — and because of the unconditional
+<code>lib/</code> scan (<a href="#fig4">Figure 4</a>), leaving it in place removes
+the whole extension rather than just that feature.</li>
+
+<li><b>The arm64 glibc floor.</b> Building <code>linux_arm64.yml</code> on
+<code>ubuntu-22.04-arm</code>, or against an older sysroot, would drop the
+requirement from 2.38 back to ~2.34 and make the packages usable on RHEL 9,
+Amazon Linux 2023 and Ubuntu 22.04.</li>
+
+<li><b>The Python version mismatch.</b> The arm64
+<code>ten_runtime_python</code> is built against 3.12 while
+<code>python_addon_loader</code> defaults to <code>libpython3.10.so</code>
+(<a href="#fig5">Figure 5</a>). One of the two should move so that no
+<code>TEN_PYTHON_LIB_PATH</code> is needed.</li>
+
+<li><b><code>tman check env</code> guidance.</b> It reports Python 3.10 as the
+only supported version, which contradicts the arm64 artefacts.</li>
+
+<li><b><code>uv pip install --system</code> is hardcoded, so a bare-metal install
+needs root.</b> <code>install_python_deps.py</code> builds the command literally
+(<code>["uv", "pip", "install", "--system"]</code>) with no env override. Inside
+the container this is free — it runs as root — but as an ordinary user every
+extension fails with <code>Permission denied</code>. Honouring
+<code>PIP_INSTALL_CMD</code> the way <code>install_deps_and_build.sh</code>
+already does would be enough.</li>
+
+<li><b>Nothing pins the interpreter for dependency installs.</b>
+<code>--system</code> resolves to whatever <code>python3</code> is, which on any
+distribution shipping 3.13+ is not the 3.12 the arm64 binding was built against.
+The mismatch is silent until an extension raises
+<code>ModuleNotFoundError</code> at runtime. Selecting the interpreter from
+<code>TEN_PYTHON_LIB_PATH</code> — the version is already stated there — would
+close the gap without a new setting.</li>
+
+<li><b><code>${env:}</code> validation misses nested keys.</b> The API server
+checks only a node's top-level string properties, and every vendor key lives
+under <code>params</code> (17.3). A missing or empty key produces no warning from
+the server.</li>
+
+<li><b>The unrouted-message warning is throttled to one line per thousand.</b>
+That is the right default for a hot path, but it means a graph with a genuinely
+missing connection logs the fact once, at the start, and then looks quiet
+(<a href="#fig3">Figure 3</a>). A single summary line at graph teardown —
+"<em>n</em> messages named <code>error</code> were dropped" — would make the
+condition discoverable without changing the hot path.</li>
+
+<li><b><code>ten_agent_build</code> is single-arch.</b> Publishing it as a
+multi-arch manifest the way <code>ten_building_ubuntu2204</code> already is would
+remove the need for <code>Dockerfile.dev</code> entirely.</li>
+
+<li><b><code>rustup target add stable x86_64-unknown-linux-gnuasan</code></b> is
+hardcoded in the multi-arch builder Dockerfile and has no meaning on arm64.</li>
+</ul>
+
+<h3 id="ch24">24. Not covered here</h3>
+
+<ul>
+<li><b>A from-source core build has not been exercised on arm64 beyond CI.</b>
+The official job builds it; nothing in this manual verified the result
+independently, and no test target has ever been built there (18.3).</li>
+
+<li><b>The guarder suites have never run on arm64.</b> The path is
+architecture-correct; that is not the same as having been run.</li>
+
+<li><b><code>ffmpeg</code> and <code>libwebsockets</code> are untested in the
+arm64 core build.</b></li>
+
+<li><b><code>build_docker_for_ai_agents.yml</code></b> builds the 13 example
+images without a <code>platforms:</code> field, so they are amd64-only.</li>
+
+<li><b>Concurrency and long-running behaviour.</b> Everything verified here is a
+single session on an idle machine.</li>
+
+<li><b>The 25 examples other than <code>websocket-example</code> and
+<code>voice-assistant</code>.</b> Their extensions are pure Python and their
+graphs differ only in configuration, so they are expected to work — but
+expectation is not verification.</li>
+</ul>
+
+<h2 id="sources"><span class="pnum">Appendix</span>Source citations</h2>
+
+<p>Every line number in this manual was re-checked against the working tree
+rather than quoted from memory. They are collected here so a future reader can
+tell at a glance whether the tree has moved underneath them.</p>
+
+<table>
+<thead><tr><th>Claim</th><th>File</th><th>Line</th></tr></thead>
+<tbody>
+<tr><td>"Environment variable … neither default value is provided"</td><td><code>core/src/ten_utils/lib/sys/general/placeholder.c</code></td><td>196</td></tr>
+<tr><td>the process death that follows it</td><td><code>core/src/ten_utils/lib/sys/general/placeholder.c</code></td><td>207 (<code>exit(EXIT_FAILURE)</code>)</td></tr>
+<tr><td>"Failed to find destination of a '%s' message '%s' from graph."</td><td><code>core/src/ten_runtime/extension/extension.c</code></td><td>435</td></tr>
+<tr><td>the throttle call on the send path</td><td><code>core/src/ten_runtime/ten_env/internal/send.c</code></td><td>161</td></tr>
+<tr><td>the warning that is only reached when the throttle allows it</td><td><code>core/src/ten_runtime/ten_env/internal/send.c</code></td><td>163</td></tr>
+<tr><td>the modulo test that gates it</td><td><code>core/src/ten_runtime/extension/msg_not_connected_cnt.c</code></td><td>76</td></tr>
+<tr><td><code>TEN_MSG_NOT_CONNECTED_COUNT_RESET_THRESHOLD</code> = 1000</td><td><code>core/src/ten_runtime/extension/msg_not_connected_cnt.c</code></td><td>14</td></tr>
+<tr><td>the unconditional <code>lib/</code> scan</td><td><code>core/src/ten_runtime/addon/addon_autoload.c</code></td><td>441</td></tr>
+<tr><td>the worker's child-pid retry loop</td><td><code>ai_agents/server/internal/worker_linux.go</code></td><td>83–93</td></tr>
+<tr><td><code>cmd.Start()</code> for the worker</td><td><code>ai_agents/server/internal/worker_linux.go</code></td><td>71</td></tr>
+</tbody>
+</table>
+
+<p class="src" style="margin-top:2.5rem">TEN Framework on arm64 — written against
+<code>feat/arm64-native-build</code>. The Markdown source of this manual is
+<code>docs/development/arm64_build.md</code>.</p>
+
+</main>
+</div>
+</body>
+</html>

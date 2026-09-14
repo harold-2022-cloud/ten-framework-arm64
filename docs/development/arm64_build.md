@@ -8,6 +8,13 @@ Written against `feat/arm64-native-build`. Every claim here was checked against
 the source or run on a machine; where something could not be verified it says
 so rather than guessing.
 
+An HTML edition of this manual with eleven diagrams is alongside it at
+[`arm64_build.html`](arm64_build.html) — the same text, plus figures for the
+mechanisms that are hard to hold in prose (addon loading, the Python ABI
+mismatch, the RTC two-package split, `${env:}` resolution, log routing).
+A Traditional Chinese edition of the same manual is at
+[`arm64_build.zh-TW.html`](arm64_build.zh-TW.html).
+
 **Contents**
 
 | Part | Covers |
@@ -139,6 +146,19 @@ W ten:runtime ten_env_send_msg_internal@send.c:163
   Failed to send message: Failed to find destination of a 'data' message 'error' from graph.
 ```
 
+**That warning is throttled, and the throttle changes how you search for it.**
+`send.c:161` routes the failure through
+`ten_extension_increment_msg_not_connected_count`, whose whole test is
+`entry->count % TEN_MSG_NOT_CONNECTED_COUNT_RESET_THRESHOLD == 0`
+(`msg_not_connected_cnt.c:76`, threshold `1000`). The counter starts at zero and
+zero satisfies the test, so the **first** occurrence always prints; the branch
+then resets the counter and the next 999 are silent. The counter is keyed per
+extension *and* per message name.
+
+The consequence is that the absence of this line proves nothing. A message
+dropped a few hundred times an hour may have logged exactly once, hours ago —
+so grep the whole file, not its tail.
+
 This is a real case: the ASR extension emits an `error` data message, but
 `websocket-example`'s graph routes only `asr_result`, `metrics` and
 `tts_flush_end`. A missing API key therefore never reaches the UI and lives only
@@ -203,7 +223,7 @@ An addon package is a directory. The runtime scans its `lib/` subdirectory and
 **`dlopen`s every `.so` it finds there**:
 
 ```c
-// addon_autoload.c:440
+// addon_autoload.c:441
 // Load the library from the 'lib/' directory.
 success = load_all_dynamic_libraries_under_path(
     ten_string_get_raw_str(&addon_lib_folder_path));
@@ -1542,7 +1562,7 @@ A worker that dies early **produces no log file of its own**, and the only recor
 is `task_run.log`.
 
 The ten seconds before `Worker process failed` are not a timeout.
-`worker_linux.go:84-93` retries `pgrep -P <pid>` ten times at one-second
+`worker_linux.go:83-93` retries `pgrep -P <pid>` ten times at one-second
 intervals to find the child; a process that died immediately fails all ten. The
 worker exited at once.
 
@@ -1557,8 +1577,9 @@ built — see 19.5.
 
 **`${env:}` with no default.** `Environment variable X is not found, neither
 default value is provided` followed by `exit status 1` is
-`placeholder.c:195`. The usual cause is that `.env` was filled *after*
-`task run` started; it is read once at startup.
+`placeholder.c:196`, and the process death that follows is line 207. The usual
+cause is that `.env` was filled *after* `task run` started; it is read once at
+startup.
 
 ```bash
 stat -c '%y' ~/ten-framework/ai_agents/.env

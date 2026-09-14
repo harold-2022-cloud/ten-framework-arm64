@@ -1,0 +1,2427 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEN Framework on arm64 — 技術手冊</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=Noto+Sans+TC:wght@400;500;700&amp;display=swap">
+<style>
+:root{
+  --paper:#F4F6F6; --card:#FFFFFF; --sunk:#E8EDED;
+  --ink:#12191B; --ink-2:#45555A; --ink-3:#77878C;
+  --rule:#D3DBDC; --rule-2:#B7C3C5;
+  --accent:#0F5F6B; --accent-soft:#DCECEE;
+  --warn:#9A4B12; --warn-soft:#F7E8DC;
+  --danger:#8E2A2A; --danger-soft:#F6E1E1;
+  --ok:#1B6144; --ok-soft:#DDEDE5;
+  --code-bg:#12191B; --code-ink:#DCE4E5;
+  --measure:44em;
+  --han:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}}
+:root[data-theme="dark"]{
+  --paper:#0F1416; --card:#171E20; --sunk:#0A0E10;
+  --ink:#E4EAEA; --ink-2:#9DAEB2; --ink-3:#6E7F84;
+  --rule:#263033; --rule-2:#374447;
+  --accent:#4EC5D3; --accent-soft:#12292D;
+  --warn:#E4A063; --warn-soft:#2A1F14;
+  --danger:#E48A80; --danger-soft:#2B1817;
+  --ok:#63C39B; --ok-soft:#12251D;
+  --code-bg:#0A0E10; --code-ink:#DCE4E5;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:1.5rem}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",-apple-system,sans-serif;
+  font-size:15.5px; line-height:1.85; -webkit-font-smoothing:antialiased;
+  text-spacing-trim:space-first;
+}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+
+/* ---------- shell ---------- */
+.shell{display:grid; grid-template-columns:17.5rem minmax(0,1fr); max-width:88rem; margin:0 auto}
+@media(max-width:64rem){.shell{grid-template-columns:1fr}}
+
+nav.toc{
+  position:sticky; top:0; align-self:start; max-height:100vh; overflow-y:auto;
+  padding:2rem 1rem 3rem 1.5rem; border-right:1px solid var(--rule);
+  font-size:.85rem; line-height:1.6;
+}
+@media(max-width:64rem){nav.toc{position:static; max-height:none; border-right:0; border-bottom:1px solid var(--rule)}}
+nav.toc .brand{font-weight:700; font-size:.95rem; margin-bottom:.15rem; color:var(--ink)}
+nav.toc .brandsub{color:var(--ink-3); font-size:.78rem; margin-bottom:1.4rem; line-height:1.5}
+nav.toc .part{
+  margin:1.1rem 0 .3rem; font-size:.72rem; letter-spacing:.06em;
+  color:var(--ink-3); font-weight:700;
+}
+nav.toc a{display:block; color:var(--ink-2); text-decoration:none; padding:.16rem 0 .16rem .55rem;
+  border-left:2px solid transparent}
+nav.toc a:hover{color:var(--accent); border-left-color:var(--accent)}
+nav.toc a .n{color:var(--ink-3); display:inline-block; min-width:1.6rem}
+
+main{padding:2.5rem 3rem 6rem; min-width:0}
+@media(max-width:64rem){main{padding:2rem 1.25rem 4rem}}
+main > *{max-width:var(--measure)}
+main > figure, main > .wide{max-width:none}
+
+/* ---------- type ---------- */
+h1{font-size:2.1rem; line-height:1.35; margin:0 0 .5rem; letter-spacing:0}
+.lede{font-size:1.05rem; color:var(--ink-2); margin:0 0 2rem; max-width:40em; line-height:1.8}
+h2{font-size:1.6rem; margin:3.5rem 0 .2rem; padding-top:2rem; border-top:2px solid var(--rule-2); line-height:1.4}
+h2 .pnum{display:block; font-size:.72rem; letter-spacing:.06em;
+   color:var(--ink-3); font-weight:700; margin-bottom:.35rem}
+h3{font-size:1.2rem; margin:2.4rem 0 .4rem; line-height:1.5}
+h4{font-size:1.02rem; margin:1.6rem 0 .35rem; color:var(--accent); line-height:1.6}
+h5{font-size:.92rem; margin:1.2rem 0 .3rem; color:var(--ink-2); font-weight:600}
+p{margin:.8rem 0}
+strong,b{font-weight:700}
+a{color:var(--accent)}
+
+code{background:var(--sunk); padding:.1em .36em; border-radius:3px; font-size:.86em}
+pre{background:var(--code-bg); color:var(--code-ink); padding:1rem 1.15rem; border-radius:8px;
+  overflow-x:auto; font-size:.82rem; line-height:1.6; margin:1rem 0}
+pre code{background:none; padding:0; color:inherit; font-size:inherit}
+
+table{border-collapse:collapse; margin:1.1rem 0; font-size:.88rem; width:100%;
+  display:block; overflow-x:auto; line-height:1.7}
+th,td{text-align:left; padding:.55rem .75rem; border-bottom:1px solid var(--rule); vertical-align:top}
+th{background:var(--sunk); font-weight:700; white-space:nowrap}
+td code{white-space:nowrap}
+
+ul,ol{margin:.8rem 0; padding-left:1.5rem}
+li{margin:.35rem 0}
+
+/* ---------- callouts ---------- */
+.note,.warn,.bad,.ok{border-left:3px solid; padding:.85rem 1.1rem; margin:1.2rem 0; border-radius:0 6px 6px 0}
+.note{border-color:var(--accent); background:var(--accent-soft)}
+.warn{border-color:var(--warn);   background:var(--warn-soft)}
+.bad {border-color:var(--danger); background:var(--danger-soft)}
+.ok  {border-color:var(--ok);     background:var(--ok-soft)}
+.note > :first-child,.warn > :first-child,.bad > :first-child,.ok > :first-child{margin-top:0}
+.note > :last-child,.warn > :last-child,.bad > :last-child,.ok > :last-child{margin-bottom:0}
+
+.src{color:var(--ink-3); font-size:.84rem; margin:.3rem 0 .8rem}
+.src code{background:none; padding:0; color:var(--ink-3)}
+
+/* ---------- figures ---------- */
+figure{margin:1.8rem 0; padding:1.2rem 1.2rem .9rem; background:var(--card);
+  border:1px solid var(--rule); border-radius:10px; max-width:none}
+figure svg{display:block; margin:0 auto; max-width:100%; height:auto; color:var(--ink)}
+figcaption{margin-top:.9rem; padding-top:.7rem; border-top:1px solid var(--rule);
+  font-size:.88rem; color:var(--ink-2); line-height:1.8; max-width:46em}
+figcaption b{color:var(--ink)}
+
+/* diagram helpers — CJK fallback matters here: the label fonts are Latin-only */
+.d-label{font:600 12.5px "IBM Plex Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+.d-sub{font:400 11px "IBM Plex Mono","Noto Sans TC","PingFang TC","Microsoft JhengHei",monospace;
+  fill:currentColor; fill-opacity:.62}
+.d-edge{font:400 11px "IBM Plex Mono","Noto Sans TC","PingFang TC","Microsoft JhengHei",monospace;
+  fill:currentColor; fill-opacity:.75}
+.d-box{fill:none; stroke:currentColor; stroke-width:1.25; rx:6}
+.d-box-soft{fill:currentColor; fill-opacity:.045; stroke:currentColor; stroke-width:1.25; rx:6}
+.d-line{stroke:currentColor; stroke-width:1.25; fill:none}
+.d-dash{stroke:currentColor; stroke-width:1.25; fill:none; stroke-dasharray:4 3; opacity:.55}
+.d-hot{stroke:#C2410C; stroke-width:1.9; fill:none}
+.d-hot-t{fill:#C2410C; font:600 11.5px "IBM Plex Sans","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+.d-hot-b{fill:#C2410C; fill-opacity:.09; stroke:#C2410C; stroke-width:1.6; rx:6}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .d-hot{stroke:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-t{fill:#F59E6B}
+  :root:not([data-theme="light"]) .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}}
+:root[data-theme="dark"] .d-hot{stroke:#F59E6B}
+:root[data-theme="dark"] .d-hot-t{fill:#F59E6B}
+:root[data-theme="dark"] .d-hot-b{fill:#F59E6B; fill-opacity:.12; stroke:#F59E6B}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc" aria-label="目錄">
+  <div class="brand">TEN Framework on arm64</div>
+  <div class="brandsub">技術手冊 · 對應分支 <code>feat/arm64-native-build</code></div>
+
+  <a href="#top"><span class="n">—</span>卷首</a>
+
+  <div class="part">第 I 部 — 架構</div>
+  <a href="#ch1"><span class="n">1</span>分層堆疊</a>
+  <a href="#ch2"><span class="n">2</span>倉庫的兩半</a>
+  <a href="#ch3"><span class="n">3</span>訊息與路由</a>
+  <a href="#ch4"><span class="n">4</span>RPC:cmd 與 CmdResult</a>
+  <a href="#ch5"><span class="n">5</span>runtime 如何載入 addon</a>
+
+  <div class="part">第 II 部 — 平台</div>
+  <a href="#ch6"><span class="n">6</span>ABI 下限</a>
+  <a href="#ch7"><span class="n">7</span>每個 <code>.so</code> 做什麼</a>
+  <a href="#ch8"><span class="n">8</span>元件清單</a>
+  <a href="#ch9"><span class="n">9</span>建置相依</a>
+
+  <div class="part">第 III 部 — 建置</div>
+  <a href="#ch10"><span class="n">10</span>從源碼建 core</a>
+  <a href="#ch11"><span class="n">11</span>Ubuntu 24.04</a>
+  <a href="#ch12"><span class="n">12</span>RPM 系發行版</a>
+  <a href="#ch13"><span class="n">13</span>容器內執行</a>
+  <a href="#ch14"><span class="n">14</span>建置 <code>agora_rtc</code></a>
+
+  <div class="part">第 IV 部 — 開發</div>
+  <a href="#ch15"><span class="n">15</span>撰寫 extension</a>
+  <a href="#ch16"><span class="n">16</span>版本管理</a>
+  <a href="#ch17"><span class="n">17</span>配置</a>
+  <a href="#ch18"><span class="n">18</span>測試</a>
+
+  <div class="part">第 V 部 — 運維</div>
+  <a href="#ch19"><span class="n">19</span>五個腳本</a>
+  <a href="#ch20"><span class="n">20</span>日誌在哪</a>
+  <a href="#ch21"><span class="n">21</span>依症狀診斷</a>
+  <a href="#ch22"><span class="n">22</span>速查表</a>
+
+  <div class="part">第 VI 部 — 現況</div>
+  <a href="#ch23"><span class="n">23</span>值得推回上游</a>
+  <a href="#ch24"><span class="n">24</span>本手冊未涵蓋</a>
+
+  <div class="part">圖目錄</div>
+  <a href="#fig1"><span class="n">1</span>分層堆疊</a>
+  <a href="#fig2"><span class="n">2</span><code>source</code> 與 <code>dest</code></a>
+  <a href="#fig3"><span class="n">3</span>無路由的訊息</a>
+  <a href="#fig4"><span class="n">4</span>addon 載入</a>
+  <a href="#fig5"><span class="n">5</span>Python ABI</a>
+  <a href="#fig6"><span class="n">6</span>RTC 是兩個 package</a>
+  <a href="#fig7"><span class="n">7</span>RTC 建置管線</a>
+  <a href="#fig8"><span class="n">8</span>版本釘選</a>
+  <a href="#fig9"><span class="n">9</span><code>${env:}</code> 三態</a>
+  <a href="#fig10"><span class="n">10</span>日誌去向</a>
+  <a href="#fig11"><span class="n">11</span>worker 啟動</a>
+</nav>
+
+<main id="top">
+
+<h1>TEN Framework on arm64</h1>
+<p class="lede">在 aarch64 Linux 上執行與建置 TEN Framework 的實作手冊:這個
+framework 由哪些東西組成、哪些部分跟 CPU 架構有關、每一部分怎麼建,以及出事的時候
+怎麼查出真正的原因。</p>
+
+<p>對應分支 <code>feat/arm64-native-build</code>。本文每一項陳述都經過原始碼對照或
+實機執行驗證;凡是無法驗證的,文中會直接說明,而不是用推測填補。所有原始碼引用都附上
+檔案與行號 —— 這些行號是撰寫當下重新核對過工作樹的結果,不是憑記憶寫的。</p>
+
+<div class="note">
+<p>本文是 <a href="arm64_build.html"><code>arm64_build.html</code></a> 的繁體中文版,
+內容一致。框架本身的專有名詞(<code>extension</code>、<code>addon</code>、
+<code>graph</code>、<code>runtime</code>、<code>binding</code>、<code>package</code>
+等)保留英文,與倉庫內既有的中文文檔慣例一致;檔名、函式名、設定鍵、日誌原文一律不譯。</p>
+</div>
+
+<table>
+<thead><tr><th>部</th><th>涵蓋範圍</th></tr></thead>
+<tbody>
+<tr><td>I — 架構</td><td>分層堆疊、extension 之間如何溝通、runtime 如何載入它們</td></tr>
+<tr><td>II — 平台</td><td>ABI 下限、每個 shared object 的職責、建置系統與其旗標</td></tr>
+<tr><td>III — 建置</td><td>framework core、三種發行版上的 agents,以及 <code>agora_rtc</code></td></tr>
+<tr><td>IV — 開發</td><td>撰寫與維護 extension、版本釘選、抽換 vendor、測試</td></tr>
+<tr><td>V — 運維</td><td>五個腳本、日誌位置,以及依症狀診斷</td></tr>
+<tr><td>VI — 現況</td><td>還留給上游的問題,以及本手冊沒有涵蓋的部分</td></tr>
+</tbody>
+</table>
+
+<h4>從哪裡開始讀</h4>
+<ul>
+<li>要在 arm64 機器上跑起 agents → <a href="#part3">第 III 部</a>,接著 <a href="#part5">第 V 部</a></li>
+<li>RTC 不能用 → <a href="#ch14">第 14 章,為 aarch64 建置 <code>agora_rtc</code></a></li>
+<li>出錯了但介面什麼都沒顯示 → <a href="#ch21">第 21 章,依症狀診斷</a></li>
+<li>要寫一個 extension → <a href="#part4">第 IV 部</a></li>
+<li>要判斷某個改動是不是 arm64 特有的 → <a href="#part2">第 II 部</a></li>
+</ul>
+<h2 id="part1"><span class="pnum">第 I 部</span>架構</h2>
+
+<h3 id="ch1">1. 分層堆疊</h3>
+
+<p>一個 vendor extension 是純 Python 的,坐在四層之上。一項改動落在哪一層,決定了它用哪套
+工具鏈建置、觸發哪個 CI job,以及它究竟跟 CPU 架構有沒有關係。</p>
+
+<figure id="fig1">
+<svg viewBox="-26 0 986 336" role="img" aria-label="四層堆疊:Python extension 疊在 ten_ai_base 上,ten_ai_base 疊在語言 binding 上,binding 疊在 C runtime 上。新增 vendor 只動最上層;更動 message type 則會下探到最底兩層,那是倉庫的另一半。">
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-hot-b" x="210" y="20"  width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="98"  width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="176" width="380" height="48"/>
+  <rect class="d-box-soft" x="210" y="254" width="380" height="48"/>
+
+  <text class="d-label d-hot-t" x="400" y="40" text-anchor="middle">extension（Python）</text>
+  <text class="d-sub" x="400" y="57" text-anchor="middle">deepgram_asr_python, elevenlabs_tts2_python, …</text>
+
+  <text class="d-label" x="400" y="118" text-anchor="middle" fill="currentColor">ten_ai_base</text>
+  <text class="d-sub" x="400" y="135" text-anchor="middle">AsyncASRBaseExtension, AsyncTTS2BaseExtension, …</text>
+
+  <text class="d-label" x="400" y="196" text-anchor="middle" fill="currentColor">語言 binding</text>
+  <text class="d-sub" x="400" y="213" text-anchor="middle">libten_runtime_python.so / _go.so / _nodejs.so</text>
+
+  <text class="d-label" x="400" y="274" text-anchor="middle" fill="currentColor">C runtime</text>
+  <text class="d-sub" x="400" y="291" text-anchor="middle">graph 解析 · lifecycle · 訊息路由 · addon 載入</text>
+
+  <line class="d-line" x1="260" y1="96" x2="260" y2="70" marker-end="url(#a1)"/>
+  <line class="d-line" x1="260" y1="174" x2="260" y2="148" marker-end="url(#a1)"/>
+  <line class="d-line" x1="260" y1="252" x2="260" y2="226" marker-end="url(#a1)"/>
+  <text class="d-edge" x="274" y="87">繼承</text>
+  <text class="d-edge" x="274" y="165">import ten_runtime</text>
+  <text class="d-edge" x="274" y="243">連結 libten_runtime.so</text>
+
+  <text class="d-sub" x="608" y="40">ai_agents/agents/ten_packages/extension/&lt;name&gt;/</text>
+  <text class="d-sub" x="608" y="56">本倉庫內可直接編輯的源碼</text>
+  <text class="d-sub" x="608" y="118">registry 相依 — 源碼不在本倉庫</text>
+  <text class="d-sub" x="608" y="134">由 tman install 實體化進 tenapp</text>
+  <text class="d-sub" x="608" y="196">core/src/ten_runtime/binding/{python,go,nodejs}</text>
+  <text class="d-sub" x="608" y="274">core/src/ten_runtime</text>
+
+  <path class="d-hot" d="M200 20 L188 20 L188 68 L200 68"/>
+  <text class="d-hot-t" x="180" y="40" text-anchor="end">新增一個 vendor：</text>
+  <text class="d-hot-t" x="180" y="57" text-anchor="end">只動這一層</text>
+
+  <path class="d-line" d="M200 176 L188 176 L188 302 L200 302"/>
+  <text class="d-label" x="180" y="228" text-anchor="end" fill="currentColor">改 message type、schema</text>
+  <text class="d-label" x="180" y="245" text-anchor="end" fill="currentColor">或 lifecycle 契約：</text>
+  <text class="d-sub" x="180" y="263" text-anchor="end">core/ — GN+Ninja，另一套 CI</text>
+</svg>
+<figcaption><b>圖 1 — 四層,以及一項改動會落在哪裡。</b>新增 vendor 只碰最上面那個框:
+一個新的 Python package、一份 manifest,再加一次 graph 編輯。任何更動 message type、
+schema 或 lifecycle 契約的改動,都會穿透到 <code>core/</code> —— 那是另一套建置系統、
+另一個 CI job,也是倉庫的另外一半(第 2 章)。<code>ten_ai_base</code> 是最多人找不到的
+一層:它是有版號的 registry 相依,所以在剛 clone 下來的倉庫裡沒有它的源碼,只有安裝完的
+tenapp 裡才有。</figcaption>
+</figure>
+
+<h3 id="ch2">2. 倉庫的兩半</h3>
+
+<table>
+<thead><tr><th></th><th>Framework core</th><th>AI agents</th></tr></thead>
+<tbody>
+<tr><th>路徑</th><td><code>core/</code>、<code>packages/</code>、<code>tests/</code>、<code>build/</code>、<code>third_party/</code>、<code>tools/</code></td><td><code>ai_agents/</code></td></tr>
+<tr><th>語言</th><td>C/C++ runtime、Rust(<code>ten_rust</code>、<code>ten_manager</code>)、Go/Python/Node binding</td><td>Python extension、Go API server、Next.js playground</td></tr>
+<tr><th>建置</th><td>透過 <code>tgn</code> 包裝的 GN + Ninja</td><td><code>task</code> targets</td></tr>
+<tr><th>CI</th><td><code>linux_ubuntu2204.yml</code>、<code>mac_*</code>、<code>win.yml</code>、<code>tman_full_*</code></td><td><code>ai_agents.yaml</code></td></tr>
+</tbody>
+</table>
+
+<p>兩組 CI 使用互斥的 <code>paths-ignore</code> 過濾:改 <code>ai_agents/</code>
+底下的東西永遠不會觸發 core 建置,改 <code>core/</code> 底下的東西也永遠不會觸發
+agents job。</p>
+
+<p>本手冊大部分內容關於 agents 那一半。第 10 章是唯一一章在講怎麼建 core。</p>
+
+<h3 id="ch3">3. 訊息與路由</h3>
+
+<p>extension 之間從不互相呼叫。所有互動都是訊息,而 graph 的 <code>connections</code>
+區塊決定誰會收到。這就是為什麼抽換一個 vendor 只是改 JSON —— 也是為什麼名字打錯會
+無聲無息地失敗。</p>
+
+<h4>3.1 五種訊息型別</h4>
+<p class="src">來源:<code>core/include/ten_runtime/msg/msg.h</code></p>
+
+<table>
+<thead><tr><th>型別</th><th>語意</th><th>典型用途</th></tr></thead>
+<tbody>
+<tr><td><code>cmd</code></td><td><b>有回覆</b> —— 送出方會收到一個 <code>CmdResult</code></td><td><code>tool_register</code>、<code>on_user_joined</code></td></tr>
+<tr><td><code>cmd_result</code></td><td>回覆本身,由 runtime 負責配對</td><td>不會手動路由</td></tr>
+<tr><td><code>data</code></td><td>單向、有結構</td><td><code>asr_result</code>、<code>metrics</code>、<code>tts_flush_end</code></td></tr>
+<tr><td><code>audio_frame</code></td><td>單向,zero-copy 音訊緩衝</td><td><code>pcm_frame</code></td></tr>
+<tr><td><code>video_frame</code></td><td>單向,視訊緩衝</td><td>視覺類 extension</td></tr>
+</tbody>
+</table>
+
+<p>runtime 另外定義了內部命令 —— <code>START_GRAPH</code>、<code>STOP_GRAPH</code>、
+<code>CLOSE_APP</code>、<code>TIMER</code>、<code>TIMEOUT</code>、
+<code>TRIGGER_LIFE_CYCLE</code> —— 那是 framework 自己在用的。</p>
+
+<h4>3.2 connections 區塊,以及方向為什麼可以寫兩次</h4>
+
+<p>路由寫在 <code>tenapp/property.json</code> 的
+<code>predefined_graphs[].graph.connections</code> 底下。每個區塊掛在一個 node 上,
+以該 node 的 <b><code>name</code></b> 為鍵,不是以 <code>addon</code> 為鍵。方向來自
+<code>source</code>(這些 node 送給我)或 <code>dest</code>(我送給這些 node)—— 兩種都
+合法,所以同一條邊可以從任一端宣告。</p>
+
+<figure id="fig2">
+<svg viewBox="0 0 940 330" role="img" aria-label="三個 graph node 以 data 訊息相連。stt 與 main_control 之間的同一條邊,既可以寫成 main_control 底下的 source 條目,也可以寫成 stt 底下的 dest 條目;兩者產生完全相同的連結,所以讀 graph 必須兩端都看。">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="30"  y="30" width="190" height="54"/>
+  <rect class="d-box-soft" x="360" y="30" width="200" height="54"/>
+  <rect class="d-box-soft" x="700" y="30" width="200" height="54"/>
+
+  <text class="d-label" x="125" y="52" text-anchor="middle" fill="currentColor">stt</text>
+  <text class="d-sub"   x="125" y="70" text-anchor="middle">addon: soniox_asr_python</text>
+  <text class="d-label" x="460" y="52" text-anchor="middle" fill="currentColor">main_control</text>
+  <text class="d-sub"   x="460" y="70" text-anchor="middle">addon: main_python</text>
+  <text class="d-label" x="800" y="52" text-anchor="middle" fill="currentColor">tts</text>
+  <text class="d-sub"   x="800" y="70" text-anchor="middle">addon: elevenlabs_tts2_python</text>
+
+  <line class="d-hot" x1="222" y1="57" x2="356" y2="57" marker-end="url(#a2)"/>
+  <text class="d-hot-t" x="289" y="24" text-anchor="middle">data  "asr_result"</text>
+
+  <line class="d-line" x1="562" y1="57" x2="696" y2="57" marker-end="url(#a2)"/>
+  <text class="d-edge" x="629" y="24" text-anchor="middle">data  "tts_text_input"</text>
+
+  <rect class="d-box" x="30"  y="152" width="400" height="104"/>
+  <rect class="d-box" x="500" y="152" width="400" height="104"/>
+
+  <text class="d-label d-hot-t" x="230" y="174" text-anchor="middle">寫在 main_control 上 — 訂閱</text>
+  <text class="d-sub" x="46" y="198">{ "extension": "main_control",</text>
+  <text class="d-sub" x="46" y="214">&#160; "data": [ { "name": "asr_result",</text>
+  <text class="d-sub" x="46" y="230">&#160;&#160;&#160;&#160; "source": [ {"extension": "stt"} ] } ] }</text>
+
+  <text class="d-label d-hot-t" x="700" y="174" text-anchor="middle">寫在 stt 上 — 發佈</text>
+  <text class="d-sub" x="516" y="198">{ "extension": "stt",</text>
+  <text class="d-sub" x="516" y="214">&#160; "data": [ { "name": "asr_result",</text>
+  <text class="d-sub" x="516" y="230">&#160;&#160;&#160;&#160; "dest": [ {"extension": "main_control"} ] } ] }</text>
+
+  <path class="d-dash" d="M230 150 L230 120 L289 120 L289 66"/>
+  <path class="d-dash" d="M700 150 L700 120 L289 120"/>
+  <text class="d-hot-t" x="289" y="112" text-anchor="middle">同一條邊 — 兩端皆可</text>
+
+  <text class="d-sub" x="30" y="288">connections 區塊的 "extension" 欄位以 node 的 name 為鍵，永遠不是 addon。抽換 vendor 時改 addon，必須讓 name 保持不動。</text>
+  <text class="d-sub" x="30" y="308">cmd 區塊用 "names"（陣列）；data / audio_frame / video_frame 用 "name"（單一字串）。</text>
+</svg>
+<figcaption><b>圖 2 — 一條邊,兩種寫法。</b>讀 graph 必須兩端都檢查:一個 extension 的
+入邊,可能宣告在它自己身上(用 <code>source</code>),也可能宣告在送出方身上(用
+<code>dest</code>),runtime 對兩種寫法沒有偏好。全程的路由鍵都是 node 的
+<code>name</code>,所以「為了配合新 vendor 而把 node 改名」會無聲地把它從管線上摘下來,
+偏偏 <code>addon</code> 本身的抽換卻是成功的。</figcaption>
+</figure>
+
+<h4>3.3 三個名字必須一致</h4>
+
+<p>只有這三者全部吻合,extension 才會被實體化。不一致時,它會在
+<b>graph 載入階段無聲失敗</b> —— 沒有錯誤訊息,那個 extension 就是不存在:</p>
+
+<ol>
+<li><code>addon.py</code> 裡 <code>@register_addon_as_extension("x")</code> 的引數</li>
+<li>該 extension 的 <code>manifest.json</code> 中的 <code>name</code> 欄位</li>
+<li>graph node 的 <code>addon</code> 欄位</li>
+</ol>
+
+<p>node 的 <code>name</code> 是另一回事:它是這個實例在 graph 內的標籤,也是
+<code>connections</code> 用來路由的依據。抽換 vendor 時,改 <code>addon</code>,
+<b>不要動 <code>name</code></b>。</p>
+
+<h4>3.4 沒有路由的訊息會被丟棄 —— 而且那行警告是節流的</h4>
+
+<p>送出一個 graph 裡沒有對應連線的訊息,只會產生一行警告,其他什麼也不會發生。這行警告
+很容易被錯過,原因從日誌上看不出來:它是按訊息名稱做速率限制的。</p>
+
+<figure id="fig3">
+<svg viewBox="0 0 900 424" role="img" aria-label="一次 send_data 呼叫,其訊息名稱在 graph 裡沒有目的地:runtime 設定 MSG_NOT_CONNECTED 錯誤碼,遞增一個以 extension 與訊息名稱為鍵的計數器,只有在計數器為一千的倍數時才輸出警告 —— 因此第一次一定會印,之後每一千次印一次。">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="20" y="24" width="176" height="52"/>
+  <text class="d-label" x="108" y="46" text-anchor="middle" fill="currentColor">send_data(msg)</text>
+  <text class="d-sub"   x="108" y="64" text-anchor="middle">name = "error"</text>
+
+  <rect class="d-box" x="236" y="24" width="330" height="52"/>
+  <text class="d-label" x="401" y="46" text-anchor="middle" fill="currentColor">到 graph 的 connections 查這個名字</text>
+  <text class="d-sub"   x="401" y="64" text-anchor="middle">runtime 路由</text>
+
+  <line class="d-line" x1="198" y1="50" x2="232" y2="50" marker-end="url(#a3)"/>
+
+  <rect class="d-box" x="626" y="24" width="250" height="52"/>
+  <text class="d-label" x="751" y="46" text-anchor="middle" fill="currentColor">找到 → 派送</text>
+  <text class="d-sub"   x="751" y="64" text-anchor="middle">送到該名稱的每一個 dest</text>
+  <line class="d-line" x1="568" y1="50" x2="622" y2="50" marker-end="url(#a3)"/>
+
+  <line class="d-hot" x1="401" y1="78" x2="401" y2="108" marker-end="url(#a3)"/>
+  <text class="d-hot-t" x="414" y="98">找不到目的地</text>
+
+  <rect class="d-box" x="236" y="112" width="330" height="52"/>
+  <text class="d-label" x="401" y="134" text-anchor="middle" fill="currentColor">ten_error_set(TEN_ERROR_CODE_MSG_NOT_CONNECTED)</text>
+  <text class="d-sub"   x="401" y="152" text-anchor="middle">extension.c:435 — "Failed to find destination of a '%s' message '%s'"</text>
+
+  <line class="d-line" x1="401" y1="166" x2="401" y2="196" marker-end="url(#a3)"/>
+
+  <rect class="d-box" x="236" y="200" width="330" height="52"/>
+  <text class="d-label" x="401" y="222" text-anchor="middle" fill="currentColor">increment_msg_not_connected_count(ext, name)</text>
+  <text class="d-sub"   x="401" y="240" text-anchor="middle">send.c:161 — 每組（extension, 訊息名稱）各一個計數器</text>
+
+  <line class="d-line" x1="401" y1="254" x2="401" y2="284" marker-end="url(#a3)"/>
+
+  <rect class="d-hot-b" x="261" y="288" width="280" height="46"/>
+  <text class="d-label d-hot-t" x="401" y="310" text-anchor="middle">count % 1000 == 0 ?</text>
+  <text class="d-sub"  x="401" y="327" text-anchor="middle">msg_not_connected_cnt.c:76</text>
+
+  <path class="d-line" d="M301 336 L301 358" marker-end="url(#a3)"/>
+  <path class="d-hot"  d="M501 336 L501 358" marker-end="url(#a3)"/>
+  <text class="d-edge"  x="292" y="352" text-anchor="end">false</text>
+  <text class="d-hot-t" x="512" y="352">true</text>
+
+  <rect class="d-box" x="60" y="362" width="290" height="46"/>
+  <text class="d-label" x="205" y="384" text-anchor="middle" fill="currentColor">靜音 — 什麼都不記錄</text>
+  <text class="d-sub"   x="205" y="401" text-anchor="middle">訊息一樣被丟棄</text>
+
+  <rect class="d-hot-b" x="416" y="362" width="330" height="46"/>
+  <text class="d-label d-hot-t" x="581" y="384" text-anchor="middle">TEN_LOGW — send.c:163</text>
+  <text class="d-sub"   x="581" y="401" text-anchor="middle">同一分支內把計數器歸零</text>
+
+  <text class="d-hot-t" x="606" y="222">第 1 次會印，</text>
+  <text class="d-hot-t" x="606" y="239">之後每 1000 次印一次</text>
+  <text class="d-sub"   x="606" y="258">TEN_MSG_NOT_CONNECTED_COUNT_</text>
+  <text class="d-sub"   x="606" y="273">RESET_THRESHOLD = 1000</text>
+</svg>
+<figcaption><b>圖 3 — 一則被丟棄的訊息只印一次,之後每一千次印一次。</b>計數器從 0 起算,
+而 0 滿足 <code>% 1000 == 0</code>,所以第一次必定會印;該分支接著把計數器歸零,後續 999
+次全部靜音。實務上的結論是:<b>這行警告沒出現,什麼都證明不了</b> —— 一個每小時被丟掉
+幾百次的訊息,可能只在幾小時前印過那麼一次。計數器是按 extension <em>與</em> 訊息名稱
+分別計的,所以第二個沒有路由的名稱,會有它自己的「第一次」。</figcaption>
+</figure>
+
+<pre><code>W ten:runtime ten_env_send_msg_internal@send.c:163
+  Failed to send message: Failed to find destination of a 'data' message 'error' from graph.</code></pre>
+
+<div class="warn">
+<p><b>這是真實案例。</b>ASR extension 會送出一個 <code>error</code> data 訊息,但
+<code>websocket-example</code> 的 graph 只路由了 <code>asr_result</code>、
+<code>metrics</code> 和 <code>tts_flush_end</code>。因此少填一把 API key 這件事永遠傳不到
+UI,只活在日誌裡。當介面什麼都沒顯示時,先 grep 這一行 —— 而且因為上面說的節流機制,
+要 grep 整份檔案,不要只看尾巴。</p>
+</div>
+
+<h3 id="ch4">4. RPC:cmd 與 CmdResult</h3>
+<p class="src">來源:<code>core/src/ten_runtime/binding/python/interface/ten_runtime/async_ten_env.py</code></p>
+
+<p><code>cmd</code> 是這個 framework 的 RPC。Python 側提供兩種形式。</p>
+
+<h5>單次回覆</h5>
+<pre><code>result, err = await ten_env.send_cmd(cmd)
+# runtime 保證 result.is_completed()</code></pre>
+
+<h5>串流回覆</h5>
+<pre><code>async for result, err in ten_env.send_cmd_ex(cmd):
+    if err: break
+    ...
+    if result.is_completed(): break</code></pre>
+
+<p><code>send_cmd_ex</code> 背後是一個 <code>maxsize=10</code> 的佇列,所以中間結果會
+邊產生邊送達,最後一個帶著 <code>is_completed()</code>。LLM 逐 token 的輸出走的就是
+這條路。</p>
+
+<h5>回覆</h5>
+<pre><code>await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))</code></pre>
+
+<h5>單向送出</h5>
+<pre><code>await ten_env.send_data(data)
+await ten_env.send_audio_frame(frame)
+await ten_env.send_video_frame(frame)</code></pre>
+
+<p>每個都接受一個選用的 <code>SendOptions</code>;預設是送出即忘,而
+<code>wait_for_result=True</code> 會等待 runtime 確認送達 —— 注意它回報的是「有沒有送到」,
+不是「接收方拿它做了什麼」。</p>
+
+<div class="bad">
+<p>最花時間的兩個錯誤:</p>
+<ul>
+<li><code>ten_env.get_property_*()</code> 回傳的是
+<b><code>(value, error)</code> 元組</b>,不是值本身。永遠要取 <code>[0]</code>。</li>
+<li>extension 不在主執行緒上跑,所以<b>不能裝 signal handler,也不能用
+<code>atexit</code></b>。清理work 寫在 <code>on_stop()</code> 裡。</li>
+</ul>
+</div>
+
+<h3 id="ch5">5. runtime 如何載入 addon</h3>
+<p class="src">來源:<code>core/src/ten_runtime/addon/addon_autoload.c</code></p>
+
+<p>一個 addon package 就是一個目錄。runtime 會掃描它的 <code>lib/</code> 子目錄,並且
+<b><code>dlopen</code> 在那裡找到的每一個 <code>.so</code></b> —— 它不會去 manifest 查
+檔名,也不會跳過載入失敗的物件。</p>
+
+<figure id="fig4">
+<svg viewBox="0 0 940 372" role="img" aria-label="runtime 掃描每個 addon package 的 lib 目錄,並 dlopen 其中每一個 shared object。成功載入會註冊該 addon;若因為架構不符而載入失敗,結果是這個 extension 在 graph 中完全不存在,而不是功能降級。">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="20" y="24" width="336" height="264"/>
+  <text class="d-label" x="36" y="46" fill="currentColor">tenapp/ten_packages/</text>
+  <text class="d-sub" x="36" y="72">├ system/</text>
+  <text class="d-sub" x="36" y="88">│&#160;&#160;├ ten_runtime/lib/</text>
+  <text class="d-sub" x="36" y="104">│&#160;&#160;│&#160;&#160;&#160;libten_runtime.so, libten_utils.so</text>
+  <text class="d-sub" x="36" y="120">│&#160;&#160;└ ten_runtime_python/lib/</text>
+  <text class="d-sub" x="36" y="136">│&#160;&#160;&#160;&#160;&#160;&#160;libten_runtime_python.so</text>
+  <text class="d-sub" x="36" y="158">├ addon_loader/</text>
+  <text class="d-sub" x="36" y="174">│&#160;&#160;└ python_addon_loader/lib/</text>
+  <text class="d-sub" x="36" y="190">│&#160;&#160;&#160;&#160;&#160;&#160;libpython_addon_loader.so</text>
+  <text class="d-sub" x="36" y="212">└ extension/</text>
+  <text class="d-sub" x="36" y="228">&#160;&#160;&#160;├ agora_rtc/lib/</text>
+  <text class="d-sub" x="36" y="244">&#160;&#160;&#160;│&#160;&#160;&#160;libagora_rtc.so&#160;&#160;← 原生</text>
+  <text class="d-sub" x="36" y="260">&#160;&#160;&#160;└ soniox_asr_python/</text>
+  <text class="d-sub" x="36" y="276">&#160;&#160;&#160;&#160;&#160;&#160;&#160;根本沒有 lib/&#160;&#160;← 純 Python</text>
+
+  <line class="d-line" x1="360" y1="90" x2="402" y2="90" marker-end="url(#a4)"/>
+  <text class="d-edge" x="364" y="82">掃描</text>
+
+  <rect class="d-box" x="406" y="60" width="510" height="58"/>
+  <text class="d-label" x="661" y="84" text-anchor="middle" fill="currentColor">load_all_dynamic_libraries_under_path(&lt;addon&gt;/lib/)</text>
+  <text class="d-sub"   x="661" y="102" text-anchor="middle">addon_autoload.c:441 — "Load the library from the 'lib/' directory."</text>
+
+  <line class="d-line" x1="661" y1="120" x2="661" y2="152" marker-end="url(#a4)"/>
+
+  <rect class="d-box" x="406" y="156" width="510" height="48"/>
+  <text class="d-label" x="661" y="180" text-anchor="middle" fill="currentColor">逐一 dlopen() 在那裡找到的每個 .so</text>
+  <text class="d-sub"   x="661" y="197" text-anchor="middle">不篩檔名，也不預先檢查架構</text>
+
+  <path class="d-line" d="M535 206 L535 240" marker-end="url(#a4)"/>
+  <path class="d-hot"  d="M790 206 L790 240" marker-end="url(#a4)"/>
+  <text class="d-edge"  x="526" y="228" text-anchor="end">成功</text>
+  <text class="d-hot-t" x="800" y="228">ELF machine 不符</text>
+
+  <rect class="d-box" x="406" y="244" width="256" height="60"/>
+  <text class="d-label" x="534" y="268" text-anchor="middle" fill="currentColor">addon 完成註冊</text>
+  <text class="d-sub"   x="534" y="286" text-anchor="middle">graph node 得以實體化</text>
+
+  <rect class="d-hot-b" x="686" y="244" width="230" height="60"/>
+  <text class="d-label d-hot-t" x="801" y="268" text-anchor="middle">載入失敗</text>
+  <text class="d-sub"   x="801" y="286" text-anchor="middle">什麼都沒註冊</text>
+
+  <text class="d-hot-t" x="661" y="332" text-anchor="middle">dlopen 失敗等於這個 extension「不存在」，不是「功能變少」。</text>
+  <text class="d-sub"   x="661" y="351" text-anchor="middle">在 aarch64 上，addon 的 lib/ 底下只要有一個 x86-64 物件，整個 addon 就沒了。</text>
+</svg>
+<figcaption><b>圖 4 — 這個掃描是無條件的,而這正是整個 arm64 問題的根源。</b>因為 runtime
+會打開 <code>lib/</code> 裡的每一個物件,一個架構不對的檔案不會被跳過:addon 註冊失敗,
+它所支撐的 graph node 也就永遠不會實體化。這解釋了為什麼架構不符表現出來的樣子是
+<em>一個不存在的 extension</em>,而不是一個行為異常的 extension —— 也解釋了 14.4 節的
+第 2 項修改為什麼要把那個只有 x86-64 版本的產物從 arm64 package 裡拿掉,而不是留著不管。</figcaption>
+</figure>
+
+<p>因此,帶原生程式碼的 extension 是兩份 JSON 加上 <code>lib/*.so</code>;純 Python 的
+沒有 <code>lib/</code>,是透過 <code>python_addon_loader</code> 接到 runtime 的。</p>
+<h2 id="part2"><span class="pnum">第 II 部</span>平台</h2>
+
+<h3 id="ch6">6. ABI 下限</h3>
+
+<p>官方發佈的 arm64 binary 有兩項性質,決定了它們到底能不能被載入。兩者都是用
+<code>readelf</code> 對 0.11.71 的
+<code>ten_packages-linux-arm64-gcc-release.zip</code> 讀出來的。</p>
+
+<h4>6.1 glibc ≥ 2.38</h4>
+
+<table>
+<thead><tr><th>函式庫</th><th>所需的最高 glibc 符號</th></tr></thead>
+<tbody>
+<tr><td><code>libten_utils.so</code></td><td><code>__isoc23_strtol@GLIBC_2.38</code></td></tr>
+<tr><td><code>libpython_addon_loader.so</code></td><td><code>__isoc23_strtol@GLIBC_2.38</code></td></tr>
+<tr><td><code>libten_runtime.so</code></td><td><code>GLIBC_2.34</code></td></tr>
+<tr><td><code>libten_runtime_python.so</code></td><td><code>GLIBC_2.17</code></td></tr>
+</tbody>
+</table>
+
+<p>同樣這幾個函式庫,x64 package 的上限停在 2.34。這個差異並不是刻意設計的:
+<code>__isoc23_strtol</code> 是 glibc 2.38 以上、搭配較新 GCC 時,標頭檔把
+<code>strtol</code> 轉導過去的目標。它是
+<code>linux_arm64.yml</code> 跑在 <code>ubuntu-24.04-arm</code>、而
+<code>linux_ubuntu2204.yml</code> 跑在 22.04 的副產物,結果讓 arm64 的下限一口氣
+拉高了四個 glibc 版本。</p>
+
+<h4>6.2 Python 版本必須與 binding 相符</h4>
+
+<p><code>ten_runtime_python</code> 是針對某一個 Python 的標頭檔編出來的,而
+<code>python_addon_loader</code> 是用一個寫死的檔名去 <code>dlopen</code> libpython。
+在 arm64 上,這兩個版本不一樣。</p>
+
+<figure id="fig5">
+<svg viewBox="0 0 950 392" role="img" aria-label="arm64 的 Python binding 是針對 Python 3.12 標頭檔編譯的,而 addon loader 預設 dlopen 的是 libpython3.10.so。兩份產物彼此不一致,所以必須用 TEN_PYTHON_LIB_PATH 把 loader 導向 binding 實際編譯所依據的 3.12 函式庫。">
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="40" y="24" width="380" height="56"/>
+  <text class="d-label" x="230" y="48" text-anchor="middle" fill="currentColor">libten_runtime_python.so</text>
+  <text class="d-sub"   x="230" y="67" text-anchor="middle">Python binding，arm64 package 0.11.71</text>
+
+  <rect class="d-box" x="520" y="24" width="380" height="56"/>
+  <text class="d-label" x="710" y="48" text-anchor="middle" fill="currentColor">libpython_addon_loader.so</text>
+  <text class="d-sub"   x="710" y="67" text-anchor="middle">在 worker 內啟動直譯器</text>
+
+  <line class="d-line" x1="230" y1="82" x2="230" y2="110" marker-end="url(#a5)"/>
+  <line class="d-line" x1="710" y1="82" x2="710" y2="110" marker-end="url(#a5)"/>
+
+  <rect class="d-box-soft" x="40" y="114" width="380" height="52"/>
+  <text class="d-label" x="230" y="138" text-anchor="middle" fill="currentColor">針對 Python 3.12 標頭檔編譯</text>
+  <text class="d-sub"   x="230" y="156" text-anchor="middle">執行期需要 CPython 3.12 ABI</text>
+
+  <rect class="d-box-soft" x="520" y="114" width="380" height="52"/>
+  <text class="d-label" x="710" y="138" text-anchor="middle" fill="currentColor">dlopen("libpython3.10.so")</text>
+  <text class="d-sub"   x="710" y="156" text-anchor="middle">內建預設值 — 與 x64 package 相同</text>
+
+  <path class="d-hot" d="M230 168 L230 190 L710 190 L710 168"/>
+  <rect class="d-hot-b" x="290" y="196" width="370" height="50"/>
+  <text class="d-label d-hot-t" x="475" y="219" text-anchor="middle">3.12 ≠ 3.10</text>
+  <text class="d-sub" x="475" y="237" text-anchor="middle">兩份 arm64 產物彼此矛盾</text>
+
+  <text class="d-sub" x="676" y="216">沒有覆寫的話，worker 會印：</text>
+  <text class="d-sub" x="676" y="232">[Python addon loader] Failed to load</text>
+  <text class="d-sub" x="676" y="247">system libpython.</text>
+
+  <line class="d-line" x1="475" y1="248" x2="475" y2="274" marker-end="url(#a5)"/>
+
+  <rect class="d-box" x="195" y="278" width="560" height="56"/>
+  <text class="d-label" x="475" y="302" text-anchor="middle" fill="currentColor">export TEN_PYTHON_LIB_PATH=…/libpython3.12.so</text>
+  <text class="d-sub"   x="475" y="321" text-anchor="middle">Debian 佈局在 /usr/lib/aarch64-linux-gnu/&#160;&#160;·&#160;&#160;RPM 佈局在 /usr/lib64/</text>
+
+  <line class="d-line" x1="475" y1="336" x2="475" y2="358" marker-end="url(#a5)"/>
+  <text class="d-label" x="475" y="377" text-anchor="middle" fill="currentColor">loader 打開 3.12 — binding 得到滿足，extension 可以 import</text>
+</svg>
+<figcaption><b>圖 5 — 唯一一項沒有它就無法在 arm64 上運作的設定。</b>這個不一致是官方
+arm64 package 內部的問題:不是主機造成的,也沒有任何主機端配置能消除它,除非把 loader
+指向正確的函式庫。<code>TEN_PYTHON_LIB_PATH</code> 只覆寫 loader 的
+<code>dlopen</code> 目標;它不會改變 <code>uv pip install --system</code> 把套件裝進
+哪一個 Python —— 那是另一個獨立的陷阱(12.4)。</figcaption>
+</figure>
+
+<div class="warn">
+<p><code>tman check env</code> 至今仍會回報 <em>"TEN Framework only supports Python
+3.10"</em>,並建議 <code>pyenv install 3.10.18</code>。就官方發佈的 arm64 package 而言,
+這個建議是錯的 —— 照著做會得到一個 3.10 直譯器去配 3.12 的 binding。</p>
+</div>
+
+<h4>6.3 發行版相容性</h4>
+
+<table>
+<thead><tr><th>發行版</th><th>glibc</th><th>系統 Python</th><th>官方 arm64 package</th></tr></thead>
+<tbody>
+<tr><td>Ubuntu 24.04 LTS</td><td>2.39</td><td>3.12</td><td><b>可用</b> —— 設定 <code>TEN_PYTHON_LIB_PATH</code></td></tr>
+<tr><td>Ubuntu 24.10 / 25.04</td><td>2.40+</td><td>3.12+</td><td>libpython 對得上 3.12 就可用</td></tr>
+<tr><td>Debian 13 (trixie)</td><td>2.41</td><td>3.13</td><td>需要另外裝 3.12 的 libpython</td></tr>
+<tr><td>Fedora 39 / 40</td><td>2.38 / 2.39</td><td>3.12</td><td><b>可用</b> —— libpython 在 <code>/usr/lib64</code></td></tr>
+<tr><td>Fedora 41+</td><td>2.40+</td><td>3.13</td><td><b>可用</b> —— 需並存安裝 <code>python3.12</code></td></tr>
+<tr><td>Lychee 2025(Fedora 重build)</td><td>2.41</td><td>3.13</td><td><b>已實測</b> —— 第 12 章就是在這個平台寫的</td></tr>
+<tr><td>Ubuntu 22.04 LTS</td><td>2.35</td><td>3.10</td><td><b>不行</b> —— 低於下限</td></tr>
+<tr><td>Debian 12 (bookworm)</td><td>2.36</td><td>3.11</td><td><b>不行</b></td></tr>
+<tr><td>RHEL / Rocky 9</td><td>2.34</td><td>3.9</td><td><b>不行</b></td></tr>
+<tr><td>Amazon Linux 2023</td><td>2.34</td><td>3.9</td><td><b>不行</b> —— 用 Graviton 的要注意</td></tr>
+<tr><td>Alpine (musl)</td><td>—</td><td>—</td><td><b>不行</b> —— 沒有 musl 版本</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<p>低於下限時,不要跟官方 package 硬拚。改成從源碼建 core(第 10 章):產出的東西會連結
+你自己的 glibc 和你自己的 Python,兩個限制一次繞過。</p>
+</div>
+
+<h3 id="ch7">7. 每個 shared object 做什麼</h3>
+
+<p>每一列回答四個問題:它提供什麼、由什麼產生、被誰載入或連結,以及有沒有 aarch64
+版本。</p>
+
+<table>
+<thead><tr><th><code>.so</code></th><th>提供</th><th>由誰產生</th><th>被誰載入 / 連結</th><th>aarch64</th></tr></thead>
+<tbody>
+<tr><td><code>libten_utils.so</code></td><td>字串、容器、日誌、backtrace、atomics、<code>${env:}</code> 解析</td><td><code>core/src/ten_utils/BUILD.gn</code>,<code>shared_library("ten_utils_shared")</code></td><td>由 <code>libten_runtime.so</code> 連結</td><td>已驗證</td></tr>
+<tr><td><code>libten_runtime.so</code></td><td>C runtime:graph 解析、extension lifecycle、<b>訊息路由</b>、addon 載入</td><td><code>core/src/ten_runtime/BUILD.gn</code>,<code>output_name = "ten_runtime"</code></td><td>由 worker 載入;所有 binding 都連結它</td><td>已驗證</td></tr>
+<tr><td><code>libten_runtime_python.so</code></td><td>Python binding</td><td><code>binding/python/native/BUILD.gn</code>,<code>ten_shared_library</code></td><td><code>import ten_runtime</code> 時載入</td><td>已驗證</td></tr>
+<tr><td><code>libpython_addon_loader.so</code></td><td>在 worker 內啟動 Python 直譯器,<code>dlopen</code> libpython</td><td><code>packages/core_addon_loaders/python_addon_loader/BUILD.gn</code></td><td>由 runtime 從 <code>addon_loader/*/lib/</code> <code>dlopen</code></td><td>已驗證</td></tr>
+<tr><td><code>libten_runtime_go.so</code></td><td>Go binding</td><td><code>binding/go/BUILD.gn</code>,<code>ten_package</code></td><td>Go app 透過 CGO 連結</td><td>已驗證</td></tr>
+<tr><td><code>libten_runtime_nodejs.so</code></td><td>Node.js binding</td><td><code>binding/nodejs/native/BUILD.gn</code></td><td><code>nodejs_addon_loader</code></td><td>建置系統支援</td></tr>
+<tr><td><code>libagora_rtc.so</code></td><td><b>RTC 傳輸層</b> —— 在 Agora SDK 之上實作 TEN 的 extension 介面</td><td>不在本倉庫;源碼由 Agora 提供</td><td>由 <code>extension/agora_rtc/lib/</code> 被 <code>dlopen</code></td><td>自行建置 —— 第 14 章</td></tr>
+<tr><td><code>libagora_rtc_sdk.so</code> 與四個編解碼函式庫</td><td>Agora 自家 SDK</td><td>Agora</td><td>由 <code>libagora_rtc.so</code> 連結</td><td>有,重新打包即可</td></tr>
+</tbody>
+</table>
+
+<h4>7.1 唯一的預編產物</h4>
+
+<p>整個建置流程中,只有一項二進位相依不是從源碼編出來的:</p>
+
+<pre><code>third_party/node/BUILD.gn
+  ten_prebuilt_library("prebuilt_node_shared")
+    node-shared-linux-arm64-gcc.zip / node-shared-linux-arm64-clang.zip</code></pre>
+
+<p><b>它有 arm64 版本。</b>其他所有 <code>third_party</code> 項目 —— curl、zlib、
+mbedtls、msgpack、libuv、libwebsockets、yyjson、nlohmann_json、googletest、ffmpeg ——
+全部從源碼建,所以不需要任何其他的架構專屬產物。</p>
+
+<h3 id="ch8">8. 元件清單,以及 arm64 改變了什麼</h3>
+
+<p><code>BUILD.gn</code> 定義了一個 group:<code>ten_framework_all</code>,其他一切都掛
+在它下面:</p>
+
+<table>
+<thead><tr><th>Target</th><th>內容</th></tr></thead>
+<tbody>
+<tr><td><code>core/src/ten_runtime</code></td><td>C runtime</td></tr>
+<tr><td><code>core/src/ten_runtime/binding</code></td><td>go、nodejs、python 三個 binding</td></tr>
+<tr><td><code>core/src/ten_rust</code></td><td>Rust crates,受 <code>ten_enable_ten_rust</code> 控制</td></tr>
+<tr><td><code>core/src/ten_manager</code></td><td><code>tman</code>,受 <code>ten_enable_ten_manager</code> 控制</td></tr>
+<tr><td><code>third_party</code></td><td>十四個相依,全部源碼</td></tr>
+<tr><td><code>packages/core_addon_loaders</code></td><td><code>python_addon_loader</code>、<code>nodejs_addon_loader</code></td></tr>
+<tr><td><code>packages/core_apps</code></td><td><code>default_app_{cpp,go,nodejs,python}</code></td></tr>
+<tr><td><code>packages/core_extensions</code></td><td>九個 <code>default_*</code> 樣板</td></tr>
+<tr><td><code>packages/core_protocols</code></td><td><code>msgpack</code></td></tr>
+<tr><td><code>packages/core_systems</code></td><td><code>pytest_ten</code></td></tr>
+<tr><td><code>packages/example_apps</code></td><td><code>pprof_app_go</code>、<code>transcriber_demo</code></td></tr>
+<tr><td><code>packages/example_extensions</code></td><td>十八個,包含 ffmpeg 三件組、<code>vosk_asr_cpp</code>、<code>webrtc_vad_cpp</code></td></tr>
+</tbody>
+</table>
+
+<p>共有二十二個 feature flag 在控管:<code>build/options.gni</code> 七個,
+<code>build/ten_runtime/options.gni</code> 十五個。</p>
+
+<h4>8.1 在 arm64 上實際不可用或被關掉的東西</h4>
+
+<p>只有第一項是真正的功能缺口。其餘列出來,是為了避免被誤認為缺口。</p>
+
+<table>
+<thead><tr><th>項目</th><th>性質</th></tr></thead>
+<tbody>
+<tr><td><code>agora_rtc</code> extension</td><td>registry 裡唯一的缺口。可從源碼建 —— 第 14 章。</td></tr>
+<tr><td>覆蓋率插樁</td><td>根本無法啟用。有六個 <code>assert(is_linux &amp;&amp; target_cpu == "x64")</code> 擋著 —— <code>build/ten_runtime/glob.gni</code> 三個、<code>build/ten_runtime/ten.gni</code> 兩個、<code>build/ten_common/rust/rust.gni</code> 一個。它們全都在 <code>if (enable_coverage)</code> 裡面,所以預設建置永遠不會走到。</td></tr>
+<tr><td>測試</td><td><code>linux_arm64.yml</code> 設了 <code>ten_enable_tests=false</code> 以及 rust、manager 的測試旗標,所以 arm64 job 不會建任何測試 target。</td></tr>
+<tr><td><code>ten_enable_libwebsockets=false</code></td><td>沒有代價。這個旗標總共只被引用三次,全在 <code>tests/ten_runtime/</code> 底下,而 arm64 CI 本來就關掉測試。它不控制任何 runtime 程式碼。</td></tr>
+<tr><td><code>ten_manager_enable_frontend=false</code></td><td>tman designer 的前端不會被建出來。</td></tr>
+<tr><td><code>ten_enable_go_app_leak_check</code></td><td>定義上就只限 x64,而且只在 sanitizer debug 建置下才有意義。</td></tr>
+<tr><td><code>rustup target add stable x86_64-unknown-linux-gnuasan</code></td><td>寫死在建置用 Dockerfile 裡,在 arm64 上沒有意義。</td></tr>
+<tr><td>ffmpeg extensions</td><td>所有平台預設都是關的(<code>ten_enable_ffmpeg_extensions = false</code>),不是 arm64 的限制。</td></tr>
+</tbody>
+</table>
+
+<p>第四列是在糾正一個很容易發生的誤讀:把 <code>libwebsockets</code> 關掉「看起來」像是
+拿掉了一種傳輸方式,其實不是。</p>
+
+<h3 id="ch9">9. 建置相依</h3>
+
+<p><code>tools/docker_for_building/ubuntu/22.04/Dockerfile</code> 是關於「core 建置需要
+什麼」的唯一書面紀錄,而它從頭到尾都是 Ubuntu 22.04 與 Debian 工具。在任何其他發行版上,
+它應該被當成一份清單來讀,而不是拿來執行。</p>
+
+<table>
+<thead><tr><th>用途</th><th>套件(Ubuntu 命名)</th></tr></thead>
+<tbody>
+<tr><td>編譯與建置</td><td><code>build-essential</code> <code>cmake</code> <code>make</code> <code>autoconf</code> <code>libtool</code> <code>pkg-config</code></td></tr>
+<tr><td>加密與網路</td><td><code>libssl-dev</code> <code>libcurl4-gnutls-dev</code> <code>libcrypto++-dev</code> <code>libnss3-dev</code></td></tr>
+<tr><td>解析</td><td><code>libexpat1-dev</code> <code>libmsgpack-dev</code> <code>zlib1g-dev</code></td></tr>
+<tr><td>系統</td><td><code>uuid-dev</code> <code>libunwind-dev</code> <code>libffi-dev</code> <code>libreadline-dev</code> <code>libncurses5-dev</code> <code>libgdbm-dev</code></td></tr>
+<tr><td>音訊</td><td><code>libasound2</code></td></tr>
+<tr><td>僅 ffmpeg extensions 需要</td><td><code>libavformat-dev</code> <code>libavfilter-dev</code> <code>libx264-dev</code> <code>libdrm-dev</code> <code>libxcomposite-dev</code> <code>libxdamage1</code></td></tr>
+<tr><td>Sanitizer</td><td><code>libasan5</code></td></tr>
+<tr><td>Python</td><td><code>python3</code> <code>python3-dev</code> <code>python3-pip</code> <code>python3-venv</code></td></tr>
+<tr><td>工具鏈</td><td>Go 1.22.3 加上 go1.20.12;Rust stable 搭配 <code>cbindgen</code>;來自 apt.llvm.org 的 clang-18</td></tr>
+<tr><td>工具</td><td><code>uv</code> <code>task</code> <code>jq</code> <code>git</code> <code>zip</code> <code>unzip</code> <code>p7zip-full</code> <code>tree</code> <code>cpulimit</code> <code>iwyu</code></td></tr>
+</tbody>
+</table>
+
+<h4>9.1 建置實際上連結了什麼</h4>
+
+<p>把 <code>core/</code>、<code>packages/</code>、<code>build/</code> 底下所有 GN 的
+<code>libs</code> 宣告攤開,結果全部落在 libc 層級:</p>
+
+<pre><code>stdc++  c++  pthread  gcc  gcc_s  rt  m  dl  c        （Windows 上多一個 bcrypt）</code></pre>
+
+<p>沒有 <code>ssl</code>、<code>crypto</code>、<code>curl</code>、<code>z</code>、
+<code>expat</code>、<code>uuid</code>、<code>unwind</code>、<code>asound</code> 或
+<code>msgpack</code>。上表中有幾項在 GN 圖裡<b>根本沒有消費者</b>,這是用 grep 掃過
+<code>core/</code>、<code>packages/</code>、<code>build/</code> 確認的:</p>
+
+<table>
+<thead><tr><th>套件</th><th>調查結果</th></tr></thead>
+<tbody>
+<tr><td><code>libmysqlclient-dev</code>、<code>libmysqlcppconn-dev</code></td><td>零引用</td></tr>
+<tr><td><code>iwyu</code>、<code>cpulimit</code>、<code>p7zip-full/rar</code></td><td>零引用</td></tr>
+<tr><td><code>libunwind-dev</code></td><td>命中的是 <code>#include "unwind.h"</code> 和 <code>_Unwind_Backtrace</code> —— 那是 <b>libgcc 的 unwinder</b>,不是 libunwind</td></tr>
+<tr><td><code>libssl-dev</code></td><td>命中的是註解裡的英文字 "endle<b>ssl</b>y"</td></tr>
+<tr><td><code>libffi-dev</code></td><td>命中的是註解裡的 "e<b>ffi</b>ciently"</td></tr>
+<tr><td><code>uuid-dev</code></td><td>TEN 自己實作了 <code>ten_uuid</code>;沒有 <code>#include &lt;uuid/uuid.h&gt;</code></td></tr>
+<tr><td><code>libexpat1-dev</code>、<code>libnss3-dev</code>、<code>libreadline-dev</code>、<code>libncurses5-dev</code>、<code>libgdbm-dev</code>、<code>libasound2</code></td><td>零引用</td></tr>
+</tbody>
+</table>
+
+<p>只有一項是真的需要,而且是條件式的:</p>
+
+<table>
+<thead><tr><th>套件</th><th>被誰需要</th><th>什麼時候</th></tr></thead>
+<tbody>
+<tr><td><code>libx264-dev</code></td><td><code>third_party/ffmpeg</code> 的 autotool 命令列帶了 <code>--enable-libx264</code></td><td>只有在 <code>ten_enable_ffmpeg_extensions=true</code> 時</td></tr>
+</tbody>
+</table>
+
+<p>那些從源碼建的相依不需要系統上的對應套件。<code>curl</code> 的設定同時帶了
+<code>CURL_ENABLE_SSL=ON</code> <b>和</b> <code>CURL_USE_MBEDTLS=ON</code>,所以它用的是
+源碼建出來的 mbedtls,OpenSSL 根本沒有參與。</p>
+
+<h4>9.2 離開 Ubuntu x64 就會失效的三行</h4>
+
+<pre><code>ln -sf /usr/bin/python3.10-config /usr/bin/python3-config   # 寫死 3.10
+rustup target add stable x86_64-unknown-linux-gnuasan       # 寫死 x86_64
+add-apt-repository "deb http://apt.llvm.org/..."            # 只限 Debian 系，為了 clang-18</code></pre>
+
+<p>Go 的安裝反而是值得學的反例:它從 <code>dpkg --print-architecture</code> 推導出
+壓縮檔名稱,所以本來就是架構正確的 —— 只是在 RPM 發行版上,<code>dpkg</code> 本身要換掉。</p>
+<h2 id="part3"><span class="pnum">第 III 部</span>建置</h2>
+
+<h3 id="ch10">10. 從源碼建 framework core</h3>
+
+<p>四種情況需要這麼做:目標平台低於 ABI 下限、C runtime 本身要改、要跑 core 的測試,
+或者要建一個 C++ extension。</p>
+
+<p><code>core/ten_gn</code> 是一個 submodule,而且<b>剛 clone 下來時是空的</b> ——
+沒初始化之前什麼都建不起來,而 <code>tgn</code> 本身就來自那裡:</p>
+
+<pre><code>git submodule update --init --recursive --depth 1 core/ten_gn
+export PATH=$(pwd)/core/ten_gn:$PATH</code></pre>
+
+<p>它附帶 aarch64 版的 <code>gn</code> 與 <code>ninja</code> 執行檔,所以建置工具本身
+不需要編譯。<code>build.py:87</code> 依 <code>platform.machine()</code> 選擇它們,而
+<code>validate_cpu</code> 接受 <code>linux/arm64</code>,因此在 arm64 主機上不需要任何
+額外旗標。</p>
+
+<p>工具鏈:clang 或 gcc、cmake、Go ≥ 1.20、帶 <code>cbindgen</code> 的 Rust stable、
+裝了 <code>python-dotenv</code> 和 <code>jinja2</code> 的 Python 3;Node 只有在建
+tman designer 前端時才需要。相依清單見第 9 章。</p>
+
+<p>根目錄的 <code>Taskfile.yml</code> 會偵測主機架構,所以在 arm64 上這樣就是建 arm64,
+不用加旗標:</p>
+
+<pre><code>task gen
+task build
+# 輸出：out/linux/arm64/</code></pre>
+
+<p>若要完全比照 CI(<code>.github/workflows/linux_arm64.yml</code>,gcc + release):</p>
+
+<pre><code>tgn gen linux arm64 release -- \
+  is_clang=false log_level=1 enable_serialized_actions=true \
+  ten_enable_tests=false ten_rust_enable_tests=false ten_manager_enable_tests=false \
+  ten_enable_libwebsockets=false ten_enable_cargo_clean=true \
+  ten_enable_rust_incremental_build=false ten_manager_enable_frontend=false
+tgn build linux arm64 release</code></pre>
+
+<p>與 x64 有兩處不同:arm64 CI 沒有啟用 <code>ten_enable_ffmpeg_extensions</code>,而且
+把 <code>ten_enable_libwebsockets</code> 關掉。要重新打開任何一個,請先預留除錯時間。
+覆蓋率則根本無法啟用 —— 見 8.1。</p>
+
+<div class="bad">
+<p><b>交叉編譯沒有配置好。</b><code>toolchain/clang_cross/</code> 底下只有
+<code>win</code>;Linux 目標只有 <code>platform/linux:clang</code> 和
+<code>platform/linux:gcc</code>,兩個都是原生的。交叉建置會需要
+<code>is_clang=true</code>(只有那個分支會加 <code>--target=aarch64-linux-gnu</code>),
+再加上透過 <code>AG_SYSROOT</code> 提供一整套完整的 aarch64 sysroot,而且做出來的東西
+已經不是 Agora 和 CI 使用的那套配置了。請直接在 arm64 主機上建。</p>
+</div>
+
+<h3 id="ch11">11. 在 Ubuntu 24.04 上跑 AI agents</h3>
+
+<p>阻力最小的路徑,也是 CI 用的路徑。</p>
+
+<pre><code># 1. 系統套件
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential cmake pkg-config git curl unzip jq \
+  python3 python3-dev python3-pip python3-venv \
+  libasound2t64 libunwind-dev libssl-dev libc++1 libgstreamer1.0-dev
+
+# 2. Python ABI 轉導 —— 見 6.2
+export TEN_PYTHON_LIB_PATH=/usr/lib/aarch64-linux-gnu/libpython3.12.so
+test -e "$TEN_PYTHON_LIB_PATH"
+
+# 3. Go、Node、Bun
+curl -fsSLO https://go.dev/dl/go1.24.3.linux-arm64.tar.gz
+sudo tar -C /usr/local -xzf go1.24.3.linux-arm64.tar.gz
+export PATH=/usr/local/go/bin:$PATH
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs
+curl -fsSL https://bun.sh/install | bash &amp;&amp; export PATH="$HOME/.bun/bin:$PATH"
+
+# 4. uv、task、tman —— 都有 arm64 版本
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+curl -fsSL -o /tmp/tman.zip \
+  https://github.com/TEN-framework/ten-framework/releases/download/0.11.71/tman-linux-release-arm64.zip
+unzip -q /tmp/tman.zip -d /tmp/tman
+sudo install -m 0755 /tmp/tman/ten_manager/bin/tman /usr/local/bin/tman
+
+# 5. 動手建之前先確認
+tman check env</code></pre>
+
+<p>然後跑一個範例:</p>
+
+<pre><code>cd ai_agents
+cp .env.example .env      # 填入 provider 的金鑰
+cd agents/examples/websocket-example
+task install
+task run</code></pre>
+
+<p><code>task install</code> 會把 <code>tenapp/manifest-lock.json</code> 改寫成 arm64
+的條目。這是預期行為 —— 見 16.3。</p>
+
+<h4>11.1 Python 相依</h4>
+
+<p><code>ai_agents/agents/ten_packages/extension/</code> 底下的每一個 extension 都是
+純 Python,沒有夾帶任何二進位檔,所以那裡沒有東西需要為 arm64 重新編譯。整體的相依集合
+包含 <code>numpy</code>、<code>scipy</code>、<code>torch</code>、<code>pillow</code>、
+<code>cryptography</code> 和 <code>soundfile</code>,這些都有發佈
+<code>manylinux</code> aarch64 wheel。</p>
+
+<p><code>install_python_deps</code> 會安裝 tenapp 內<b>每一個</b> extension 的相依,
+不是只裝某個 graph 用到的那幾個。</p>
+
+<h3 id="ch12">12. 在 RPM 系發行版上跑 AI agents</h3>
+
+<p>在一台 aarch64 的 Fedora 重build 版上完整驗證過 —— Lychee 2025,glibc 2.41,
+gcc 14.3.1,dnf5 —— 以一般非 root 使用者身分,全程沒有用到容器。以下內容同樣適用於原生
+Fedora,因為這些差異談的都是它們共用的佈局。只有一項是重build 版特有的,文中會標示。</p>
+
+<h4>12.1 原封不動就能沿用的部分</h4>
+
+<p>看起來風險最高的那幾塊,結果反而是可攜的。<code>tman install</code> 直接從 registry
+解出 arm64 package。Go binding 連結 arm64 的 <code>libten_runtime.so</code>,乾淨地建
+起來(<code>GOARCH=arm64</code>、<code>GOARM64=v8.0</code>)。所有 Python 相依都解到
+aarch64 wheel —— <code>pydantic_core</code>、<code>aiohttp</code>、<code>awscrt</code>
+以及其餘的都以 <code>manylinux_*_aarch64</code> 形式到位,沒有任何一個退回去做源碼建置。</p>
+
+<h4>12.2 libpython 在 /usr/lib64</h4>
+
+<p>RPM 系發行版不使用 Debian 的 multiarch 佈局:</p>
+
+<pre><code>export TEN_PYTHON_LIB_PATH=/usr/lib64/libpython3.12.so</code></pre>
+
+<p>這個符號連結來自 <code>python3.12-devel</code>;它指向的
+<code>libpython3.12.so.1.0</code> 由 <code>python3.12-libs</code> 提供。</p>
+
+<h4>12.3 Fedora 41+ 出貨的是 Python 3.13,不是 3.12</h4>
+
+<p>Ubuntu 24.04 剛好出貨的就是 arm64 binding 編譯所依據的 3.12,這也是為什麼 Ubuntu 那條
+路完全不用處理版本問題。Fedora 41 之後預設是 3.13,所以要另外並存安裝 3.12:</p>
+
+<pre><code>sudo dnf -y install python3.12 python3.12-devel</code></pre>
+
+<p>Python 是可以多版本並存的,所以這麼做不會動到系統直譯器。</p>
+
+<h4>12.4 UV_PYTHON 必須釘住</h4>
+
+<div class="warn">
+<p>症狀最沒有幫助的一種失敗,而且在 Ubuntu 上根本不存在。兩個相依安裝器都把
+<code>uv pip install --system</code> 寫死了 —— tenapp 裡的
+<code>install_python_deps.py</code>,以及 <code>install_deps_and_build.sh</code> 裡的
+<code>PIP_INSTALL_CMD</code> —— 而 <code>--system</code> 選的是<em>預設</em>直譯器,
+在這裡就是 3.13。相依裝進了 3.13 的 site-packages,而 runtime 透過
+<code>TEN_PYTHON_LIB_PATH</code> 載入的是 3.12。安裝當下什麼都不會出錯;它會在很久以後,
+以某個 extension 內的 <code>ModuleNotFoundError</code> 浮現出來。</p>
+<pre><code>export UV_PYTHON=/usr/bin/python3.12</code></pre>
+</div>
+
+<h4>12.5 <code>uv pip install --system</code> 需要 root</h4>
+
+<p><code>--system</code> 會寫入 <code>/usr/local/lib/python3.12/site-packages</code>
+及其 <code>lib64</code> 對應目錄。在容器裡看不到這個問題,因為容器是以 root 執行;在
+裸機上以一般使用者身分執行時,<code>task install</code> 會在每一個 extension 上重試三次
+後失敗,錯誤是 <code>Permission denied (os error 13)</code>。</p>
+
+<p>只對那一個步驟提權。<b>不要</b> <code>sudo task install</code> —— 那會連
+<code>bun install</code> 和 <code>go build</code> 也以 root 跑,在使用者家目錄裡留下
+root 所有的產物:</p>
+
+<pre><code>cd ai_agents/agents/examples/&lt;example&gt;/tenapp
+sudo env "PATH=$PATH" UV_PYTHON=/usr/bin/python3.12 python3 scripts/install_python_deps.py</code></pre>
+
+<p><code>task install</code> 會在那一步中止,所以它後面的兩個步驟必須手動補完 ——
+或者用 <code>finish_example_install_arm64.sh</code>(19.5)。</p>
+
+<p><code>/usr/local/lib/python3.12/site-packages</code> 和它的 <code>lib64</code>
+對應目錄都在 <code>/usr/bin/python3.12</code> 的預設 <code>sys.path</code> 上,所以
+runtime 內嵌的直譯器找得到裝進去的東西。</p>
+
+<h4>12.6 套件名稱對照</h4>
+
+<table>
+<thead><tr><th>Ubuntu</th><th>Fedora</th></tr></thead>
+<tbody>
+<tr><td><code>build-essential</code></td><td><code>dnf group install "Development Tools"</code></td></tr>
+<tr><td><code>python3-dev</code></td><td><code>python3.12-devel</code></td></tr>
+<tr><td><code>libasound2t64</code></td><td><code>alsa-lib-devel</code></td></tr>
+<tr><td><code>libunwind-dev</code></td><td><code>libunwind-devel</code></td></tr>
+<tr><td><code>libssl-dev</code></td><td><code>openssl-devel</code></td></tr>
+<tr><td><code>libc++1</code></td><td><code>libcxx</code></td></tr>
+<tr><td><code>libgstreamer1.0-dev</code></td><td><code>gstreamer1-devel</code></td></tr>
+<tr><td><code>pkg-config</code></td><td><code>pkgconf-pkg-config</code></td></tr>
+</tbody>
+</table>
+
+<h4>12.7 以 os-release 判斷發行版的安裝器(僅重build 版)</h4>
+
+<p>不適用於原生 Fedora。<code>https://rpm.nodesource.com/setup_20.x</code> 在一個
+<code>/etc/os-release</code> 帶有自己的 <code>ID</code> 且沒有設 <code>ID_LIKE</code>
+的重build 版上,會以 <code>Error: This script is intended for RPM-based systems.</code>
+結束 —— 那個腳本是靠這個欄位去列舉發行版的,它從來沒有檢查系統上有沒有
+<code>rpm</code>。Lychee 2025 回報 <code>ID=lychee</code> 且沒有 <code>ID_LIKE</code>,
+所以即使它是一個帶 <code>dnf5</code> 的 RPM 發行版,還是被拒絕。</p>
+
+<p>改用發行版自己的套件;playground 是跑在 <code>bun</code> 上而不是 Node,所以 Node
+的主版號並不關鍵:</p>
+
+<pre><code>sudo dnf -y install nodejs npm</code></pre>
+
+<h4>12.8 在這裡怎麼讀 <code>tman check env</code></h4>
+
+<p>有兩項回報是預期內的,而且都不會擋住 agents 的建置:</p>
+
+<table>
+<thead><tr><th>回報</th><th>實情</th></tr></thead>
+<tbody>
+<tr><td><code>⚠️ python3 3.13.9 … only supports Python 3.10</code></td><td>它檢查的是 <code>python3</code>,也就是系統的 3.13。真正執行 extension 的直譯器是 <code>TEN_PYTHON_LIB_PATH</code> 背後那個 3.12。照它的 <code>pyenv install 3.10.18</code> 建議做,會把建置弄壞。</td></tr>
+<tr><td><code>❌ tgn Not installed</code></td><td><code>tgn</code> 只有在建 core 或建 C++ extension 時才需要。Python 範例的 <code>task install</code> 會跑 <code>tman install</code>、<code>install_python_deps.py</code>、<code>bun install</code> 和 <code>go build</code>,沒有一個會用到它。</td></tr>
+</tbody>
+</table>
+
+<h4>12.9 防火牆與 SELinux</h4>
+
+<p>Fedora 預設啟用 firewalld。從機器本身瀏覽不受影響;要從別的地方連進來就得開通連接埠:</p>
+
+<pre><code>sudo firewall-cmd --add-port=3000/tcp --add-port=8080/tcp --add-port=49483/tcp</code></pre>
+
+<p>SELinux 只跟容器那條路有關。在 enforcing 模式下,<code>docker-compose.yml</code> 裡
+那五個 bind mount 沒有帶 <code>:z</code> 標籤,容器讀不到 <code>/app</code>;請透過本地的
+<code>docker-compose.override.yml</code> 補上標籤,不要去改被追蹤的 compose 檔。主機在
+permissive 模式則不受影響。</p>
+
+<h4>12.10 驗證結果</h4>
+
+<p>用 <code>verify_arm64_install.sh --probe-worker</code> 驗證:<b>31 項通過、0 項失敗、
+2 項略過。</b></p>
+
+<p>這應該被理解為一個下限,不是一份結論。它說的是「一個範例能正確安裝並啟動」——
+單一 graph、單一拋棄式 session、沒有任何對話。腳本印出來的 scope 區塊列出了它沒有碰的
+東西。</p>
+
+<p>在那個範圍內,真正要緊的兩項發現都是動態的;沒有任何靜態檢查構得到:</p>
+
+<pre><code>8b. Worker probe
+  POST /start accepted
+  worker for verify-&lt;pid&gt; is registered
+
+9. Worker logs
+  no libpython load failure in worker logs
+  no ModuleNotFoundError in worker logs</code></pre>
+
+<div class="ok">
+<p>一份乾淨的 worker 日誌,精準地回答了架構這個問題:它代表
+<code>python_addon_loader</code> 是透過 <code>TEN_PYTHON_LIB_PATH</code> 解到
+<code>libpython3.12</code>,而不是用它內建的 <code>libpython3.10.so</code>;也代表
+<code>uv</code> 裝的那些相依,對 runtime 內嵌的那個直譯器是可見的。它完全沒有說明任何
+特定 graph 有沒有在做有用的事。</p>
+</div>
+
+<h3 id="ch13">13. 在容器內跑 AI agents</h3>
+
+<p>預設映像 <code>ghcr.io/ten-framework/ten_agent_build:0.7.14</code> 是單一架構的
+<code>linux/amd64</code> manifest,所以 <code>docker-compose.yml</code> 釘了
+<code>platform: linux/amd64</code>,在 arm64 上是跑在模擬層裡。</p>
+
+<p><code>ai_agents/Dockerfile.dev</code> 以 <code>ubuntu:24.04</code> 為基底建一個
+arm64 替代品:</p>
+
+<pre><code>cd ai_agents
+docker build -f Dockerfile.dev -t ten_agent_dev:local .</code></pre>
+
+<p>然後在 <code>ai_agents/.env</code> 裡設定兩個變數:</p>
+
+<pre><code>TEN_AGENT_DEV_IMAGE=ten_agent_dev:local
+TEN_AGENT_DEV_PLATFORM=linux/arm64</code></pre>
+
+<p>它刻意只支援 arm64,在 amd64 上會讓建置失敗。單一映像沒辦法同時服務兩邊:x64
+package 需要 Python 3.10(Ubuntu 22.04),arm64 package 需要 glibc 2.38(Ubuntu 24.04,
+Python 3.12),在同一個基底上這兩者互斥。</p>
+
+<div class="bad">
+<p>不要在 arm64 上跑 amd64 映像。它會踩到
+<code>agents/scripts/install_deps_and_build.sh</code> 裡的 AVX2 偵測 —— 那段檢查存在的
+目的就是抓這件事 —— 並以 <code>FATAL: unsupported platform.</code> 中止。</p>
+</div>
+
+<p>容器解決掉四個 RPM 特有問題中的三個,因為不管主機是什麼,容器裡就是 Ubuntu。它沒有
+解決第四個(SELinux bind mount 標籤),而且它對「這個 framework 能不能在主機發行版上
+原生執行」這個問題,完全沒有給出答案。</p>
+<h3 id="ch14">14. 為 aarch64 建置 <code>agora_rtc</code></h3>
+
+<p>官方發佈的 <code>agora_rtc</code> extension 是 linux/x64 package,這就是 26 個範例中
+有 24 個在 arm64 上動不了的原因。這個 extension 不是開源的,但 Agora 會依請求提供源碼,
+而且它<b>不需要更動任何邏輯</b>就能為 aarch64 建置 —— 三處環境層面的修改,加上一般的
+建置指令。</p>
+
+<div class="ok">
+<p>已完整驗證:建出來的 extension 在 aarch64 主機上成功連上 Agora、發佈音訊軌,並開啟
+資料串流。</p>
+</div>
+
+<h4>14.1 RTC 是兩個 package,不是一個</h4>
+
+<p>這個區別造成的混淆,比本章其他任何東西都多。SDK 有 aarch64 版本這件事本身沒有讓你
+前進一步:runtime 載入的那個物件是 wrapper,而 wrapper 正是那個「在你自己建出來之前,
+aarch64 版本並不存在」的東西。</p>
+
+<figure id="fig6">
+<svg viewBox="0 0 920 420" role="img" aria-label="TEN runtime 以 dlopen 載入 libagora_rtc.so,也就是在 Agora SDK 之上實作 TEN extension 介面的 wrapper。wrapper 只從 SDK 解析兩個符號,而 SDK 本身完全不知道 TEN 的存在,並連結另外四個編解碼函式庫。wrapper 必須為 aarch64 從源碼建置;SDK 只需要重新打包。">
+  <defs><marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="180" y="20" width="440" height="50"/>
+  <text class="d-label" x="400" y="42" text-anchor="middle" fill="currentColor">TEN runtime — libten_runtime.so</text>
+  <text class="d-sub"   x="400" y="60" text-anchor="middle">完全不知道 Agora 的存在</text>
+
+  <line class="d-line" x1="400" y1="72" x2="400" y2="112" marker-end="url(#a6)"/>
+  <text class="d-edge" x="414" y="90">dlopen — 掃描 extension/agora_rtc/lib/</text>
+  <text class="d-sub"  x="414" y="106">addon_autoload.c:441</text>
+
+  <rect class="d-hot-b" x="180" y="116" width="440" height="62"/>
+  <text class="d-label d-hot-t" x="400" y="140" text-anchor="middle">libagora_rtc.so — wrapper</text>
+  <text class="d-sub"   x="400" y="158" text-anchor="middle">在 Agora SDK 之上實作 TEN 的 extension 介面</text>
+  <text class="d-sub"   x="400" y="172" text-anchor="middle">Agora 提供源碼 · 出貨範例釘的是 0.23.9-t1</text>
+
+  <line class="d-line" x1="400" y1="180" x2="400" y2="224" marker-end="url(#a6)"/>
+  <text class="d-edge" x="414" y="198">只解析「兩個」符號：</text>
+  <text class="d-sub"  x="414" y="214">createAgoraService, getAgoraSdkVersion</text>
+
+  <rect class="d-box" x="180" y="228" width="440" height="62"/>
+  <text class="d-label" x="400" y="252" text-anchor="middle" fill="currentColor">libagora_rtc_sdk.so — Agora 的 SDK</text>
+  <text class="d-sub"   x="400" y="270" text-anchor="middle">匯出 348 個 agora_* C 函式；零個 C++ mangled 符號或 vtable</text>
+  <text class="d-sub"   x="400" y="284" text-anchor="middle">其餘一切都靠回傳物件自身的 vptr 做虛擬派發</text>
+
+  <line class="d-line" x1="400" y1="292" x2="400" y2="326" marker-end="url(#a6)"/>
+  <text class="d-edge" x="414" y="312">連結</text>
+
+  <rect class="d-box" x="180" y="330" width="100" height="42"/>
+  <rect class="d-box" x="292" y="330" width="100" height="42"/>
+  <rect class="d-box" x="404" y="330" width="106" height="42"/>
+  <rect class="d-box" x="522" y="330" width="98"  height="42"/>
+  <text class="d-sub" x="230" y="356" text-anchor="middle">libaosl</text>
+  <text class="d-sub" x="342" y="356" text-anchor="middle">agora-fdkaac</text>
+  <text class="d-sub" x="457" y="356" text-anchor="middle">agora-ffmpeg</text>
+  <text class="d-sub" x="571" y="356" text-anchor="middle">agora-soundtouch</text>
+
+  <path class="d-hot" d="M632 116 L656 116 L656 178 L632 178"/>
+  <text class="d-hot-t" x="666" y="140">這一層要自己建</text>
+  <text class="d-sub"   x="666" y="157">14.4 節 — 三處修改，而且</text>
+  <text class="d-sub"   x="666" y="172">必須在 aarch64 主機上（不能交叉編譯）</text>
+
+  <path class="d-line" d="M632 228 L656 228 L656 372 L632 372"/>
+  <text class="d-label" x="666" y="292" fill="currentColor">這一層只要重新打包</text>
+  <text class="d-sub"   x="666" y="309">package_agora_rtc_sdk_arm64.sh</text>
+  <text class="d-sub"   x="666" y="324">Agora 本來就有發佈 aarch64 版</text>
+
+  <text class="d-sub" x="168" y="252" text-anchor="end">這一層不知道</text>
+  <text class="d-sub" x="168" y="268" text-anchor="end">TEN 存在</text>
+
+  <text class="d-hot-t" x="400" y="404" text-anchor="middle">光有 aarch64 SDK 什麼都改變不了。橋樑是 wrapper，而 runtime 載入的正是 wrapper。</text>
+</svg>
+<figcaption><b>圖 6 — 兩個 package,其中一個必須自己建。</b>介面之窄,正是這次 aarch64
+移植成本低廉的原因:連結期只需要解析 <code>createAgoraService</code> 和
+<code>getAgoraSdkVersion</code>,而這兩個都由 aarch64 版本匯出(以 <code>nm -D</code>
+確認過)。wrapper 呼叫的其餘一切,都是對 SDK 交還的物件做虛擬派發,所以沒有任何類別符號
+需要對得上。</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>Package</th><th>它是什麼</th><th>aarch64</th></tr></thead>
+<tbody>
+<tr><td><code>agora_rtc_sdk</code>(system)</td><td>Agora 自家的 SDK</td><td>Agora 有發佈;用 <code>package_agora_rtc_sdk_arm64.sh</code> 重新打包</td></tr>
+<tr><td><code>agora_rtc</code>(extension)</td><td>runtime 真正 <code>dlopen</code> 的那個 wrapper</td><td>從源碼建</td></tr>
+</tbody>
+</table>
+
+<h4>14.2 aarch64 的 SDK 就是對的那一套</h4>
+
+<p>乍看之下,aarch64 的壓縮檔像是另一個產品:x64 package 的 109 個標頭檔中有 45 個不見了,
+包括 <code>IAgoraRtcEngine.h</code>、<code>IAgoraRtcEngineEx.h</code> 和
+<code>IAgoraMediaEngine.h</code>。x64 package 是從完整的 RTC SDK 組裝出來的;aarch64
+壓縮檔則是 RTSA / server SDK。</p>
+
+<p>符號分析顯示這不重要。x64 的 <code>libagora_rtc.so</code> 從 SDK 解析的符號正好
+<b>兩個</b>:</p>
+
+<pre><code>createAgoraService      低階 / server 的進入點（IAgoraService.h）
+getAgoraSdkVersion</code></pre>
+
+<p>它沒有直接引用任何 <code>agora::</code> 類別符號 —— 其餘全部走 vtable —— 也從來沒有
+碰過 <code>createAgoraRtcEngine</code> 或 <code>IRtcEngine</code>。這兩個符號都由 aarch64
+版本匯出,以 <code>nm -D</code> 確認。wrapper 完全只用低階 API,而低階 API 正是 aarch64
+壓縮檔所提供的東西。</p>
+
+<p>那個壓縮檔在同一個函式庫之上附了兩套標頭檔,而函式庫匯出的 ABI 是 C 的:348 個
+<code>agora_*</code> 函式、九個 <code>create*</code>/<code>get*</code> 工廠函式,以及
+<b>零個</b> C++ mangled 符號、vtable 或 typeinfo。C++ 介面照樣能用 ——
+<code>createAgoraService()</code> 回傳一個指標,對它的虛擬呼叫是透過物件自身的 vptr
+派發的 —— 這就是為什麼只有兩個符號需要被解析。</p>
+
+<h4>14.3 版本配對</h4>
+
+<p>有兩個版本互相釘死,而搞錯這件事花掉的時間,比本章任何其他事情都多。</p>
+
+<table>
+<thead><tr><th>wrapper</th><th>需要的 SDK</th></tr></thead>
+<tbody>
+<tr><td><code>0.23.9-t1</code> —— 範例釘的版本</td><td><code>=4.4.32-141</code></td></tr>
+<tr><td><code>0.26.0-rc14</code> —— 撰寫當下的 master</td><td><code>=4.4.32-175</code></td></tr>
+</tbody>
+</table>
+
+<div class="bad">
+<p>釘成精確版本是有原因的。<code>0.26</code> 會呼叫 <code>setTotalExtraSendMs</code>
+並覆寫 <code>onCustomUserInfoUpdated</code>;這兩個在 141 的標頭檔裡都不存在,所以拿
+141 去建它會在<b>編譯期</b>失敗。<b>改版本號沒有用</b> —— 缺的不是一個版本號。</p>
+</div>
+
+<p>向 Agora 索取 wrapper 源碼<b>以及</b>它 manifest 所釘的那個 SDK build,然後在動手建
+任何東西之前,先確認配對:</p>
+
+<pre><code>python3 -c "import json;m=json.load(open('manifest.json'));print(m['version'],
+  [d['version'] for d in m['dependencies'] if d['name']=='agora_rtc_sdk'])"
+strings &lt;sdk&gt;/agora_sdk/libagora_rtc_sdk.so | grep -oE '4\.4\.32\.[0-9]+' | sort -u</code></pre>
+
+<p><code>0.26</code> 另外加了兩項值得知道的功能,因為它們解釋了那幾個新的 API 呼叫:
+一次音訊軌選擇的重構(三種送出模式,依 <code>audio_scenario</code>、
+<code>extra_send_ms</code> 和一個 fallback 旗標決定),以及一次細粒度回報的改造。
+第 3 種模式 —— Extra Audio Send —— 只有在 <code>extra_send_ms != 0</code> 時才會走到,
+而目前出貨的 graph 沒有任何一個會設它。</p>
+
+<h4>14.4 三處修改</h4>
+
+<p>沒有任何一處碰到 extension 的行為。</p>
+
+<h5>1. 宣告支援 arm64</h5>
+<p>manifest 出貨時 <code>supports</code> 只寫了 x64,所以 tman 不會把建出來的東西裝到
+arm64 上。加上這一項,保留 x64:</p>
+
+<pre><code>"supports": [
+  { "os": "linux", "arch": "x64" },
+  { "os": "linux", "arch": "arm64" }
+]</code></pre>
+
+<h5>2. 從 <code>resources</code> 拿掉那個 x86-64 物件</h5>
+<p><code>BUILD.gn</code> 會把 <code>lib/liblinux_audio_hy_extension.so</code> 打包進去,
+而那個檔案只有 x86-64 版本。runtime 會 <code>dlopen</code> addon <code>lib/</code> 底下
+每一個 <code>.so</code>,所以架構不對的物件會讓載入失敗,而不是被跳過
+(<a href="#fig4">圖 4</a>)。建 arm64 時把那一行拿掉;建 x64 時放回去。</p>
+
+<h5>3. 補上 <code>#include &lt;cstdint&gt;</code></h5>
+<p>GCC 13 起不再遞移地引入 <code>&lt;cstdint&gt;</code>,而源碼在 27 個檔案
+(<code>0.23.9-t1</code>)或 29 個檔案(<code>0.26.0-rc14</code>)裡依賴它。
+<b>這不是 arm64 的問題</b> —— 同樣的建置在 x64 上用 GCC 14 也會失敗 —— 值得回報上游。
+要找出這些檔案:</p>
+
+<pre><code>for f in $(find src -name '*.h' -o -name '*.cc'); do
+  grep -qE '\b(u?int(8|16|32|64)_t|uintptr_t|intptr_t)\b' "$f" &amp;&amp;
+  ! grep -qE '#include\s*&lt;c?stdint\.?h?&gt;' "$f" &amp;&amp; echo "$f"
+done</code></pre>
+
+<h4>14.5 執行順序</h4>
+
+<p>四個腳本,個別說明在第 19 章。每一個都會驗證自己的產出,寧可停下來也不會把壞掉的
+產物往下傳。只有第一個可以在任何機器上跑;其餘都需要 aarch64 主機,因為沒有交叉編譯這
+條路(第 10 章)。</p>
+
+<figure id="fig7">
+<svg viewBox="0 0 990 300" role="img" aria-label="四階段管線:SDK 壓縮檔可以在任何機器上被重新打包成 TEN system package,接著在 aarch64 主機上建置 wrapper、把它安裝進某個範例的 tenapp,並補完 task install 的其餘部分。只有第一步與架構無關。">
+  <defs><marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-hot" x="256" y="62" width="720" height="164" fill="none" stroke-dasharray="5 4" rx="8"/>
+  <text class="d-hot-t" x="616" y="52" text-anchor="middle">必須在 aarch64 主機上執行 — 沒有交叉編譯這條路（第 10 章）</text>
+
+  <rect class="d-box-soft" x="14" y="104" width="204" height="72"/>
+  <text class="d-label" x="116" y="128" text-anchor="middle" fill="currentColor">1 · 打包 SDK</text>
+  <text class="d-sub"   x="116" y="146" text-anchor="middle">package_agora_rtc_</text>
+  <text class="d-sub"   x="116" y="160" text-anchor="middle">sdk_arm64.sh</text>
+  <text class="d-sub"   x="116" y="196" text-anchor="middle">任何機器都能跑</text>
+
+  <rect class="d-box-soft" x="272" y="104" width="204" height="72"/>
+  <text class="d-label" x="374" y="128" text-anchor="middle" fill="currentColor">2 · 建 wrapper</text>
+  <text class="d-sub"   x="374" y="146" text-anchor="middle">build_agora_rtc_</text>
+  <text class="d-sub"   x="374" y="160" text-anchor="middle">arm64.sh</text>
+
+  <rect class="d-box-soft" x="528" y="104" width="204" height="72"/>
+  <text class="d-label" x="630" y="128" text-anchor="middle" fill="currentColor">3 · 安裝</text>
+  <text class="d-sub"   x="630" y="146" text-anchor="middle">install_agora_rtc_</text>
+  <text class="d-sub"   x="630" y="160" text-anchor="middle">arm64.sh</text>
+
+  <rect class="d-box-soft" x="768" y="104" width="204" height="72"/>
+  <text class="d-label" x="870" y="128" text-anchor="middle" fill="currentColor">4 · 補完安裝</text>
+  <text class="d-sub"   x="870" y="146" text-anchor="middle">finish_example_</text>
+  <text class="d-sub"   x="870" y="160" text-anchor="middle">install_arm64.sh</text>
+
+  <line class="d-line" x1="220" y1="140" x2="268" y2="140" marker-end="url(#a7)"/>
+  <line class="d-line" x1="478" y1="140" x2="524" y2="140" marker-end="url(#a7)"/>
+  <line class="d-line" x1="734" y1="140" x2="764" y2="140" marker-end="url(#a7)"/>
+
+  <text class="d-sub" x="244" y="90"  text-anchor="middle">.tpkg</text>
+  <text class="d-sub" x="501" y="90"  text-anchor="middle">out/linux/arm64/…/agora_rtc/</text>
+  <text class="d-sub" x="749" y="90"  text-anchor="middle">tenapp 就位</text>
+
+  <text class="d-sub" x="14" y="44">輸入：</text>
+  <text class="d-sub" x="14" y="62">Agora SDK 壓縮檔（.tgz）&#160;→ 第 1 步</text>
+  <text class="d-sub" x="14" y="80">wrapper 源碼 0.23.9-t1&#160;&#160;→ 第 2 步</text>
+
+  <path class="d-dash" d="M116 178 L116 212 L630 212 L630 180" />
+  <text class="d-sub" x="373" y="230" text-anchor="middle">.tpkg 會被消費兩次：第 2 步拿它來建置，第 3 步把它放進 ten_packages/system/</text>
+
+  <text class="d-sub" x="870" y="196" text-anchor="middle">bin/main · Python 相依 · playground</text>
+  <text class="d-sub" x="870" y="211" text-anchor="middle">— 也就是第 3 步刻意不做的部分</text>
+
+  <text class="d-sub" x="14" y="266">建置指令跟 Agora 自己的 Taskfile 只差一個字：</text>
+  <text class="d-sub" x="14" y="284">他們的&#160;&#160;tgn gen linux x64&#160;&#160;&#160;release -- is_clang=false</text>
+  <text class="d-sub" x="480" y="284">arm64&#160;&#160;tgn gen linux <tspan class="d-hot-t" fill-opacity="1">arm64</tspan> release -- is_clang=false</text>
+</svg>
+<figcaption><b>圖 7 — 架構邊界落在建置流程的哪個位置。</b>第 1 步只是把壓縮檔改寫成 TEN
+的 package 佈局,所以在任何機器上都能跑;第 2 到 4 步會針對目標平台呼叫
+<code>tgn</code>、<code>go build</code> 和 <code>bun</code>,必須原生執行。
+<code>.tpkg</code> 跨越這條邊界兩次 —— 一次作為建置輸入,一次作為安裝產物 —— 這就是為什麼
+第 2 步和第 3 步都要把它當引數傳進去。</figcaption>
+</figure>
+
+<pre><code># 1. SDK 壓縮檔 -&gt; TEN system package        （任何機器都能跑）
+TMAN=/path/to/tman PKG_VERSION=4.4.32-141 \
+  ai_agents/agents/scripts/package_agora_rtc_sdk_arm64.sh &lt;sdk.tgz&gt; /tmp/out
+
+# 2. 建 wrapper                              （必須在 aarch64 主機上）
+ai_agents/agents/scripts/build_agora_rtc_arm64.sh &lt;wrapper-src&gt; /tmp/out/agora_rtc_sdk-*.tpkg
+
+# 3. 放進某個範例
+ai_agents/agents/scripts/install_agora_rtc_arm64.sh \
+  &lt;wrapper-src&gt;/out/linux/arm64/ten_packages/extension/agora_rtc \
+  /tmp/out/agora_rtc_sdk-*.tpkg voice-assistant
+
+# 4. 補完 `task install` 的其餘部分
+ai_agents/agents/scripts/finish_example_install_arm64.sh voice-assistant</code></pre>
+
+<p>wrapper 連結五個 Agora 函式庫加上三個系統函式庫,所以 <code>openssl-devel</code> 和
+<code>zlib-devel</code> 必須存在:</p>
+
+<pre><code>ten_runtime  ten_utils
+agora_rtc_sdk  agora-fdkaac  agora-ffmpeg  agora-soundtouch  aosl
+z  crypto  ssl</code></pre>
+
+<div class="note">
+<p>x64 package 的 SDK 目錄裡有八個函式庫,比 aarch64 壓縮檔多三個。那三個 ——
+<code>libagora_stt_ag_extension.so</code>、<code>libagora_stt_ms_extension.so</code>、
+<code>libagora_mcc_ysd_extension.so</code> —— <b>並沒有</b>出現在官方 x64 wrapper 的
+<code>NEEDED</code> 清單裡,這是用 <code>readelf -d</code> 檢查過的。aarch64 package
+是完整的。</p>
+</div>
+
+<h4>14.6 兩個值得點名的陷阱</h4>
+
+<div class="warn">
+<p><b>tman 只會查名為 <code>default</code> 的 registry。</b>
+<code>ten_manager/src/registry/mod.rs</code> 裡的 <code>registry.get("default")</code>
+就是全部的選擇邏輯,所以本地的 <code>file://</code> registry 沒辦法跟官方的並存 ——
+把 <code>default</code> 指過去,會讓 <code>ten_runtime</code> 和其他一切都解析不到。
+那幾個腳本的做法是:其餘的東西透過 tman 安裝,SDK 用手放進去。</p>
+</div>
+
+<div class="warn">
+<p><b><code>tman install</code> 會重新解析並改寫 lock 檔。</b>在
+<code>voice-assistant</code> 上跑一次,升級了 58 個 package,其中包含
+<code>ten_runtime</code>。這是預期行為 —— 沒有任何範例有傳 <code>--locked</code> ——
+但這代表 extension 執行時載入的 runtime,可能不是它編譯時對應的那一個。
+<code>install_agora_rtc_arm64.sh</code> 的第 6 步之所以要對著 tenapp 裡實際的
+<code>ten_runtime</code> 解析符號,正是為了這件事。</p>
+</div>
+
+<h4>14.7 驗證結果</h4>
+
+<p>「載入成功」不等於「能用」。一個真的連上 Agora 的 session 會記錄這些:</p>
+
+<pre><code>[agora_rtc] on_start() done
+onConnecting:  channelId &lt;channel&gt;, state 2
+onConnected:   localUserId &lt;uid&gt;, state 3, reason 1
+               sid(&lt;session id&gt;)
+custom audio_track created
+audio track published
+onAudioTrackPublishSuccess</code></pre>
+
+<p><code>sid</code> 是 Agora 伺服器給的,所以它的存在能區分「真的連上了」和「只是本地
+初始化完成、從來沒碰到網路」。</p>
+
+<pre><code>curl -s -X POST localhost:8080/start -H 'Content-Type: application/json' \
+  -d '{"request_id":"t1","channel_name":"probe","graph_name":"voice_assistant","user_uid":1234}'
+sleep 10 &amp;&amp; curl -s localhost:8080/list</code></pre>
+
+<p><code>/list</code> 裡出現 worker,就代表 addon 載入成功了。如果那裡什麼都沒有,原因
+會在 worker 自己的輸出裡 —— 第 20 章。</p>
+<h2 id="part4"><span class="pnum">第 IV 部</span>開發</h2>
+
+<h3 id="ch15">15. 撰寫與維護一個 extension</h3>
+
+<p>一個 extension 是四個檔案,以及三個必須一致的名字。</p>
+
+<pre><code>addon.py / main.cc     @register_addon_as_extension("X")   名字 1
+manifest.json          "name": "X"                         名字 2
+property.json          預設值
+graph node             "addon": "X"                        名字 3</code></pre>
+
+<p>不一致時會發生什麼,見 3.3 節。node 的 <code>name</code> 是另一回事,它才是
+<code>connections</code> 用來路由的東西(<a href="#fig2">圖 2</a>)。</p>
+
+<h4>15.1 manifest 就是契約</h4>
+
+<pre><code>"api": {
+  "property": { "properties": { … } },
+  "cmd_in": [], "cmd_out": [],
+  "data_in": [], "data_out": [],
+  "audio_frame_in": [], "audio_frame_out": [],
+  "video_frame_in": [], "video_frame_out": []
+}</code></pre>
+
+<p>schema 在
+<code>core/src/ten_rust/src/json_schema/data/manifest.schema.json</code>。只有三個頂層
+欄位是必填的 —— <code>type</code>、<code>name</code>、<code>version</code> —— 而且
+<code>additionalProperties</code> 是 <code>false</code>,所以無法辨識的鍵會被直接拒絕。
+允許的頂層鍵為:<code>type</code>、<code>name</code>、<code>version</code>、
+<code>description</code>、<code>display_name</code>、<code>readme</code>、
+<code>tags</code>、<code>dependencies</code>、<code>dev_dependencies</code>、
+<code>api</code>、<code>supports</code>、<code>package</code>、<code>scripts</code>。</p>
+
+<div class="warn">
+<p>改 <code>api</code> 就是改契約。新增一個 property 是相容的 —— 沒有人設定它,所以
+套用預設值。<b>拿掉一個,或改變它的意義,會在完全沒有錯誤訊息的情況下改變既有 graph
+的行為。</b></p>
+</div>
+
+<p>實際的 extension 會把十個陣列全部宣告出來,包括空的,並用 <code>["**"]</code> 當作
+<code>package.include</code>。property 的型別有 <code>string</code>、
+<code>int32</code>、<code>bool</code>、<code>object</code>、<code>array</code>。</p>
+
+<h4>15.2 C++ extension</h4>
+
+<p>骨架在 <code>packages/core_extensions/default_extension_cpp/</code>:</p>
+
+<pre><code>#include "ten_runtime/binding/cpp/ten.h"
+
+class my_extension_t : public ten::extension_t {
+  void on_init(ten::ten_env_t&amp;) override;
+  void on_start(ten::ten_env_t&amp;) override;
+  void on_cmd(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::cmd_t&gt;) override;
+  void on_data(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::data_t&gt;) override;
+  void on_audio_frame(ten::ten_env_t&amp;, std::unique_ptr&lt;ten::audio_frame_t&gt;) override;
+  void on_stop(ten::ten_env_t&amp;) override;
+};
+TEN_CPP_REGISTER_ADDON_AS_EXTENSION(my_extension, my_extension_t);</code></pre>
+
+<p>送出一個音訊 frame:</p>
+
+<pre><code>auto frame = ten::audio_frame_t::create("pcm_frame");
+frame-&gt;set_sample_rate(16000);
+frame-&gt;set_number_of_channels(1);
+frame-&gt;set_bytes_per_sample(2);
+frame-&gt;set_samples_per_channel(n);
+frame-&gt;set_data_fmt(TEN_AUDIO_FRAME_DATA_FMT_INTERLEAVE);
+frame-&gt;alloc_buf(size);
+ten::buf_t buf = frame-&gt;lock_buf();
+std::memcpy(buf.data(), pcm, size);
+frame-&gt;unlock_buf(buf);
+ten_env.send_audio_frame(std::move(frame));</code></pre>
+
+<div class="bad">
+<p><b><code>ten_env</code> 只能從 extension 執行緒上碰。</b>如果 vendor SDK 是在它
+自己的執行緒上送資料進來,就必須透過 <code>ten::ten_env_proxy_t</code> 跳回來。搞錯這件
+事會產生看起來很隨機、而且只在負載下才出現的當機。</p>
+</div>
+
+<pre><code>ten_env_proxy_ = ten::ten_env_proxy_t::create(ten_env);   // 在 extension 執行緒上
+…
+// 從 SDK 執行緒 —— 先複製，SDK 可能立刻重用它的緩衝區
+auto payload = std::make_shared&lt;std::string&gt;(static_cast&lt;const char*&gt;(pcm), bytes);
+ten_env_proxy_-&gt;notify([payload](ten::ten_env_t &amp;env) { … });
+…
+delete ten_env_proxy_;   // 它的解構子負責釋放；要在 on_stop_done() 之前做</code></pre>
+
+<p><code>ten_package()</code> 會轉發 <code>sources</code>、
+<code>include_dirs</code>、<code>libs</code>、<code>lib_dirs</code>、
+<code>ldflags</code>、<code>cflags*</code>、<code>configs</code>、
+<code>defines</code>、<code>enable_build</code>、<code>output_name</code>、
+<code>resources</code> —— 但<b>不會</b>轉發 <code>deps</code>。GN 只會載入從根 target
+可達的 <code>BUILD.gn</code>,所以 tenapp 裡的 extension 還需要在該 app 的
+<code>scripts/BUILD.gn</code> 裡有一個 <code>group</code> 依賴它,否則它會被無聲地
+永遠不建。</p>
+
+<h4>15.3 原生 extension 的維護成本高得多</h4>
+
+<p>純 Python 的 extension 是一份產物走遍所有平台。原生的則必須<b>逐架構建置與發佈</b>:</p>
+
+<pre><code>"supports": [{"os":"linux","arch":"x64"}, {"os":"linux","arch":"arm64"}]</code></pre>
+
+<p>漏掉哪一個,那個平台上的 <code>dlopen</code> 就會失敗 —— 結果是這個 extension 在該
+平台上不存在,而不是功能少一點(<a href="#fig4">圖 4</a>)。這個不對稱性,就是第 14 章
+存在的全部理由。</p>
+
+<p>什麼時候該寫原生程式碼:要包裝一個既有的 C/C++ 函式庫時,或者 GIL 真的卡住音訊路徑
+時。那 89 個 vendor extension 之所以是 Python,是因為它們講的是 HTTP 和 WebSocket,寫成
+原生完全沒有好處。</p>
+
+<h3 id="ch16">16. 版本管理</h3>
+
+<p>版本宣告在四個地方,而它們之間只有一條箭頭是真正吃重的。</p>
+
+<figure id="fig8">
+<svg viewBox="0 0 960 380" role="img" aria-label="四個版本宣告位置:tenapp 的 manifest 選定 extension 版本,extension 自己的 manifest 精確釘住 SDK 版本,system package 帶著那個版本與其架構支援宣告,而 lock 檔記錄的是 tman 在產生它的那台機器上解析出來的結果。">
+  <defs><marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="30" y="20" width="500" height="70"/>
+  <text class="d-label" x="46" y="42" fill="currentColor">① tenapp/manifest.json</text>
+  <text class="d-sub"   x="46" y="63">"dependencies": [ { "name": "agora_rtc",</text>
+  <text class="d-sub"   x="46" y="79">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;"version": "=0.23.9-t1" } ]</text>
+
+  <line class="d-line" x1="280" y1="92" x2="280" y2="122" marker-end="url(#a8)"/>
+  <text class="d-edge" x="292" y="112">決定安裝哪一個 extension build</text>
+
+  <rect class="d-box" x="30" y="126" width="500" height="86"/>
+  <text class="d-label" x="46" y="148" fill="currentColor">② &lt;extension&gt;/manifest.json</text>
+  <text class="d-sub"   x="46" y="169">"version": "0.23.9-t1"</text>
+  <text class="d-sub"   x="46" y="185">"dependencies": [ { "name": "agora_rtc_sdk",</text>
+  <text class="d-sub"   x="46" y="201">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;"version": "=4.4.32-141" } ]</text>
+
+  <line class="d-hot" x1="280" y1="214" x2="280" y2="244" marker-end="url(#a8)"/>
+  <text class="d-hot-t" x="292" y="234">精確釘選 — 唯一吃重的一條箭頭</text>
+
+  <rect class="d-box" x="30" y="248" width="500" height="86"/>
+  <text class="d-label" x="46" y="270" fill="currentColor">③ &lt;system package&gt;/manifest.json</text>
+  <text class="d-sub"   x="46" y="291">"version": "4.4.32-141"</text>
+  <text class="d-sub"   x="46" y="307">"supports": [ { "os": "linux", "arch": "arm64" } ]</text>
+  <text class="d-sub"   x="46" y="323">— 由 package_agora_rtc_sdk_arm64.sh 蓋章</text>
+
+  <rect class="d-box" x="616" y="126" width="320" height="120"/>
+  <text class="d-label" x="632" y="148" fill="currentColor">④ tenapp/manifest-lock.json</text>
+  <text class="d-sub"   x="632" y="171">tman 實際解析出來的結果，</text>
+  <text class="d-sub"   x="632" y="187">記錄在跑 install 的那台機器上</text>
+  <text class="d-sub"   x="632" y="212">每次 install 都會重新解析並改寫</text>
+  <text class="d-sub"   x="632" y="228">— 本倉庫沒有任何地方傳 --locked</text>
+
+  <path class="d-dash" d="M532 55 L572 55 L572 150 L612 150" marker-end="url(#a8)"/>
+  <path class="d-dash" d="M532 169 L612 169" marker-end="url(#a8)"/>
+  <path class="d-dash" d="M532 291 L572 291 L572 200 L612 200" marker-end="url(#a8)"/>
+
+  <text class="d-hot-t" x="596" y="290">0.26 會呼叫 setTotalExtraSendMs 並</text>
+  <text class="d-hot-t" x="596" y="307">覆寫 onCustomUserInfoUpdated —</text>
+  <text class="d-sub"   x="596" y="324">141 的標頭檔沒有它們，所以配錯</text>
+  <text class="d-sub"   x="596" y="339">是「編譯期」錯誤。改版本號</text>
+  <text class="d-sub"   x="596" y="354">變不出這兩個函式。</text>
+
+  <text class="d-sub" x="30" y="358">讀 registry，不要讀 lock 檔：本倉庫每個範例的 lock 都寫 linux/x64，而同樣的版本其實有發佈 arm64。</text>
+</svg>
+<figcaption><b>圖 8 — 四處宣告,一個真正的約束。</b>① 和 ④ 各自會動:① 是一個偏好,
+④ 是某一台機器上某一次解析的紀錄。②→③ 才是必須正確的那個釘選,因為檢查它的是編譯器
+而不是套件管理器 —— 配錯的結果是一次帶著「找不到符號」訊息的建置失敗,而不是一則版本
+警告。用手放進去的 package(16.2)則落在這四者之外。</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>語法</th><th>意義</th></tr></thead>
+<tbody>
+<tr><td><code>"=0.23.9-t1"</code></td><td>精確 —— 只接受這一個 build</td></tr>
+<tr><td><code>"0.11"</code></td><td>範圍 —— 最新的相容版本</td></tr>
+</tbody>
+</table>
+
+<p>對原生 SDK 做精確釘選是有實質作用的:沒有它,tman 會裝進一個 API 對不上的 SDK,
+失敗點就從編譯期搬到執行期。</p>
+
+<h4>16.1 升級</h4>
+
+<p>沒有 <code>tman upgrade</code> 這個東西。除非傳 <code>--locked</code>,否則
+<code>tman install</code> 會<b>重新解析並改寫 lock 檔</b>,所以:</p>
+
+<ul>
+<li>版本是精確釘選的 → 改 <code>manifest.json</code>,然後 <code>tman install</code></li>
+<li>版本是範圍 → 光跑 <code>tman install</code> 就會拉到新的 build</li>
+<li>只要動一個 package → <code>tman install extension &lt;name&gt;@&lt;version&gt;</code></li>
+</ul>
+
+<p>永遠要確認動了什麼:</p>
+
+<pre><code>git diff tenapp/manifest-lock.json</code></pre>
+
+<h4>16.2 用手放進去的 package 完全在這套機制之外</h4>
+
+<p>用手放進去的 extension —— 例如 arm64 上的 <code>agora_rtc</code> —— 沒有
+<code>.ten/package_info/</code>,所以 tman 不知道它存在。<code>tman install</code> 不會
+碰它,<code>tman uninstall</code> 也找不到它。升級意味著重建與重新複製:新的源碼、對得上
+的 SDK、重新套用那三處修改、重建、放進去。</p>
+
+<p>這就是走出套件管理器要付的代價,也是 14.6 節建議「想辦法讓這些 package 被正式發佈」
+而不是長住在這裡的原因。</p>
+
+<h4>16.3 lock 檔說的比看起來少</h4>
+
+<p>被提交進版控的 <code>manifest-lock.json</code> 記錄的是產生它的那台機器上解析出來的
+平台,不是這個 package 的平台支援矩陣。本倉庫每個範例的 lock 都寫著
+<code>{"os": "linux", "arch": "x64"}</code>,看起來像是硬性封鎖 arm64,其實不是 ——
+同樣的版本是有發佈 arm64 的。</p>
+
+<p>本倉庫沒有任何地方會傳 <code>tman install --locked</code>,所以每次安裝時 lock 都會
+針對當下主機重新解析並改寫。<b>要讀 registry,不要讀 lock 檔。</b></p>
+
+<h3 id="ch17">17. 配置:抽換 vendor、指向本地模型</h3>
+
+<h4>17.1 設定放在哪裡</h4>
+
+<p>vendor 的設定放在 node 的 <code>property.params</code> 底下,是平的。沒有一層外殼去
+標示模組名或 vendor 名 —— 本倉庫沒有任何程式碼在讀
+<code>{"asr": {"vendor": …}}</code> 這種形狀。每個 extension 自己的測試設定檔才是權威;
+<code>soniox_asr_python/tests/configs/property_en.json</code> 具有代表性:</p>
+
+<pre><code>{
+    "params": {
+        "api_key": "${env:SONIOX_ASR_API_KEY}",
+        "url": "wss://stt-rt.soniox.com/transcribe-websocket",
+        "model": "stt-rt-v4",
+        "language_hints": ["en"],
+        "sample_rate": 16000
+    }
+}</code></pre>
+
+<p>抽換 provider 就是改 <code>addon</code>,並把該 node 的 <code>params</code> 整組換掉。
+<code>name</code> 和 <code>extension_group</code> 不要動。</p>
+
+<h4>17.2 <code>${env:VAR}</code> 有兩種失敗模式,而它們長得完全不一樣</h4>
+
+<p>runtime 在
+<code>core/src/ten_utils/lib/sys/general/placeholder.c</code> 解析佔位符,並且會遞迴地
+穿過 object 和 array(<code>ten_extension_property_resolve_placeholders</code>,
+<code>core/src/ten_runtime/extension/internal/metadata.c</code>),所以巢狀深度不影響。
+真正有影響的是這個變數存不存在。</p>
+
+<figure id="fig9">
+<svg viewBox="0 0 960 306" role="img" aria-label="佔位符所引用的環境變數有三種狀態:缺席且沒有預設值會直接殺掉行程;有設定但為空字串會解析成空字串,並在很久以後才在 vendor extension 內失敗;有設定且有值則一切正常。">
+  <defs><marker id="a9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <text class="d-label" x="24"  y="34" fill="currentColor">變數的狀態</text>
+  <text class="d-label" x="366" y="34" fill="currentColor">getenv()</text>
+  <text class="d-label" x="536" y="34" fill="currentColor">runtime 的反應 — placeholder.c</text>
+  <line class="d-line" x1="24" y1="44" x2="936" y2="44"/>
+
+  <rect class="d-hot-b" x="20" y="60" width="310" height="58"/>
+  <text class="d-label d-hot-t" x="34" y="83">沒有設定，也沒有 "|" 預設值</text>
+  <text class="d-sub" x="34" y="103">"${env:DEEPGRAM_API_KEY}"</text>
+  <text class="d-sub" x="366" y="92">NULL</text>
+  <line class="d-hot" x1="446" y1="88" x2="522" y2="88" marker-end="url(#a9)"/>
+  <rect class="d-hot-b" x="526" y="60" width="410" height="58"/>
+  <text class="d-label d-hot-t" x="540" y="83">exit(EXIT_FAILURE) — 第 207 行</text>
+  <text class="d-sub" x="540" y="103">第 196 行先 TEN_LOGE，接著 worker 在解析途中死掉</text>
+
+  <rect class="d-box" x="20" y="130" width="310" height="58"/>
+  <text class="d-label" x="34" y="153" fill="currentColor">有設定，但是空字串</text>
+  <text class="d-sub" x="34" y="173">複製 .env.example 之後每個鍵都是這個狀態</text>
+  <text class="d-sub" x="366" y="162">""</text>
+  <line class="d-line" x1="446" y1="158" x2="522" y2="158" marker-end="url(#a9)"/>
+  <rect class="d-box" x="526" y="130" width="410" height="58"/>
+  <text class="d-label" x="540" y="153" fill="currentColor">解析成空字串 — 完全不抱怨</text>
+  <text class="d-sub" x="540" y="173">vendor 會在很久以後、session 日誌深處才拒絕它</text>
+
+  <rect class="d-box" x="20" y="200" width="310" height="58"/>
+  <text class="d-label" x="34" y="223" fill="currentColor">有設定，而且有值</text>
+  <text class="d-sub" x="34" y="243">— 或者雖然缺席，但有給 "|" 預設值</text>
+  <text class="d-sub" x="366" y="232">值</text>
+  <line class="d-line" x1="446" y1="228" x2="522" y2="228" marker-end="url(#a9)"/>
+  <rect class="d-box" x="526" y="200" width="410" height="58"/>
+  <text class="d-label" x="540" y="223" fill="currentColor">正常</text>
+  <text class="d-sub" x="540" y="243">"${env:OPENAI_PROXY_URL|}" 讓一個變數變成選用的</text>
+
+  <text class="d-hot-t" x="20" y="288">中間那一列最浪費時間：沒填的鍵是「存在」而不是「缺席」—— 所以什麼都不會停下來，唯一的症狀是一則 vendor 錯誤。</text>
+</svg>
+<figcaption><b>圖 9 — 缺席與空字串是兩種不同的失敗。</b>這個不對稱是刻意的:一個必填的
+金鑰如果根本沒設,應該讓行程停下來,而不是讓它帶著錯誤配置繼續跑。但
+<code>.env.example</code> 把每個鍵都設成空字串,所以最常見的失誤產生的是中間那一列,
+而 runtime 會把它當成一個合法的值。<code>|</code> 後綴是唯一能讓變數真正變成選用的方式。</figcaption>
+</figure>
+
+<h4>17.3 巢狀的鍵不會有任何警告</h4>
+
+<p><code>ai_agents/server/internal/http_server.go</code> 會在啟動 worker 之前驗證
+<code>${env:…}</code>,但那個迴圈只讀 node 的<b>頂層</b> property,而且會跳過任何不是
+字串的值。這些範例裡每一把 vendor 金鑰都住在 <code>params</code> 底下,而
+<code>params</code> 是一個 object,所以它從來不會被檢查。少填或空的 vendor 金鑰,在任何
+地方都不會產生 <code>Environment variable not found</code> 這一行。</p>
+
+<p><code>verify_arm64_install.sh</code> 補上了這個缺口 —— 請在開 session 之前跑它,而不是
+事後從日誌裡推。</p>
+
+<h4>17.4 本地 LLM 通常不需要寫程式</h4>
+
+<p><code>openai_llm2_python</code> 的第一個 property 就是 <code>base_url</code>:</p>
+
+<pre><code>{ "base_url": "https://api.openai.com/v1", "api_key": "${env:OPENAI_API_KEY}", … }</code></pre>
+
+<p>任何提供 OpenAI 相容 <code>/v1/chat/completions</code> 的本地服務 —— vLLM、Ollama 的
+<code>/v1</code> 層、llama.cpp 的 <code>llama-server</code>、LM Studio、Xinference ——
+都只是改一個欄位:</p>
+
+<pre><code>"property": {
+  "base_url": "http://127.0.0.1:11434/v1",
+  "api_key": "not-needed",
+  "model": "qwen2.5:14b"
+}</code></pre>
+
+<p><code>api_key</code> 不能省略也不能是空的:多數本地服務不在乎它的值,但空字串會讓
+extension 拒絕它 —— 又是 <a href="#fig9">圖 9</a> 的中間那一列。</p>
+
+<p>只有在協定真的不相容時才寫新的 extension。骨架在
+<code>packages/core_extensions/default_llm_extension_python/</code> —— 28 行,其中唯一
+必須實作的方法是 <code>on_call_chat_completion</code>,回傳
+<code>AsyncGenerator[LLMResponse, None]</code>。基礎類別會處理訊息路由、工具協定,以及
+與 <code>main_control</code> 之間的往返。</p>
+
+<h4>17.5 改動什麼時候生效</h4>
+
+<table>
+<thead><tr><th>改了什麼</th><th>生效時機</th></tr></thead>
+<tbody>
+<tr><td><code>params</code> 內的某個值(voice id、model、語言)</td><td>下一個 session —— server 每開一個 worker 就重讀一次 <code>property.json</code></td></tr>
+<tr><td><code>addon</code>、node 集合,或 <code>connections</code></td><td>完整重啟 <code>task run</code></td></tr>
+<tr><td><code>.env</code></td><td>完整重啟 —— 它只在啟動時讀一次</td></tr>
+</tbody>
+</table>
+
+<h3 id="ch18">18. 測試</h3>
+
+<p>兩套外形相同、要求相反的測試框架。真正有意義的區別是:vendor client 是不是真的。</p>
+
+<table>
+<thead><tr><th></th><th>Standalone</th><th>Guarder</th></tr></thead>
+<tbody>
+<tr><th>指令</th><td><code>task test-extension EXTENSION=agents/ten_packages/extension/&lt;ext&gt;</code></td><td><code>task asr-guarder-test EXTENSION=&lt;ext&gt;</code> / <code>tts-guarder-test</code></td></tr>
+<tr><th>位置</th><td><code>&lt;ext&gt;/tests/</code></td><td><code>agents/integration_tests/{asr,tts}_guarder/</code></td></tr>
+<tr><th>vendor client</th><td><b>mock 掉</b> —— client 類別被 patch 換掉</td><td><b>真的</b></td></tr>
+<tr><th>憑證</th><td>不需要</td><td>需要 vendor 金鑰</td></tr>
+<tr><th>網路</th><td>不需要</td><td>需要</td></tr>
+<tr><th>arm64</th><td><b>今天就能跑</b> —— 只依賴有 aarch64 版本的 runtime 函式庫</td><td>架構是對的,但從來沒有在上面實際跑過</td></tr>
+</tbody>
+</table>
+
+<p>兩者跑的都是真正的 TEN app 而不是樁:每個 <code>conftest.py</code> 都會在自己的執行緒
+上啟動一個繼承 <code>App</code> 的 <code>FakeApp</code>,並且卡住 fixture 直到
+<code>on_init</code> 被觸發,所以整個過程中 C runtime、Python binding 和 addon manager
+都是活的。standalone 測試是對 extension 的單元測試,不是對 mock 的單元測試。</p>
+
+<h4>18.1 standalone 是怎麼跑的</h4>
+
+<p><code>&lt;ext&gt;/tests/bin/start</code>:</p>
+
+<pre><code>export PYTHONPATH=.ten/app:.ten/app/ten_packages/system/ten_runtime_python/lib:…
+export TEN_APP_BASE_DIR=.ten/app
+pytest -s tests/ "$@"</code></pre>
+
+<p><code>.ten/app</code> 是 <code>tman -y install --standalone</code> 產生的拋棄式 app
+目錄樹,由 <code>task test-extension</code> 負責建立與刪除。
+<code>test-extension-no-install</code> 兩件事都跳過 —— 迭代時比較快的迴圈,也是為什麼
+殘留的 <code>.ten/</code> 之後會造成莫名其妙的失敗
+(<code>rm -rf &lt;ext&gt;/.ten</code>)。</p>
+
+<p>mock 是在 extension import vendor client 的那個位置做 patch。以
+<code>soniox_asr_python</code> 為例,那個位置是
+<code>soniox_asr_python.extension.SonioxWebsocketClient</code>,被換成一個
+<code>MagicMock</code>,它的 <code>connect</code>、<code>send_audio</code>、
+<code>finalize</code> 和 <code>stop</code> 是 <code>AsyncMock</code>,另外還有
+<code>trigger_open</code>、<code>trigger_transcript</code>、<code>trigger_error</code>、
+<code>trigger_close</code> 和 <code>trigger_finished</code> 這些輔助方法,測試用它們把
+extension 驅動到真實 vendor 會造成的各種狀態。十六個檔案涵蓋了 finalize 模式、重連、
+信心值、多語輸出、句子終止、非法參數與 vendor 錯誤 —— 全都不需要金鑰。</p>
+
+<p><code>--</code> 之後的東西會傳給 pytest:</p>
+
+<pre><code>task test-extension-no-install EXTENSION=agents/ten_packages/extension/soniox_asr_python -- -k test_finalize -s -v</code></pre>
+
+<h4>18.2 guarder 是怎麼跑的</h4>
+
+<p>一套框架,以 extension 名稱參數化。它會先改寫自己的 manifest:</p>
+
+<pre><code>sed "s/{{extension_name}}/$EXT_NAME/g" manifest-tmpl.json &gt; manifest.json
+./scripts/install_deps_and_build.sh &lt;os&gt; &lt;arch&gt;
+./tests/bin/start --extension_name &lt;ext&gt; --config_dir &lt;ext&gt;/tests/configs</code></pre>
+
+<p><code>install_deps_and_build.sh</code> 在沒帶引數時會偵測主機架構,而 Taskfile 是明確
+傳進去的,所以這條路在 arm64 上架構是正確的 —— 只是 CI 從來沒有在上面跑過。</p>
+
+<p><code>--config_dir</code> 指向 extension 自己的 <code>tests/configs/</code>,那是該
+vendor 的權威 property 形狀。那些檔案帶的是真的 <code>${env:…}</code> 佔位符,所以對應
+的金鑰必須有設。</p>
+
+<p>音訊素材是 <code>tests/test_data/</code> 底下的 16 kHz PCM:
+<code>16k_en_us.pcm</code>、<code>16k_en_us_helloworld.pcm</code>、
+<code>16k_zh_cn.pcm</code>、<code>16k_es_es.pcm</code>。</p>
+
+<p><code>tests/bin/start</code> 預設排除 <code>test_long_duration_stream</code>。不要在
+同一個容器裡同時跑 ASR 和 TTS guarder —— 它們的建置腳本會在共用的暫存路徑上打架。</p>
+
+<h4>18.3 core 的測試</h4>
+
+<p>arm64 job 把 <code>ten_enable_tests=false</code> 連同 rust、manager 的測試旗標一起設
+掉,所以<b>從來沒有任何測試 target 在 arm64 上被建出來過</b>。要建它們就得從源碼建 core
+(第 10 章);產出的執行檔會落在 <code>out/linux/arm64/tests/</code>。覆蓋率無法啟用 ——
+見 8.1。</p>
+
+<h4>18.4 測試日誌在哪裡</h4>
+
+<p>兩套框架都不寫檔案。兩個 <code>conftest.py</code> 都設成
+<code>{"emitter": {"type": "console", "config": {"stream": "stdout"}}}</code> 並開在
+debug 等級,所以想要一份檔案就自己接:</p>
+
+<pre><code>task test-extension EXTENSION=… 2&gt;&amp;1 | tee /tmp/ext_test.log</code></pre>
+
+<p>這跟執行中的 agent 是不同的去向 —— 在那邊,API server 會給每個 worker 一份自己的
+檔案,放在 <code>LOG_PATH</code> 底下。測試執行從來不會寫到那裡。</p>
+<h2 id="part5"><span class="pnum">第 V 部</span>運維</h2>
+
+<h3 id="ch19">19. 五個腳本</h3>
+
+<p><code>ai_agents/agents/scripts/</code> 底下有五個腳本。每一個都會驗證自己的產出,寧可
+停下來也不會把壞掉的產物交給下一個。</p>
+
+<h4>19.1 <code>verify_arm64_install.sh</code></h4>
+
+<p>檢查一個<b>已安裝完成</b>的 tenapp:包括 <code>tman install</code> 從 registry 拉下來
+的東西,加上 <code>task install</code> 在本機建出來的東西。它不檢查從源碼建的 core。
+結束碼是失敗檢查的數量,所以可以直接用在 CI 裡。</p>
+
+<pre><code>./verify_arm64_install.sh                  # 只做靜態檢查
+./verify_arm64_install.sh --probe-worker   # 另外實際操作 Python binding
+./verify_arm64_install.sh voice-assistant  # 換一個範例</code></pre>
+
+<table>
+<thead><tr><th>區段</th><th>檢查內容</th></tr></thead>
+<tbody>
+<tr><td>0 主機</td><td>架構、核心版本、<code>ID</code>/<code>ID_LIKE</code>/<code>VERSION_ID</code>、release 套件、glibc、gcc、套件管理器、SELinux、容器偵測、CPU、每一個 <code>python3.x</code>、每一個 libpython。斷言 glibc 下限與套件家族 —— 當 <code>os-release</code> 說不清楚時,改從 rpm 資料庫查。</td></tr>
+<tr><td>1 環境</td><td><code>TEN_PYTHON_LIB_PATH</code> 與 <code>UV_PYTHON</code>,並推導出 runtime 將會內嵌哪一個直譯器</td></tr>
+<tr><td>2 清點</td><td>每一個 system package 與 extension 及其 manifest 版本、某個 graph 會實體化哪些 addon,以及每個 extension 的語言。graph 點名了但沒安裝的 addon,本身就是一項失敗。</td></tr>
+<tr><td>3 架構</td><td><b>每一個</b> shared object 的 ELF 架構,不是抽樣</td></tr>
+<tr><td>4 連結</td><td>未解析的 <code>NEEDED</code> 條目,並區分「這個函式庫根本不在目錄樹裡」(失敗)和「它存在但不在搜尋路徑上」(對被 <code>dlopen</code> 的 addon 而言是預期的 —— 會回報 RUNPATH 並說明原因)</td></tr>
+<tr><td>5 glibc</td><td><code>libten_runtime.so</code> 實際要求的版本,對照主機提供的版本</td></tr>
+<tr><td>6 Python ABI</td><td>loader 預設的 libpython 名稱;<b>分開</b>探測 <code>ten_runtime</code> 與 <code>ten_ai_base</code>,好讓失敗能歸屬到真正壞掉的那一層,並原文印出例外</td></tr>
+<tr><td>7 產物</td><td>兩個在本機建出來的 Go 執行檔</td></tr>
+<tr><td>7b 佔位符</td><td>走過整個 graph 找 <code>${env:…}</code>,逐一對照 <code>ai_agents/.env</code> 解析,區分「缺席且必填」與「存在但為空」(<a href="#fig9">圖 9</a>),並在 <code>.env</code> 與環境變數不一致時據實回報,而不是自行挑一邊。從不印出任何值。</td></tr>
+<tr><td>8 服務</td><td>三個連接埠、<code>/health</code>、<code>/graphs</code>,以及<b>處於 <code>T</code> 狀態的行程</b></td></tr>
+<tr><td>8b worker 探測</td><td>帶 <code>--probe-worker</code> 時,透過 API 開一個拋棄式 session 再停掉。不需要任何憑證:一個認證失敗的 worker,仍然已經載入了 libpython 並實體化了它的 extension。</td></tr>
+<tr><td>9 worker 日誌</td><td>libpython 載入失敗與 <code>ModuleNotFoundError</code>;在沒有任何 session 跑過時,回報 <b>skip</b> 而不是 pass</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<p>有兩項檢查之所以存在,是因為它們要抓的失敗在其他情況下完全無聲。第 8 段偵測處於
+<code>T</code> 狀態的行程 —— 一個被丟到背景、又被 SIGTTOU 停住的 <code>task run</code>
+會保留它的 listening socket,對連接埠檢查看起來很健康,實際上什麼都不收。第 9 段拒絕
+回報一個它沒有掙來的 pass:一個沒有被實際操作過的 Python binding,不能當作它可用的證據。</p>
+</div>
+
+<p>總結會先陳述自己的適用範圍,再給結果。全綠代表的是:一個範例在這個架構上能安裝並
+啟動 —— 一個 graph、一個拋棄式 session、沒有任何對話。</p>
+
+<h4>19.2 <code>package_agora_rtc_sdk_arm64.sh</code></h4>
+
+<p>把 Agora 的 aarch64 壓縮檔轉換成一個 TEN <code>agora_rtc_sdk</code> system package。</p>
+
+<pre><code>TMAN=/path/to/tman PKG_VERSION=4.4.32-141 \
+  ./package_agora_rtc_sdk_arm64.sh &lt;sdk.tgz&gt; [輸出目錄]</code></pre>
+
+<p>除非那些函式庫真的是 aarch64,否則它拒絕執行;它會把扁平的 <code>include/</code>
+目錄樹對映到 x64 package 使用的
+<code>include/rtc/low_level_api/include/</code> 佈局,蓋上
+<code>supports: linux/arm64</code>,並寫一份 <code>PROVENANCE.md</code> 記錄這個
+package 從哪裡來、以及它跟官方發佈的 x64 版有什麼差異。</p>
+
+<p><code>PKG_VERSION</code> 必須跟 wrapper manifest 所釘的版本一致 —— 見 14.3 與
+<a href="#fig8">圖 8</a>。</p>
+
+<h4>19.3 <code>build_agora_rtc_arm64.sh</code></h4>
+
+<p>建 wrapper。<b>必須在 aarch64 主機上執行</b>;沒有交叉編譯這條路(第 10 章)。</p>
+
+<pre><code>./build_agora_rtc_arm64.sh &lt;wrapper 源碼目錄&gt; &lt;sdk.tpkg&gt;</code></pre>
+
+<table>
+<thead><tr><th>步驟</th><th>做什麼</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>安裝 <code>openssl-devel</code> 與 <code>zlib-devel</code>,檢查 <code>tgn</code> 和 <code>tman</code></td></tr>
+<tr><td>2</td><td>為了讓解析通過,暫時拿掉 <code>agora_rtc_sdk</code> 相依,跑 <code>tman -y install --standalone</code>,再把 manifest 還原</td></tr>
+<tr><td>3</td><td>把 SDK 解開到 <code>.ten/app</code>,驗證五個 aarch64 函式庫與標頭檔佈局</td></tr>
+<tr><td>4</td><td><code>tgn gen linux arm64 release -- is_clang=false</code></td></tr>
+<tr><td>5</td><td><code>tgn build</code>,並限制 <code>NINJAFLAGS</code> —— 一萬六千行 C++ 對著這套 SDK 編是很吃記憶體的</td></tr>
+<tr><td>6</td><td>回報 ELF 架構、<code>NEEDED</code> 清單與未解析符號</td></tr>
+</tbody>
+</table>
+
+<p>第 2 步之所以存在,是因為 tman 要嘛整棵樹解析成功、要嘛失敗,而 registry 裡沒有 arm64
+的 <code>agora_rtc_sdk</code> —— 見 14.6。</p>
+
+<h4>19.4 <code>install_agora_rtc_arm64.sh</code></h4>
+
+<p>把建好的 extension 與 SDK 放進某個範例的 tenapp。</p>
+
+<pre><code>./install_agora_rtc_arm64.sh &lt;建好的 extension 目錄&gt; &lt;sdk.tpkg&gt; [範例]</code></pre>
+
+<p>它產生的佈局是從一次官方 x64 <code>tman install</code> 讀出來的,不是推測的:</p>
+
+<pre><code>ten_packages/extension/agora_rtc/{manifest.json,property.json,lib/*.so}
+ten_packages/system/agora_rtc_sdk/{include,lib}/</code></pre>
+
+<p>第 5 步會掃描每一個 <code>.so</code>,並<b>在遇到任何 x86-64 物件時中止</b>
+(<a href="#fig4">圖 4</a>);第 6 步會以 runtime 屆時會有的
+<code>LD_LIBRARY_PATH</code> 來解析符號。</p>
+
+<h4>19.5 <code>finish_example_install_arm64.sh</code></h4>
+
+<p><code>install_agora_rtc_arm64.sh</code> 刻意不做的部分 —— 也就是
+<code>task install</code> 的其餘工作。</p>
+
+<pre><code>./finish_example_install_arm64.sh [範例]</code></pre>
+
+<table>
+<thead><tr><th>步驟</th><th>做什麼</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>建 <code>tenapp/bin/main</code>,那是 <code>scripts/start.sh</code> 會 exec 的東西。沒有它,<code>tman run start</code> 會以 exit 127 失敗</td></tr>
+<tr><td>3</td><td>安裝每個 extension 的 <code>requirements.txt</code>,提權執行 —— 而且只有這一步提權</td></tr>
+<tr><td>4</td><td>在<b>共用的</b> <code>ai_agents/playground</code> 裡跑 <code>bun install</code>,那才是 <code>voice-assistant</code> 實際用的那一份</td></tr>
+<tr><td>5</td><td>以 <code>start.sh</code> 的方式解析 <code>bin/main</code> 的函式庫,並 import 幾個核心的第三方套件</td></tr>
+</tbody>
+</table>
+
+<p><code>scripts/install_python_deps.sh</code> 的兩半需要不同的權限,所以在這裡是分開跑
+的:Go 建置維持在呼叫者的身分,而 <code>uv pip install --system</code> 要寫進
+<code>/usr/local</code>,需要 root(12.5)。</p>
+
+<p>第 4 步的檢查不是裝飾。少了 <code>node_modules/.bin/next</code>,
+<code>bun run dev</code> 會退回去找 <code>PATH</code>,然後找到 nmh 的
+<code>/usr/bin/next</code>,那個東西會以 exit 1 結束,並抱怨郵件系統沒設定好。</p>
+
+<h3 id="ch20">20. 日誌在哪裡</h3>
+
+<p>三個地方,而選錯是最浪費時間的事。其中一個 worker 的輸出究竟會落在哪裡,是執行期由
+一個旗標決定的,不是你可以從磁碟上讀出來的設定。</p>
+
+<figure id="fig10">
+<svg viewBox="0 0 960 400" role="img" aria-label="task run 把三個服務放在同一個終端機裡,它們的 stdout 匯成 task_run.log。API server 為每個 session 開一個 worker;那個 worker 的輸出會落在 LOG_PATH 底下自己的檔案,還是併進 task_run.log,取決於 server 在 handlerStart 那一行印出的 Log2Stdout 旗標。">
+  <defs><marker id="a10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box" x="24" y="34" width="512" height="98" stroke-dasharray="5 4"/>
+  <text class="d-label" x="40" y="56" fill="currentColor">task run — 一個終端機，三個服務</text>
+  <rect class="d-box-soft" x="40"  y="68" width="152" height="50"/>
+  <rect class="d-box-soft" x="204" y="68" width="152" height="50"/>
+  <rect class="d-box-soft" x="368" y="68" width="152" height="50"/>
+  <text class="d-sub" x="116" y="90"  text-anchor="middle">bin/api</text>
+  <text class="d-sub" x="116" y="106" text-anchor="middle">:8080</text>
+  <text class="d-sub" x="280" y="90"  text-anchor="middle">playground</text>
+  <text class="d-sub" x="280" y="106" text-anchor="middle">:3000</text>
+  <text class="d-sub" x="444" y="90"  text-anchor="middle">tman designer</text>
+  <text class="d-sub" x="444" y="106" text-anchor="middle">:49483</text>
+
+  <line class="d-line" x1="280" y1="134" x2="280" y2="176" marker-end="url(#a10)"/>
+  <text class="d-edge" x="292" y="160">stdout ─ tee</text>
+
+  <rect class="d-box-soft" x="150" y="180" width="260" height="50"/>
+  <text class="d-label" x="280" y="202" text-anchor="middle" fill="currentColor">/tmp/task_run.log</text>
+  <text class="d-sub"   x="280" y="220" text-anchor="middle">服務啟動 · /start 失敗 · proxy 錯誤</text>
+
+  <line class="d-line" x1="194" y1="93" x2="614" y2="93" marker-end="url(#a10)"/>
+  <text class="d-edge" x="404" y="85" text-anchor="middle">POST /start → 每個 session 開一個 worker</text>
+
+  <rect class="d-box-soft" x="618" y="68" width="300" height="50"/>
+  <text class="d-label" x="768" y="90"  text-anchor="middle" fill="currentColor">worker — tman run start</text>
+  <text class="d-sub"   x="768" y="106" text-anchor="middle">graph、extension、對話都在這裡</text>
+
+  <line class="d-hot" x1="768" y1="122" x2="768" y2="158" marker-end="url(#a10)"/>
+  <rect class="d-hot-b" x="628" y="162" width="280" height="42"/>
+  <text class="d-label d-hot-t" x="768" y="188" text-anchor="middle">Log2Stdout ?</text>
+
+  <path class="d-line" d="M628 183 L470 183 L470 178" marker-end="url(#a10)"/>
+  <text class="d-edge" x="549" y="175" text-anchor="middle">true</text>
+
+  <line class="d-line" x1="768" y1="208" x2="768" y2="240" marker-end="url(#a10)"/>
+  <text class="d-edge" x="780" y="230">false</text>
+
+  <rect class="d-box" x="628" y="244" width="300" height="52"/>
+  <text class="d-label" x="768" y="266" text-anchor="middle" fill="currentColor">$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</text>
+  <text class="d-sub"   x="768" y="284" text-anchor="middle">每個 worker 一份 · LOG_PATH 預設 /tmp/ten_agent</text>
+
+  <rect class="d-box" x="628" y="310" width="300" height="52"/>
+  <text class="d-label" x="768" y="332" text-anchor="middle" fill="currentColor">$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</text>
+  <text class="d-sub"   x="768" y="350" text-anchor="middle">那個 session 實際使用的 graph 配置</text>
+  <path class="d-dash" d="M768 298 L768 306"/>
+
+  <text class="d-hot-t" x="24" y="266">不要用猜的。server 自己會在 handlerStart 那一行記下兩者：</text>
+  <text class="d-sub"   x="24" y="290">grep -o 'LogFile:[^ ]*'&#160;&#160;&#160;&#160;/tmp/task_run.log | tail -1</text>
+  <text class="d-sub"   x="24" y="306">grep -o 'Log2Stdout:[a-z]*' /tmp/task_run.log | tail -1</text>
+  <text class="d-sub"   x="24" y="332">Log2Stdout:true 時，那份 per-worker 檔案可能根本不存在，</text>
+  <text class="d-sub"   x="24" y="348">而 worker 一切正常 —— 空的 LOG_PATH 不是任何東西</text>
+  <text class="d-sub"   x="24" y="364">出錯的證據。</text>
+</svg>
+<figcaption><b>圖 10 — 一個旗標決定了一半的證據落在哪裡。</b>一個在開出自己的日誌檔之前
+就先掛掉的 worker,唯一的痕跡會留在 <code>task_run.log</code> 裡 —— 而那裡看起來一切正常。
+在讀任何東西之前,先從 server 自己的 <code>handlerStart</code> 那一行把去向解出來,而且
+當指名的那個檔案是空的時候,退回去讀 <code>task_run.log</code>。</figcaption>
+</figure>
+
+<table>
+<thead><tr><th>位置</th><th>內容</th><th>什麼時候看</th></tr></thead>
+<tbody>
+<tr><td><code>/tmp/task_run.log</code></td><td>三個服務的 stdout。<b>當 <code>LOG_STDOUT=true</code> 時,worker 的輸出也在這裡</b></td><td>服務起不來、<code>/start</code> 失敗、WebSocket proxy 錯誤</td></tr>
+<tr><td><code>$LOG_PATH/app-&lt;channel&gt;-&lt;ts&gt;.log</code></td><td>每個 worker 一份(<code>LOG_PATH</code> 預設 <code>/tmp/ten_agent</code>)</td><td>對話行為 —— 大多數問題</td></tr>
+<tr><td><code>$LOG_PATH/property-&lt;channel&gt;-&lt;ts&gt;.json</code></td><td>那個 session 使用的 graph 配置</td><td>確認某個被注入的值</td></tr>
+</tbody>
+</table>
+
+<p>這一段不管哪種情況都能解出正確的檔案:</p>
+
+<pre><code>L=$(F=$(grep -o 'LogFile:[^ ]*' /tmp/task_run.log | tail -1 | cut -d: -f2); \
+    [ -s "$F" ] &amp;&amp; echo "$F" || echo /tmp/task_run.log)</code></pre>
+
+<p>管線的各個段落是以 <b>node 名稱</b>為鍵的,而抽換 vendor 時 node 名稱不會變:</p>
+
+<pre><code>grep -E '\[stt\]|asr_result|asr_error'          "$L" | tail -20
+grep -E '\[llm\]|main_control'                  "$L" | tail -20
+grep -E '\[tts\]|tts_audio_start|tts_audio_end' "$L" | tail -20</code></pre>
+
+<div class="note">
+<p>每一段裡第一個要讀的是 <code>config:</code> —— 那是這個 extension 實際收到的東西。
+一把空的憑證,在其他所有地方看起來都跟能用的一模一樣。</p>
+</div>
+
+<p><code>key_point</code> 是 extension 用來標記重要事件的日誌分類
+(<code>LOG_CATEGORY_KEY_POINT</code>);grep 它就能得到整條管線的骨架。測試執行兩邊都不
+會寫 —— 見 18.4。</p>
+
+<h3 id="ch21">21. 依症狀診斷</h3>
+
+<p>一行指令定位出問題的階段:</p>
+
+<pre><code>L=$(F=$(grep -o 'LogFile:[^ ]*' /tmp/task_run.log | tail -1 | cut -d: -f2); \
+    [ -s "$F" ] &amp;&amp; echo "$F" || echo /tmp/task_run.log)
+grep -E 'key_point|_error:|connection_status_changed|Failed to|Traceback|Worker process failed' "$L" | tail -40</code></pre>
+
+<table>
+<thead><tr><th>看到什麼</th><th>壞在哪</th><th>去哪節</th></tr></thead>
+<tbody>
+<tr><td>什麼都沒有,而且沒有日誌檔</td><td>worker 從來沒啟動</td><td>21.2</td></tr>
+<tr><td><code>Worker process failed</code></td><td>worker 退出了</td><td>21.2</td></tr>
+<tr><td><code>proxy error … ECONNREFUSED</code></td><td>WebSocket</td><td>21.3</td></tr>
+<tr><td>ASR <code>connection_status_changed … 'disconnected'</code></td><td>ASR</td><td>21.5</td></tr>
+<tr><td>有 <code>asr_result</code> 但沒有 <code>[llm]</code></td><td>路由,或 <code>main_control</code></td><td>21.6</td></tr>
+<tr><td>有 <code>[llm]</code> 但沒有 TTS 音訊</td><td>TTS</td><td>21.7</td></tr>
+<tr><td><code>Failed to find destination of a … message</code></td><td>graph 缺一條連線</td><td>3.4</td></tr>
+</tbody>
+</table>
+
+<h4>21.1 服務起不來</h4>
+
+<p><b>被 SIGTTOU 停住。</b>丟到背景的 <code>task run</code> 只要一碰終端機就會被停住。
+<code>nohup</code> 擋的是 SIGHUP,不是這個。</p>
+
+<pre><code>ps -o pid,stat,cmd -p $(pgrep -f 'task run|bin/api|tman designer' | tr '\n' ',' | sed 's/,$//')</code></pre>
+
+<div class="warn">
+<p><code>STAT</code> 裡的 <code>T</code> 代表已停止。<b>被停住的行程仍然保有它的
+listening socket</b>,所以連接埠檢查會回報它很健康,但它其實什麼都不收。</p>
+</div>
+
+<p>用 tmux:</p>
+
+<pre><code>tmux new -d -s ten 'cd &lt;example&gt; &amp;&amp; task run 2&gt;&amp;1 | tee /tmp/task_run.log'</code></pre>
+
+<p>用 <kbd>Ctrl+B</kbd> 再按 <kbd>D</kbd> 卸離 —— 絕對不要按 <kbd>Ctrl+C</kbd>。</p>
+
+<p><b>3000 埠被佔用。</b>檢查 <code>ss -tlnp | grep :3000</code> 和
+<code>docker ps</code>。一個在同一台主機上發佈 3000 埠的容器 —— 或者透過 WSL2 的
+localhost 轉發能構到的容器 —— 會在你以為的那個位址上提供一個完全不同的應用。</p>
+
+<p><b>前端立刻退出</b>並抱怨 nmh:playground 的 <code>node_modules</code> 不見了。
+見 19.5。</p>
+
+<h4>21.2 worker 起不來</h4>
+
+<pre><code>curl -s localhost:8080/list          # "data":[] 代表一個都沒有
+grep -E 'handlerStart|Worker (start|stop|process)|placeholder' /tmp/task_run.log | tail -12</code></pre>
+
+<p>早夭的 worker <b>不會產生自己的日誌檔</b>,唯一的紀錄就是
+<code>task_run.log</code>(<a href="#fig10">圖 10</a>)。</p>
+
+<figure id="fig11">
+<svg viewBox="0 0 960 268" role="img" aria-label="Go server 啟動 worker 行程之後會跑 pgrep 去找它的子行程,以一秒間隔重試十次。十次都失敗會耗掉十秒,然後回報 Worker process failed;但那個子行程在第一次嘗試時就已經不在了 —— 這十秒是重試預算,不是逾時。">
+  <defs><marker id="a11" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="d-box-soft" x="24" y="88" width="204" height="58"/>
+  <text class="d-label" x="126" y="112" text-anchor="middle" fill="currentColor">cmd.Start()</text>
+  <text class="d-sub"   x="126" y="130" text-anchor="middle">worker_linux.go:71</text>
+
+  <line class="d-line" x1="230" y1="117" x2="296" y2="117" marker-end="url(#a11)"/>
+
+  <rect class="d-box" x="300" y="88" width="250" height="58"/>
+  <text class="d-label" x="425" y="112" text-anchor="middle" fill="currentColor">pgrep -P &lt;pid&gt;</text>
+  <text class="d-sub"   x="425" y="130" text-anchor="middle">找子行程 — worker_linux.go:83–93</text>
+
+  <path class="d-line" d="M340 86 C340 46, 510 46, 510 86" marker-end="url(#a11)"/>
+  <text class="d-edge" x="425" y="46" text-anchor="middle">重試 ×10，每次間隔 sleep 1 秒</text>
+
+  <path class="d-line" d="M552 102 L594 70" marker-end="url(#a11)"/>
+  <path class="d-hot"  d="M552 132 L594 168" marker-end="url(#a11)"/>
+
+  <rect class="d-box" x="598" y="42" width="338" height="52"/>
+  <text class="d-label" x="767" y="64" text-anchor="middle" fill="currentColor">找到子行程 → worker 完成註冊</text>
+  <text class="d-sub"   x="767" y="82" text-anchor="middle">會出現在 GET /list 裡</text>
+
+  <rect class="d-hot-b" x="598" y="144" width="338" height="68"/>
+  <text class="d-label d-hot-t" x="767" y="167" text-anchor="middle">十次全失敗 → "Worker process failed"</text>
+  <text class="d-sub"   x="767" y="185" text-anchor="middle">在 /start 回傳約 10 秒後才回報</text>
+  <text class="d-sub"   x="767" y="201" text-anchor="middle">從來沒有建立過任何 per-worker 日誌檔</text>
+
+  <text class="d-hot-t" x="24" y="184">那十秒是重試預算，不是逾時。</text>
+  <text class="d-sub"   x="24" y="206">立刻死掉的行程會十次全部失敗，所以這段延遲</text>
+  <text class="d-sub"   x="24" y="222">完全說明不了 worker 到底活了多久。</text>
+  <text class="d-sub"   x="24" y="248">拿到前景重現：cd &lt;example&gt;/tenapp &amp;&amp; tman run start</text>
+</svg>
+<figcaption><b>圖 11 — 為什麼「它跑了十秒」是錯誤的結論。</b><code>/start</code> 與
+<code>Worker process failed</code> 之間的間隔是由重試迴圈固定下來的,所以不管 worker 是
+在第一道指令就死掉、還是撐了九秒,這個數字都一樣。任何從這個數字推論出「逾時」「卡住」
+或「啟動很慢」的說法,讀的都是那個迴圈,不是 worker。拿到前景跑,真正的錯誤會立刻出現。</figcaption>
+</figure>
+
+<p><code>No such file or directory … bin/main</code> 加上 exit 127,代表 Go app 從來沒被
+建出來 —— 見 19.5。</p>
+
+<p><b><code>${env:}</code> 沒有預設值。</b><code>Environment variable X is not found,
+neither default value is provided</code> 之後跟著 <code>exit status 1</code>,那是
+<code>placeholder.c:196</code>,而隨後的行程死亡是第 207 行(<a href="#fig9">圖 9</a>)。
+最常見的原因是 <code>.env</code> 是在 <code>task run</code> 啟動<em>之後</em>才填的;
+它只在啟動時讀一次。</p>
+
+<pre><code>stat -c '%y' ~/ten-framework/ai_agents/.env
+ps -o lstart= -p $(pgrep -f 'bin/api' | head -1)</code></pre>
+
+<p><code>.env</code> 比行程新,就代表要重啟,其他什麼都先不用試。</p>
+
+<h4>21.3 WebSocket 連不上</h4>
+
+<p><code>ws.onerror</code> 不帶任何細節 —— 瀏覽器的 error event 從來就不帶。要看伺服器
+那一側。</p>
+
+<pre><code>瀏覽器  ws://localhost:3000/ws/{port}      port 是 8000-9000 的隨機值，存在 localStorage
+   ↓     frontend/server.js 做代理
+         ws://127.0.0.1:{port}
+   ↓     API server 把它注入 graph
+         websocket_server 綁定它</code></pre>
+
+<p>client 只有在 <code>/start</code> 回傳之後才會連,而且還會固定再等兩秒;失敗的話會
+每三秒無限重試。</p>
+
+<pre><code>grep 'WebSocket upgrade'     /tmp/task_run.log | tail -2   # 瀏覽器想要的 port
+grep 'WebSocket proxy error' /tmp/task_run.log | tail -2
+grep -o "\[websocket_server\] Loaded config: {[^}]*}" "$L"  # extension 實際綁的 port</code></pre>
+
+<table>
+<thead><tr><th>看到什麼</th><th>代表</th></tr></thead>
+<tbody>
+<tr><td>第三個指令什麼都沒印</td><td>worker 從來沒啟動 —— 21.2</td></tr>
+<tr><td>兩個 port 不一樣</td><td>注入失敗</td></tr>
+<tr><td>一兩個 <code>ECONNREFUSED</code>,然後就安靜了</td><td><b>正常</b> —— 瀏覽器早敲了幾百毫秒,重試就接上了</td></tr>
+<tr><td><code>ECONNREFUSED</code> 一直持續</td><td>worker 死了 —— 21.2</td></tr>
+</tbody>
+</table>
+
+<h4>21.4 沒有麥克風</h4>
+
+<p><code>audioUtils.ts:178</code> 的
+<code>Cannot read properties of undefined (reading 'getUserMedia')</code> 代表
+<code>navigator.mediaDevices</code> 是 <code>undefined</code>。<b>是整個 API 不存在,
+不是被擋住</b>:瀏覽器只在安全情境下才暴露它 —— HTTPS,或者 <code>localhost</code>。
+IP 位址永遠不算。</p>
+
+<pre><code>[location.href, window.isSecureContext, !!navigator.mediaDevices]</code></pre>
+
+<p>從跑瀏覽器的那台機器建通道,然後開 <code>http://localhost:3000</code> —— 不要用 IP。
+<code>localhost</code> 上的任何 port 都是安全情境,所以 3000 被佔用完全不成問題:</p>
+
+<pre><code>ssh -L 3100:localhost:3000 &lt;user&gt;@&lt;host&gt;</code></pre>
+
+<h4>21.5 沒有 ASR 結果</h4>
+
+<pre><code>grep -E '\[stt\]|asr_result|asr_error|connection_status_changed' "$L" | tail -25</code></pre>
+
+<table>
+<thead><tr><th>日誌行</th><th>代表</th></tr></thead>
+<tbody>
+<tr><td><code>[stt] config: {…'params':{…}}</code></td><td><b>先讀這一行</b> —— <code>'api_key': ''</code> 就是沒填的金鑰</td></tr>
+<tr><td><code>connection_status_changed … 'connected'</code></td><td>vendor 接受了這條連線</td></tr>
+<tr><td><code>send asr_error: {"code": …, "message": …}</code></td><td>vendor 自己給的原因</td></tr>
+</tbody>
+</table>
+
+<p><code>_send_asr_metrics … 'actual_send': 0</code> 代表<b>一個音訊 byte 都沒送出去</b>
+—— 要往上游看麥克風(21.4)或 WebSocket(21.3),不是看 ASR。</p>
+
+<p>如果日誌裡有錯誤而介面什麼都沒顯示,那是 graph 沒有路由 <code>error</code> ——
+見 3.4 與 <a href="#fig3">圖 3</a>。</p>
+
+<h4>21.6 LLM 沒有回應</h4>
+
+<pre><code>grep -E '\[llm\]|asr_result|main_control' "$L" | tail -25</code></pre>
+
+<table>
+<thead><tr><th>看到什麼</th><th>壞在哪</th></tr></thead>
+<tbody>
+<tr><td>完全沒有 <code>asr_result</code></td><td>ASR —— 21.5</td></tr>
+<tr><td>有 <code>asr_result</code> 但從沒出現 <code>[llm]</code></td><td><code>main_control</code> 沒有轉發;檢查 <code>connections</code></td></tr>
+<tr><td><code>[llm]</code> 之後接一個 HTTP 狀態碼</td><td>vendor:401 金鑰、404 模型名稱、429 配額</td></tr>
+<tr><td><code>[llm]</code> 之後一片安靜</td><td>連不到 vendor;<code>OPENAI_PROXY_URL</code> 就是為此存在的</td></tr>
+</tbody>
+</table>
+
+<p><code>_run_stream … stream error (rid=…)</code> 來自 <code>ten_ai_base</code> 的 LLM
+基礎類別包裝 vendor 例外 —— <b>真正的原因在接下來幾行</b>,所以要往下多讀幾行。</p>
+
+<h4>21.7 沒有 TTS 音訊</h4>
+
+<pre><code>grep -E '\[tts\]|tts_audio_start|tts_audio_end|pcm_frame' "$L" | tail -25</code></pre>
+
+<p>有 <code>tts_audio_start</code>、一個 <code>tts_ttfb</code> 指標,以及
+<code>request_total_audio_duration_ms</code> 不為零的 <code>tts_audio_end</code>,就代表
+合成成功了,問題在下游。確認音訊有離開伺服器:</p>
+
+<pre><code>grep 'Forwarded .* bytes of audio' "$L" | tail -3</code></pre>
+
+<p>那一行是 <code>log_debug</code>,所以除非有開 debug,否則它不存在什麼都證明不了。到
+<code>tenapp/property.json</code> 打開它,重開 session,事後再關掉 —— 它非常吵:</p>
+
+<pre><code>sed -i 's/"level": "info"/"level": "debug"/' &lt;example&gt;/tenapp/property.json</code></pre>
+
+<p>音訊有轉發出去但聽不到,是瀏覽器端的問題。<code>AudioPlayer</code> 在 mount effect
+裡建立它的 <code>AudioContext</code>,那是在任何使用者手勢之前,所以瀏覽器回傳的是
+suspended 狀態;此時對 buffer source 呼叫 <code>start()</code> 不會發出聲音也不會丟例外,
+而且因為 <code>onended</code> 永遠不會觸發,佇列會卡在第一個 buffer。擷取端本來就有
+resume;播放端一直到 <code>aa98a8ffc</code> 才有。</p>
+
+<div class="warn">
+<p><code>output_format</code> 保持 <code>pcm_16000</code>。那是整條管線講好的格式,改掉
+會在完全沒有錯誤訊息的情況下,把下游的音訊弄壞。</p>
+</div>
+
+<h3 id="ch22">22. 速查表</h3>
+
+<table>
+<thead><tr><th>症狀</th><th>原因</th><th>處理</th></tr></thead>
+<tbody>
+<tr><td><code>Environment variable X is not found, neither default value is provided</code></td><td><code>.env</code> 裡沒有,或 <code>task run</code> 比 <code>.env</code> 舊</td><td>填好,然後<b>重啟</b></td></tr>
+<tr><td><code>config: {…'api_key': ''}</code></td><td>存在但是空的</td><td>填好,然後重啟</td></tr>
+<tr><td><code>STAT</code> 顯示 <code>T</code></td><td>丟到背景,被 SIGTTOU 停住</td><td>改用 tmux</td></tr>
+<tr><td><code>Cannot read properties of undefined (reading 'getUserMedia')</code></td><td>不是安全情境</td><td>SSH 通道,走 <code>localhost</code></td></tr>
+<tr><td><code>proxy error … ECONNREFUSED</code> 持續出現</td><td>worker 沒在跑</td><td>21.2</td></tr>
+<tr><td><code>Failed to find destination of a … message</code></td><td>graph 少一條連線</td><td>加進 <code>connections</code></td></tr>
+<tr><td><code>actual_send: 0</code></td><td>沒有音訊送到 ASR</td><td>21.3、21.4</td></tr>
+<tr><td>exit 127,找不到 <code>bin/main</code></td><td>Go app 從來沒建過</td><td>19.5</td></tr>
+<tr><td><code>next: Doesn't look like nmh is installed</code></td><td>playground 的 <code>node_modules</code> 不見了</td><td>19.5</td></tr>
+<tr><td>日誌裡有錯誤,UI 卻一片安靜</td><td><code>error</code> 沒有被路由</td><td><b>相信日誌</b></td></tr>
+<tr><td>換了 vendor 卻毫無變化</td><td>改了 <code>addon</code> 但沒重啟</td><td>17.5</td></tr>
+<tr><td>瀏覽器顯示的是另一個應用</td><td>3000 埠被別的東西佔了</td><td><code>ss -tlnp | grep :3000</code></td></tr>
+</tbody>
+</table>
+<h2 id="part6"><span class="pnum">第 VI 部</span>現況</h2>
+
+<h3 id="ch23">23. 值得推回上游的事</h3>
+
+<ul>
+<li><b>把 <code>agora_rtc</code> 和 <code>agora_rtc_sdk</code> 發佈 arm64 版。</b>
+兩者今天都能為 aarch64 建置 —— wrapper 完全不需要改邏輯 —— 但兩個都不在 registry 裡,
+所以每一個使用者都得自己建、自己用手放進去,活在套件管理器之外(16.2)。發佈它們就能
+解開 26 個範例中的 24 個,而使用者端一行都不用改。</li>
+
+<li><b>在 <code>agora_rtc</code> 源碼裡補上 <code>#include &lt;cstdint&gt;</code>。</b>
+GCC 13 起不再遞移引入它,而源碼在 27 個檔案裡依賴它。這件事在現代工具鏈上也會弄壞 x64
+的建置,所以它不是 arm64 的問題。</li>
+
+<li><b>提供 aarch64 版的 <code>liblinux_audio_hy_extension.so</code>,</b>或者確認它已經
+不再被使用。它目前只出貨 x86-64 版,必須從 arm64 package 裡排除 —— 而且因為
+<code>lib/</code> 是無條件掃描的(<a href="#fig4">圖 4</a>),把它留著會讓整個 extension
+消失,不是只有那一項功能失效。</li>
+
+<li><b>arm64 的 glibc 下限。</b>把 <code>linux_arm64.yml</code> 改在
+<code>ubuntu-22.04-arm</code> 上建,或者對著較舊的 sysroot 建,可以把需求從 2.38 降回
+約 2.34,讓這些 package 在 RHEL 9、Amazon Linux 2023 和 Ubuntu 22.04 上可用。</li>
+
+<li><b>Python 版本不一致。</b>arm64 的 <code>ten_runtime_python</code> 是針對 3.12 建的,
+而 <code>python_addon_loader</code> 預設是 <code>libpython3.10.so</code>
+(<a href="#fig5">圖 5</a>)。兩者應該有一個要動,好讓 <code>TEN_PYTHON_LIB_PATH</code>
+變成不必要。</li>
+
+<li><b><code>tman check env</code> 的建議。</b>它回報 Python 3.10 是唯一支援的版本,
+這與 arm64 產物互相矛盾。</li>
+
+<li><b><code>uv pip install --system</code> 被寫死,導致裸機安裝需要 root。</b>
+<code>install_python_deps.py</code> 是把指令字面組出來的
+(<code>["uv", "pip", "install", "--system"]</code>),沒有任何環境變數可以覆寫。在容器裡
+這不用付代價 —— 它跑在 root 底下 —— 但以一般使用者身分執行時,每一個 extension 都會以
+<code>Permission denied</code> 失敗。像 <code>install_deps_and_build.sh</code> 已經在做的
+那樣尊重 <code>PIP_INSTALL_CMD</code>,就足夠了。</li>
+
+<li><b>沒有任何地方為相依安裝釘住直譯器。</b><code>--system</code> 解到的是
+<code>python3</code> 當下指向的東西,而在任何出貨 3.13+ 的發行版上,那都不是 arm64
+binding 編譯所依據的 3.12。這個不一致會一路無聲,直到某個 extension 在執行期丟出
+<code>ModuleNotFoundError</code>。從 <code>TEN_PYTHON_LIB_PATH</code> 推導出直譯器 ——
+版本號本來就寫在那裡面了 —— 就能補上這個缺口,而且不需要新增任何設定。</li>
+
+<li><b><code>${env:}</code> 的驗證漏掉巢狀鍵。</b>API server 只檢查 node 的頂層字串
+property,而每一把 vendor 金鑰都住在 <code>params</code> 底下(17.3)。少填或空的金鑰,
+server 完全不會給出警告。</li>
+
+<li><b>無路由訊息的警告被節流到千分之一。</b>對一條熱路徑來說這是正確的預設值,但它
+造成的結果是:一個真的少了連線的 graph,只會在最開頭記錄這件事一次,之後看起來就一片
+安靜(<a href="#fig3">圖 3</a>)。在 graph 拆除時補一行彙總 ——「名為 <code>error</code>
+的訊息被丟棄了 <em>n</em> 次」—— 就能讓這個狀況被發現,而且完全不動到熱路徑。</li>
+
+<li><b><code>ten_agent_build</code> 是單一架構的。</b>像
+<code>ten_building_ubuntu2204</code> 那樣把它發佈成 multi-arch manifest,就能徹底不需要
+<code>Dockerfile.dev</code>。</li>
+
+<li><b><code>rustup target add stable x86_64-unknown-linux-gnuasan</code></b> 被寫死在
+multi-arch builder 的 Dockerfile 裡,在 arm64 上毫無意義。</li>
+</ul>
+
+<h3 id="ch24">24. 本手冊未涵蓋的部分</h3>
+
+<ul>
+<li><b>從源碼建 core,在 arm64 上除了 CI 之外沒有被實際操作過。</b>官方 job 會建它;
+本手冊沒有獨立驗證過那個產物,而且從來沒有任何測試 target 在上面被建出來(18.3)。</li>
+
+<li><b>guarder 測試組從來沒有在 arm64 上跑過。</b>那條路的架構是正確的;那跟「跑過了」
+不是同一件事。</li>
+
+<li><b><code>ffmpeg</code> 與 <code>libwebsockets</code> 在 arm64 的 core 建置中未經
+測試。</b></li>
+
+<li><b><code>build_docker_for_ai_agents.yml</code></b> 建那 13 個範例映像時沒有帶
+<code>platforms:</code> 欄位,所以它們都只有 amd64。</li>
+
+<li><b>並行與長時間執行的行為。</b>這裡驗證過的一切,都是在一台閒置機器上的單一
+session。</li>
+
+<li><b><code>websocket-example</code> 和 <code>voice-assistant</code> 之外的那 25 個
+範例。</b>它們的 extension 都是純 Python,graph 之間也只有配置上的差異,所以預期是可以
+運作的 —— 但預期不等於驗證。</li>
+</ul>
+
+<h2 id="sources"><span class="pnum">附錄</span>原始碼引用對照</h2>
+
+<p>本手冊每一個行號都是重新對照工作樹核對過的,不是憑記憶引用的。集中列在這裡,是為了
+讓後來的讀者一眼就能判斷這棵樹有沒有在底下移動過。</p>
+
+<table>
+<thead><tr><th>陳述</th><th>檔案</th><th>行號</th></tr></thead>
+<tbody>
+<tr><td>"Environment variable … neither default value is provided"</td><td><code>core/src/ten_utils/lib/sys/general/placeholder.c</code></td><td>196</td></tr>
+<tr><td>緊接其後的行程死亡</td><td><code>core/src/ten_utils/lib/sys/general/placeholder.c</code></td><td>207(<code>exit(EXIT_FAILURE)</code>)</td></tr>
+<tr><td>"Failed to find destination of a '%s' message '%s' from graph."</td><td><code>core/src/ten_runtime/extension/extension.c</code></td><td>435</td></tr>
+<tr><td>送出路徑上的節流呼叫</td><td><code>core/src/ten_runtime/ten_env/internal/send.c</code></td><td>161</td></tr>
+<tr><td>只有節流放行時才會抵達的那行警告</td><td><code>core/src/ten_runtime/ten_env/internal/send.c</code></td><td>163</td></tr>
+<tr><td>控制它的取餘數判斷</td><td><code>core/src/ten_runtime/extension/msg_not_connected_cnt.c</code></td><td>76</td></tr>
+<tr><td><code>TEN_MSG_NOT_CONNECTED_COUNT_RESET_THRESHOLD</code> = 1000</td><td><code>core/src/ten_runtime/extension/msg_not_connected_cnt.c</code></td><td>14</td></tr>
+<tr><td>無條件的 <code>lib/</code> 掃描</td><td><code>core/src/ten_runtime/addon/addon_autoload.c</code></td><td>441</td></tr>
+<tr><td>worker 尋找子行程的重試迴圈</td><td><code>ai_agents/server/internal/worker_linux.go</code></td><td>83–93</td></tr>
+<tr><td>啟動 worker 的 <code>cmd.Start()</code></td><td><code>ai_agents/server/internal/worker_linux.go</code></td><td>71</td></tr>
+</tbody>
+</table>
+
+<p class="src" style="margin-top:2.5rem">TEN Framework on arm64 —— 對應分支
+<code>feat/arm64-native-build</code>。英文版:
+<a href="arm64_build.html"><code>arm64_build.html</code></a>;Markdown 原始檔:
+<code>docs/development/arm64_build.md</code>。</p>
+
+</main>
+</div>
+</body>
+</html>
