@@ -20,6 +20,7 @@ REPO="${REPO:-$HOME/ten-framework}"
 URL="${AMBARELLA_LLM_BASE_URL:-http://127.0.0.1:8080}"
 MODEL_TYPE="${MODEL_TYPE:-9}"
 TIMEOUT="${TIMEOUT:-90}"
+SETTLE="${SETTLE:-8}"   # seconds to let the single-user slot drain between probes
 
 sec() { printf '\n\033[1m===== %s\033[0m\n' "$*"; }
 kv()  { printf '  %-34s %s\n' "$1" "$2"; }
@@ -33,18 +34,19 @@ kv "host"        "$(uname -n) $(uname -m)"
 kv "date"        "$(date -Is)"
 kv "llm url"     "$URL"
 kv "model_type"  "$MODEL_TYPE"
+kv "settle between probes" "${SETTLE}s"
 kv "log"         "$LOG"
 
 # --------------------------------------------------------------- 1. ports
 sec "1. Listening ports"
 if command -v ss >/dev/null 2>&1; then
-  ss -lntp 2>/dev/null | awk 'NR==1 || /:(3000|8080|8081|49483)\y/' \
+  ss -lntp 2>/dev/null | awk 'NR==1 || /:(3000|8080|8081|49483)[^0-9]/' \
     | sed 's/[[:space:]]\+$//'
   # tr -d would delete those letters wherever they appear in the name, so
   # capture the quoted process name instead.
   LLM_OWNER=$(ss -lntp 2>/dev/null | sed -n '/:8080[^0-9]/ s/.*users:((\"\([^"]*\)\".*/\1/p' | head -1)
   for p in 8080 8081; do
-    if ss -lntp 2>/dev/null | grep -q ":${p}\y.*\"api\""; then GO_PORT="$p"; fi
+    if ss -lntp 2>/dev/null | grep -q ":${p}[^0-9].*\"api\""; then GO_PORT="$p"; fi
   done
 else
   echo "  ss not available"
@@ -100,8 +102,28 @@ probe() {
   local tag="$1" desc="$2"; shift 2
   local out="/tmp/ambarella_probe_${tag}.bin"
   printf '\n\033[1m--- %s: %s\033[0m\n' "$tag" "$desc"
+
+  # run_llm_demo.sh is documented with --max_user 1, so the board serves one
+  # turn at a time. Without a pause a probe can fail merely because the
+  # previous one is still generating, which looks identical to the request
+  # itself being refused.
+  sleep "$SETTLE"
+
+  local before=0
+  [[ -r /tmp/log.txt ]] && before=$(wc -l < /tmp/log.txt)
+
   curl -sS -X POST --url "$URL/" --max-time "$TIMEOUT" --output "$out" "$@"
   local rc=$?
+
+  if [[ -r /tmp/log.txt ]]; then
+    local after; after=$(wc -l < /tmp/log.txt)
+    if [[ "$after" -gt "$before" ]]; then
+      echo "  --- /tmp/log.txt lines added by this request ---"
+      tail -n "$((after - before))" /tmp/log.txt | sed 's/^/    /'
+    else
+      echo "  (the server logged nothing for this request)"
+    fi
+  fi
   local n=0; [[ -f "$out" ]] && n=$(wc -c < "$out")
   RC[$tag]=$rc; BYTES[$tag]=$n
   kv "curl exit"     "$rc$([[ $rc -eq 52 ]] && echo '  (empty reply -- server closed without responding)')"
@@ -152,6 +174,15 @@ probe B4 "streaming (Stream-Off: 0) -- the extension's real request" \
   -H "Content-Type: text/plain; charset=utf-8" \
   --data "你好，一句話介紹自己"
 
+# B5 -- B1 again with a fresh session id. This is the control. If B1 passed and
+# B5 passes too, the board is not stuck and B2..B4 failed on their own merits.
+# If B5 also fails, everything after B1 failed because the single user slot was
+# still busy, and the ladder proves nothing about the body or the headers.
+probe B5 "control: B1 repeated verbatim (ASCII body, non-streaming)" \
+  -H "Session-Id: 1238" -H "Model-Type: $MODEL_TYPE" \
+  -H "Stream-Off: 1" -H "Reset-En: 1" \
+  --data "Hello"
+
 # --------------------------------------------------------------- 6. verdict
 sec "6. Verdict"
 kv "Go API server"        "$([[ -n "$GO_PORT" ]] && echo "listening on $GO_PORT" || echo '**NOT RUNNING** -- /start will fail')"
@@ -160,10 +191,15 @@ kv "test_llm_client"      "$([[ $CLIENT_PROC -eq 1 ]] && echo present || echo '*
 kv "Device ENABLE seen"   "$([[ $DEVICE_ENABLE -eq 1 ]] && echo yes || echo '**NO** -- model may still be loading')"
 echo
 printf '  %-6s %-8s %-8s %s\n' probe exit bytes meaning
-for t in B1 B2 B3 B4; do
+for t in B1 B2 B3 B4 B5; do
   printf '  %-6s %-8s %-8s ' "$t" "${RC[$t]:-?}" "${BYTES[$t]:-0}"
   if [[ "${RC[$t]:-1}" -eq 0 && "${BYTES[$t]:-0}" -gt 0 ]]; then echo "ok"; else echo "FAILED"; fi
 done
+echo
+echo "  READ B5 FIRST -- it repeats B1 exactly."
+echo "    B5 ok      -> the board is not stuck; B2..B4 failed on their own merits."
+echo "    B5 FAILED  -> the single user slot was still busy, and the ladder below"
+echo "                  proves nothing. Re-run with SETTLE=30 $0"
 echo
 echo "  Where the ladder first fails names the cause:"
 echo "    B1 -> the service itself, unrelated to TEN. Check test_llm_client above,"
