@@ -136,11 +136,33 @@ probe() {
   kv "curl exit"     "$rc$([[ $rc -eq 52 ]] && echo '  (empty reply -- server closed without responding)')"
   kv "bytes received" "$n"
   if [[ "$n" -gt 0 ]]; then
-    echo "  --- first 240 bytes, escaped (shows framing: 'data:' prefix = SSE) ---"
-    od -c -N 240 "$out" | sed 's/^/  /'
-    echo "  --- as text ---"
-    dd if="$out" bs=1 count=400 2>/dev/null | sed 's/^/  /'
-    echo
+    # Analyse rather than dump. The previous version printed 240 octal bytes,
+    # which is not enough to reach the </think> delimiter in a typical reply
+    # and invites a conclusion drawn from a truncated window.
+    python3 - "$out" <<'PYEOF'
+import sys, pathlib
+raw = pathlib.Path(sys.argv[1]).read_bytes()
+text = raw.decode("utf-8", errors="replace")
+stripped = text.lstrip()
+print("    framing:        %s" % (
+    "SSE (starts with 'data:')" if stripped.startswith("data:") else "plain text"))
+print("    total bytes:    %d" % len(raw))
+idx = text.find("</think>")
+if idx < 0:
+    print("    </think>:       absent -- the whole body is the answer")
+    body = text
+else:
+    print("    </think>:       at byte offset %d" % idx)
+    print("    reasoning:      %d chars before it" % len(text[:idx].strip()))
+    body = text[idx + len("</think>"):]
+    print("    opening <think>: %s" % ("present" if "<think>" in text[:idx] else
+                                       "ABSENT -- generation starts inside the block"))
+print("    --- answer (after </think> if present) ---")
+ans = body.strip()
+print("    " + (ans[:300] if ans else "<empty>"))
+if len(ans) > 300:
+    print("    ... %d more chars" % (len(ans) - 300))
+PYEOF
   fi
 }
 
@@ -218,8 +240,12 @@ echo "    B2 -> multibyte body handling."
 echo "    B3 -> the Content-Type header at ambarella.py:123."
 echo "    B4 -> streaming specifically; non-streaming would still work."
 echo
-echo "  If B4 returned bytes, its od -c dump above settles response_format:"
-echo "    starts with 'data:'  -> pin response_format to \"sse\""
-echo "    plain text           -> pin response_format to \"raw\""
+echo "  If B4 returned bytes, its 'framing:' line above settles response_format:"
+echo "    SSE         -> pin response_format to \"sse\""
+echo "    plain text  -> pin response_format to \"raw\""
+echo
+echo "  The </think> lines say whether the board emits chain-of-thought, and"
+echo "  whether it opens the block or starts already inside it. That decides"
+echo "  how the extension has to strip reasoning before it reaches TTS."
 echo
 kv "full log" "$LOG"
