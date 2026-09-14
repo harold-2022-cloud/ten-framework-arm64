@@ -1,0 +1,13 @@
+#!/bin/bash
+#
+# Run this extension's tests. main_python lives inside a tenapp rather than
+# being a standalone package, so there is no .ten/app to install into; the
+# runtime and base classes come from the shared system packages instead.
+set -e
+
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+
+SYS="${TEN_SYSTEM_DIR:-/app/agents/ten_packages/system}"
+export PYTHONPATH="..:$SYS/ten_runtime_python/lib:$SYS/ten_runtime_python/interface:$SYS/ten_ai_base/interface:$PYTHONPATH"
+
+exec python3 -m pytest tests/ "$@"

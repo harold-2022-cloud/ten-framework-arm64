@@ -20,6 +20,7 @@ from .agent.events import (
     UserLeftEvent,
 )
 from .helper import _send_cmd, _send_data, parse_sentences
+from .interrupt_gate import InterruptGate
 from .config import MainControlConfig  # assume extracted from your base model
 
 import uuid
@@ -42,6 +43,7 @@ class MainControlExtension(AsyncExtension):
         self.sentence_fragment: str = ""
         self.turn_id: int = 0
         self.session_id: str = "0"
+        self._interrupt_gate = InterruptGate()
 
     def _current_metadata(self) -> dict:
         return {"session_id": self.session_id, "turn_id": self.turn_id}
@@ -86,7 +88,7 @@ class MainControlExtension(AsyncExtension):
         stream_id = int(self.session_id)
         if not event.text:
             return
-        if event.final or len(event.text) > 2:
+        if self._interrupt_gate.should_interrupt(event.text, event.final):
             await self._interrupt()
         if event.final:
             self.turn_id += 1
