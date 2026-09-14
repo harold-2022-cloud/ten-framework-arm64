@@ -55,6 +55,11 @@ Two consequences worth internalising before writing code:
 The Go server binds every interface (`http_server.go:900`, `r.Run(":"+Port)`),
 so a phone on the same LAN can reach it.
 
+**8080 is the default, not a guarantee.** It comes from `SERVER_PORT` in
+`ai_agents/.env`, and one deployment has to move it: see [Running the board's
+own LLM](#running-the-boards-own-llm). Read the port out of `.env` rather than
+hardcoding it.
+
 ## The HTTP API
 
 Routes are registered in `ai_agents/server/internal/http_server.go:884-893`.
@@ -358,6 +363,119 @@ Partials from one speaker overwrite each other until one arrives with
 
 The full working parser is `playground/src/manager/rtc/rtc.ts:174-307`.
 
+## Running the board's own LLM
+
+The Ambarella AI Developer Kit (N1-655) ships an on-board LLM demo server, and
+`voice_assistant_soniox_ambarella_llm` routes the `llm` node to it instead of
+to OpenAI. Everything else in that graph — transport, ASR, TTS, connections —
+is identical to `voice_assistant_soniox`.
+
+Two things change for the client, and nothing else. Agora credentials, channel
+naming, joining, audio and transcript parsing are all unaffected: swapping the
+provider only touches the board.
+
+### 1. The API server moves off 8080
+
+The board's LLM demo server listens on 8080 and cannot be moved:
+`run_llm_demo.sh` takes `ip`, `run_mode`, `model_type`, `bsize`, `model_path`
+and `max_user`, and no port option. `ai_agents/.env` also defaults
+`SERVER_PORT` to 8080, and the Go server binds `0.0.0.0`, which takes the port
+on loopback too — so whichever starts second fails to bind, silently leaving
+`/start` unreachable.
+
+Move the TEN server, not the board's:
+
+```
+SERVER_PORT=8081
+AGENT_SERVER_URL=http://localhost:8081
+```
+
+Every call the client makes — `/start`, `/token/generate`, `/ping`, `/stop` —
+goes to the new port. Confirm with:
+
+```bash
+ss -lntp | grep -E ':3000|:808[0-9]|:49483'
+```
+
+`api` on 8081, `test_llm` on 8080, `next-server` on 3000, `tman` on 49483.
+
+### 2. The graph name
+
+```json
+{ "graph_name": "voice_assistant_soniox_ambarella_llm" }
+```
+
+### One session at a time, held for 180 seconds
+
+`run_llm_demo.sh` is documented with `--max_user 1`. The board treats each
+distinct `Session-Id` as a distinct user, allows exactly one, and keeps a used
+session for **180 seconds** after its last request before freeing it. Exceeding
+that logs
+
+```
+[ERR] current user num (2) > max_user_num (1), please wait 180s ...
+[ERR] handle_request_from_post fail
+```
+
+to `/tmp/log.txt` and closes the connection **with no HTTP response at all**,
+which surfaces client-side as an empty reply rather than an error.
+
+The extension generates one id per instance and reuses it across turns, so a
+running agent stays within the budget. The trap is restarting: a fresh worker
+draws a new id while the previous session is still held, and every inference
+fails until it expires. Either wait it out, or pin `session_id` on the `llm`
+node so restarts reuse one session.
+
+`Session-Id` must be a **non-zero decimal integer** — the board parses it
+numerically, and a non-numeric value becomes zero and is refused the same
+silent way.
+
+### Reasoning in the reply
+
+`deepseek_7B` is an R1 distill and reasons before answering. A **non-streaming**
+reply arrives as
+
+```
+<reasoning>
+</think>
+
+<answer>
+```
+
+— the closing tag with no opening one, because generation begins inside the
+block. **Streaming replies carry no reasoning at all**, and the extension
+streams by default, so this does not normally reach TTS; the extension strips
+it on the non-streaming path regardless.
+
+Streaming is SSE with one character per event and a bare-text payload, not
+JSON:
+
+```
+data: 您
+
+data: 好
+
+```
+
+The graph pins `response_format` to `sse` rather than sniffing it.
+
+### Bringing the board's LLM up
+
+```bash
+cd /usr/share/ambarella/llm_demo/
+./run_llm_demo.sh --run_mode start --model_type 9 \
+    --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+```
+
+The first load after boot takes up to 80 s; the board is ready once
+`/tmp/log.txt` shows `Device ENABLE`. The LLM demo and the LLaVA demo cannot
+run at the same time — they share a library that does not support it.
+
+`ai_agents/agents/scripts/diagnose_ambarella_llm.sh` checks all of the above
+without changing anything: ports, backend processes, model readiness, and a
+ladder of requests that each vary one thing, reporting what the server logged
+for each.
+
 ## Keeping the worker alive
 
 `worker_common.go:148-159`:
@@ -511,3 +629,4 @@ From `ai_agents/server/internal/code.go:10-27`. Values are strings.
 - [`arm64_build.md`](./arm64_build.md) — building `agora_rtc` for aarch64
 - `ai_agents/server/internal/http_server.go` — the API implementation
 - `ai_agents/agents/examples/voice-assistant/tenapp/property.json` — the graphs
+- `ai_agents/agents/scripts/diagnose_ambarella_llm.sh` — on-board LLM diagnostic
