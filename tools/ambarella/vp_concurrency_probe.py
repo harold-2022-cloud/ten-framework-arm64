@@ -136,7 +136,9 @@ async def infer(
         ) from err
 
 
-def _llm_request(url: str, model_type: int, prompt: str) -> Tuple[bool, str]:
+def _llm_request(
+    url: str, model_type: int, prompt: str, timeout_s: float
+) -> Tuple[bool, str]:
     """POST one prompt and reassemble the streamed reply. Blocking on purpose.
 
     Called through asyncio.to_thread so it can run while a daemon inference is
@@ -159,7 +161,7 @@ def _llm_request(url: str, model_type: int, prompt: str) -> Tuple[bool, str]:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             body = resp.read().decode("utf-8", errors="replace")
     except (urllib.error.URLError, OSError) as err:
         # A refusal closes the connection with no HTTP response at all, so
@@ -180,12 +182,21 @@ def _llm_request(url: str, model_type: int, prompt: str) -> Tuple[bool, str]:
 
 
 async def llm_infer(
-    url: str, model_type: int, prompt: str, label: str
+    url: str,
+    model_type: int,
+    prompt: str,
+    label: str,
+    timeout_s: float,
 ) -> InferResult:
+    """One LLM turn. `label` names the phase, so a failure says where."""
     started = time.monotonic()
-    ok, detail = await asyncio.to_thread(_llm_request, url, model_type, prompt)
+    ok, detail = await asyncio.to_thread(
+        _llm_request, url, model_type, prompt, timeout_s
+    )
     elapsed = time.monotonic() - started
-    return elapsed, ("OK " + detail[:60]) if ok else ("ERR " + detail[:120])
+    if ok:
+        return elapsed, "OK " + detail[:60]
+    return elapsed, f"ERR [{label}] " + detail[:120]
 
 
 async def _read_terminal_line(proc: Process, started: float) -> InferResult:
@@ -282,6 +293,20 @@ def parse_args() -> argparse.Namespace:
         "serves one session at a time",
     )
     parser.add_argument(
+        "--llm-timeout-s",
+        type=float,
+        default=120.0,
+        help="seconds to wait for one LLM generation, default 120.0. A turn "
+        "takes 5-14s alone on an N1-655; the headroom is for contention",
+    )
+    parser.add_argument(
+        "--llm-probe-timeout-s",
+        type=float,
+        default=30.0,
+        help="seconds to wait for the residency check, default 30.0. Short on "
+        "purpose: it only asks whether the server answers at all",
+    )
+    parser.add_argument(
         "--skip-llm",
         action="store_true",
         help="probe asr_d and tts_d only, for a board where the LLM demo is "
@@ -363,8 +388,11 @@ async def run_probe(
     # ---------------------------------------------------------------- phase 1
     print("=== 1. Residency")
     print("  the LLM is expected to be already resident, served over HTTP")
+    # Fail fast here. This request only asks whether the server answers at
+    # all, and waiting a full generation timeout to learn that it does not is
+    # the difference between a useful diagnostic and a stalled one.
     elapsed, line = await llm_infer(
-        llm_url, args.model_type, "Hi", "residency llm"
+        llm_url, args.model_type, "Hi", "residency", args.llm_probe_timeout_s
     )
     if line.startswith("ERR"):
         print(f"  llm: {line}")
@@ -424,6 +452,7 @@ async def run_probe(
                     args.model_type,
                     f"Say hello, attempt {index}.",
                     "baseline llm",
+                    args.llm_timeout_s,
                 ),
             )
     print("  done\n")
@@ -461,6 +490,7 @@ async def run_probe(
                         args.model_type,
                         f"Count to five, attempt {index}.",
                         "overlap llm",
+                        args.llm_timeout_s,
                     ),
                 ),
                 tagged(
@@ -504,6 +534,7 @@ async def run_probe(
                         args.model_type,
                         f"Name three colours, attempt {index}.",
                         "overlap llm",
+                        args.llm_timeout_s,
                     ),
                 ),
                 tagged(
@@ -525,6 +556,7 @@ async def run_probe(
                         args.model_type,
                         f"Describe the sky, attempt {index}.",
                         "three-way llm",
+                        args.llm_timeout_s,
                     ),
                 ),
                 tagged(
