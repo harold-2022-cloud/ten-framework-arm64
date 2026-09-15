@@ -29,6 +29,7 @@ from .config import SherpaOnnxTTSConfig
 from .const import (
     CALLBACK_CONTINUE,
     CALLBACK_STOP,
+    FRAME_MS,
     LOG_CATEGORY_KEY_POINT,
     LOG_CATEGORY_VENDOR,
 )
@@ -189,6 +190,13 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
         loop = asyncio.get_running_loop()
         source_rate = int(engine.sample_rate)
         target_rate = int(self.config.output_sample_rate)
+        # The base class turns each yield into one AudioFrame, so the size of
+        # a yield is the size of a frame. A sentence is seconds of audio and
+        # would make one of a few hundred kilobytes; the rest of the pipeline
+        # is built around 20 ms. Framing here also bounds barge-in: without
+        # it, a sentence already synthesised is delivered whole however late
+        # the interruption arrives.
+        frame_bytes = max(2, target_rate * 2 * FRAME_MS // 1000)
         failure: list = []
 
         def on_chunk(samples: np.ndarray, _progress: float) -> int:
@@ -219,13 +227,25 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
         worker = loop.run_in_executor(None, synthesise)
+        # Sentences do not divide evenly into frames; the remainder waits
+        # here for the next sentence rather than being padded or dropped,
+        # either of which would be audible over a long reply.
+        pending = bytearray()
         try:
             while True:
                 pcm = await queue.get()
-                if pcm is None or self._is_cancelled:
+                if pcm is None:
                     break
-                if pcm:
-                    yield pcm, TTS2HttpResponseEventType.RESPONSE
+                pending.extend(pcm)
+                while len(pending) >= frame_bytes and not self._is_cancelled:
+                    yield bytes(
+                        pending[:frame_bytes]
+                    ), TTS2HttpResponseEventType.RESPONSE
+                    del pending[:frame_bytes]
+                if self._is_cancelled:
+                    break
+            if pending and not self._is_cancelled:
+                yield bytes(pending), TTS2HttpResponseEventType.RESPONSE
         finally:
             # Whoever stops reading stops the synthesis: a consumer that
             # breaks out of this generator would otherwise leave a thread

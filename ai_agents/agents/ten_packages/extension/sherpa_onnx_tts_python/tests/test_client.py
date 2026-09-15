@@ -291,3 +291,62 @@ async def test_metadata_reports_the_voice_and_speaker():
 
     assert metadata["speaker_id"] == 3
     assert "zh" in metadata["voice"]
+
+
+# --- Frame sizing ----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_sentence_is_yielded_as_frames_not_in_one_piece():
+    """The base class makes one AudioFrame per yield, whatever its size.
+
+    A sentence is seconds of audio; handed over whole it becomes a single
+    frame of a few hundred kilobytes, where the rest of the pipeline is built
+    around 20 ms ones.
+    """
+    engine = FakeEngine(
+        sample_rate=16000, num_chunks=1, samples_per_chunk=16000
+    )
+    events = await drain(make_client(engine, output_sample_rate=16000))
+
+    frames = [
+        chunk
+        for chunk, kind in events
+        if kind == TTS2HttpResponseEventType.RESPONSE
+    ]
+    # One second of 16 kHz PCM16 is fifty 20 ms frames of 640 bytes.
+    assert len(frames) == 50
+    assert {len(f) for f in frames} == {640}
+
+
+@pytest.mark.asyncio
+async def test_a_partial_frame_is_carried_into_the_next_sentence():
+    """Sentences do not divide evenly into 20 ms. The remainder is not lost."""
+    engine = FakeEngine(sample_rate=16000, num_chunks=2, samples_per_chunk=500)
+    events = await drain(make_client(engine, output_sample_rate=16000))
+
+    pcm = audio_of(events)
+    # 1000 samples over two sentences: three whole frames, and the last 40
+    # samples flushed at the end rather than dropped.
+    assert len(pcm) == 1000 * 2
+
+
+@pytest.mark.asyncio
+async def test_barge_in_stops_within_a_sentence_already_synthesised():
+    """Stopping the engine is not enough once a long sentence is in hand."""
+    engine = FakeEngine(
+        sample_rate=16000, num_chunks=1, samples_per_chunk=16000
+    )
+    client = make_client(engine, output_sample_rate=16000)
+
+    frames = 0
+    async for _, kind in client.get("你好", "req-1"):
+        if kind == TTS2HttpResponseEventType.RESPONSE:
+            frames += 1
+            if frames == 3:
+                await client.cancel()
+
+    assert frames == 3, (
+        "the whole second of audio was delivered after cancellation; a "
+        "barge-in during a long sentence would keep talking over the user"
+    )

@@ -22,3 +22,8 @@ LOG_CATEGORY_VENDOR = "vendor"
 # after its first sentence.
 CALLBACK_STOP = 0
 CALLBACK_CONTINUE = 1
+
+# One yield becomes one AudioFrame, so this is the frame length the pipeline
+# sees. 20 ms is what the rest of the chain is built around, and it also
+# bounds how much already-synthesised audio a barge-in has to talk over.
+FRAME_MS = 20

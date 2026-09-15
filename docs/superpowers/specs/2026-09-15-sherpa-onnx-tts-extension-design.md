@@ -93,27 +93,37 @@ rate conversion is on the path from the start rather than deferred.
    first sentence: measured at 1.91 s against a 10.03 s total, roughly a fifth
    of the wait. Splitting text ourselves would not improve on this, which is
    the other half of why long-text splitting is out of scope.
-8. Empty or whitespace-only text yields no audio and does not reach the
+8. **Each yield becomes one `AudioFrame`**, so audio is handed over in 20 ms
+   frames rather than a sentence at a time. A sentence is seconds long; whole,
+   it would make a single frame of a few hundred kilobytes. The remainder of a
+   sentence that does not divide evenly waits for the next one rather than
+   being padded or dropped.
+9. Empty or whitespace-only text yields no audio and does not reach the
    engine. `main_control` sends an empty string to close a turn
    (`main_python/extension.py:185`), so this is a normal event, not an error.
 
 ### Interruption
 
-9. Barge-in stops generation rather than discarding its result: the callback
-   returns **zero** to stop and non-zero to continue, which ends `generate()`
-   early. The model stays loaded -- reloading costs 2.0 s.
+10. Barge-in stops generation rather than discarding its result: the callback
+    returns **zero** to stop and non-zero to continue, which ends `generate()`
+    early. The model stays loaded -- reloading costs 2.0 s.
 
-   This is the reverse of what `generate()`'s own docstring states ("Return a
-   non-zero value to stop generation early"), measured against sherpa-onnx
-   1.13.8. Believing the docstring truncates every reply to its first
-   sentence, silently and without error. A test pins the polarity against the
-   installed library so a version that flips it fails the suite instead of
-   mangling speech on the board.
+    This is the reverse of what `generate()`'s own docstring states ("Return a
+    non-zero value to stop generation early"), measured against sherpa-onnx
+    1.13.8. Believing the docstring truncates every reply to its first
+    sentence, silently and without error. A test pins the polarity against the
+    installed library so a version that flips it fails the suite instead of
+    mangling speech on the board.
+
+    Stopping the engine is necessary but not sufficient: a sentence already
+    synthesised is still in hand, so the frame loop checks the same flag
+    between frames. Without that, a barge-in arriving early in a long sentence
+    would still talk over the user for the rest of it.
 
 ### Lifecycle
 
-10. The model loads once and is released on stop.
-11. Loading is warmed in the background so the first sentence does not pay
+11. The model loads once and is released on stop.
+12. Loading is warmed in the background so the first sentence does not pay
     for it, following `ambarella_tts_python`, whose warm-up races its own
     teardown if the two are not drained in order.
 
