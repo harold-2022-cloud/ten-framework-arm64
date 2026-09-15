@@ -15,6 +15,12 @@ Verified on the board on 2026-09-15: sherpa-onnx transcribes at a real-time
 factor of 0.2 on one thread, and Piper synthesises both languages. Neither
 opens `/dev/cavalry`.
 
+The Mandarin voice, measured on the board the same day at one thread: it loads
+in 2.0 s, emits 22050 Hz, and synthesises at a real-time factor of 0.34 to
+0.38 -- about three times faster than playback. The factor is flat from 3
+characters to 57, so cost is linear in text length and splitting long text
+buys no throughput.
+
 This spec covers TTS only. ASR stays on soniox for now, so a failure in the
 resulting graph isolates to the one node that changed.
 
@@ -82,7 +88,11 @@ rate conversion is on the path from the start rather than deferred.
 6. **`generate()` must not run on the event loop.** It is a synchronous C++
    call; it runs in a worker thread.
 7. Audio is emitted in chunks as it is produced, through `generate()`'s
-   callback, rather than accumulated and cut up afterwards.
+   callback, rather than accumulated and cut up afterwards. The engine calls
+   back once per sentence, so a multi-sentence reply starts playing after its
+   first sentence: measured at 1.91 s against a 10.03 s total, roughly a fifth
+   of the wait. Splitting text ourselves would not improve on this, which is
+   the other half of why long-text splitting is out of scope.
 8. Empty or whitespace-only text yields no audio and does not reach the
    engine. `main_control` sends an empty string to close a turn
    (`main_python/extension.py:185`), so this is a normal event, not an error.
@@ -90,8 +100,15 @@ rate conversion is on the path from the start rather than deferred.
 ### Interruption
 
 9. Barge-in stops generation rather than discarding its result: the callback
-   returns non-zero, which ends `generate()` early. The model stays loaded --
-   reloading costs seconds.
+   returns **zero** to stop and non-zero to continue, which ends `generate()`
+   early. The model stays loaded -- reloading costs 2.0 s.
+
+   This is the reverse of what `generate()`'s own docstring states ("Return a
+   non-zero value to stop generation early"), measured against sherpa-onnx
+   1.13.8. Believing the docstring truncates every reply to its first
+   sentence, silently and without error. A test pins the polarity against the
+   installed library so a version that flips it fails the suite instead of
+   mangling speech on the board.
 
 ### Lifecycle
 
@@ -119,7 +136,9 @@ engine's, not ours. There is no subprocess.
 - English. Mandarin first; a second language is either a second node or the
   bilingual model, and that choice is better made after the first one is
   heard on the board.
-- Long-text splitting. The engine has no length limit that requires it.
+- Long-text splitting. The engine has no length limit that requires it,
+  synthesis cost is linear in length, and the per-sentence callback already
+  delivers the first audio early.
 
 ## Testing
 
@@ -127,6 +146,11 @@ Unit tests cover what does not need a model: rate conversion, text
 sanitising, empty input, and that cancellation stops generation rather than
 discarding output. Synthesis itself is exercised on the board, where the
 voices are.
+
+One test does need the library but not a voice: the callback polarity in
+behaviour 9. It is the one contract this adapter takes from sherpa-onnx that
+the documentation gets wrong, and its failure mode -- speech cut off after one
+sentence -- is not one a reader of the code would suspect.
 
 The rate conversion uses `resample_poly`, whose FIR anti-aliasing filter
 matters here: this is a downsample, and without it the 8-11 kHz content folds
