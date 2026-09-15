@@ -14,3 +14,11 @@ DEFAULT_NUM_THREADS = 1
 
 LOG_CATEGORY_KEY_POINT = "key_point"
 LOG_CATEGORY_VENDOR = "vendor"
+
+# generate()'s callback steers the synthesis through its return value, and the
+# polarity is the reverse of what its docstring states: zero stops, non-zero
+# continues. Measured against sherpa-onnx 1.13.8. Named rather than written as
+# bare 0 and 1 because the wrong one is silent -- every reply simply ends
+# after its first sentence.
+CALLBACK_STOP = 0
+CALLBACK_CONTINUE = 1

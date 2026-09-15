@@ -1,0 +1,7 @@
+{
+    "voice_dir": "/home/lychee/piper_tts/vits/vits-piper-zh_CN-huayan-medium",
+    "output_sample_rate": 16000,
+    "num_threads": 1,
+    "speed": 1.0,
+    "speaker_id": 0
+}
