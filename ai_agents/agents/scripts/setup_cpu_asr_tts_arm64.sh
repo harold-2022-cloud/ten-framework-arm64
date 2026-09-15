@@ -77,6 +77,19 @@ if [[ "$FROM_SOURCE" -eq 1 ]]; then
     have "$t" || die "$t is required for --from-source"
   done
   ok "git, cmake, g++, make present"
+
+  # Piper links with -static-libstdc++, so it needs the static archive, not
+  # the shared library that g++ alone brings. Missing, the linker reports
+  # "cannot find -lstdc++" -- indistinguishable from libstdc++-devel being
+  # absent, which sends you installing a package that is already there.
+  STATIC_LIBSTDCXX="$(g++ -print-file-name=libstdc++.a)"
+  if [[ "$STATIC_LIBSTDCXX" == "libstdc++.a" || ! -f "$STATIC_LIBSTDCXX" ]]; then
+    die "libstdc++.a is missing, and piper links -static-libstdc++ against it.
+  On Fedora it is in libstdc++-static, which libstdc++-devel does NOT include:
+    sudo dnf install libstdc++-static
+  Debian and Ubuntu carry it inside libstdc++-<version>-dev."
+  fi
+  ok "libstdc++.a at $STATIC_LIBSTDCXX"
 else
   ok "wget, tar present (prebuilt mode needs no toolchain)"
 fi
@@ -184,10 +197,18 @@ if [[ "$FROM_SOURCE" -eq 1 ]]; then
   rm -rf "$SRC/lib/Linux-aarch64"; mkdir -p "$SRC/lib/Linux-aarch64"
   cp -a "$TTS_ROOT/deps/onnxruntime-linux-aarch64-$ORT_VER/include" "$SRC/lib/Linux-aarch64/"
   cp -a "$TTS_ROOT/deps/onnxruntime-linux-aarch64-$ORT_VER/lib"     "$SRC/lib/Linux-aarch64/"
+  # ExternalProject stamps survive a failed build, so a second run reports
+  # "Built target piper_phonemize_external" and links against libraries that
+  # were never produced. Trust the artifacts, not the stamps.
+  if [[ -d "$SRC/build" ]] && ! ls "$SRC/build/pi/lib/"libpiper_phonemize* >/dev/null 2>&1; then
+    warn "a previous build left no libpiper_phonemize; discarding build/"
+    rm -rf "$SRC/build"
+  fi
+
   step "cmake build"
   ( cd "$SRC" \
     && cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$TTS_ROOT/install" \
-    && cmake --build build -j"$(nproc)" \
+    && cmake --build build --target piper -j"$(nproc)" \
     && cmake --install build ) || die "piper build failed"
   PIPER_HOME="$TTS_ROOT/install/bin"
 else
