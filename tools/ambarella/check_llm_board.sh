@@ -110,15 +110,45 @@ sec "3. The model artifacts"
 guide "tar xvf ~/demo_resources/models/Deepseek-R1-Distill-Qwen/n1-655_deepseek_r1_distill_qwen_7B_1NVP.tar"
 guide "    -C ~/demo_resources/llm_demo/deepseek_7B"
 if [[ -d "$GUIDE_MODEL_DIR" ]]; then
-  found "$GUIDE_MODEL_DIR exists, $(du -sh "$GUIDE_MODEL_DIR" 2>/dev/null | cut -f1)"
+  found "$GUIDE_MODEL_DIR exists"
+  # du does not follow symlinks, and this directory's weights are links into
+  # ~/demo_resources/models -- which is why a plain du -sh reports a few
+  # kilobytes for a 5 GB model and reads like a failed extraction. Count both
+  # sides, and resolve the links so the real bytes are named.
+  links=$(find "$GUIDE_MODEL_DIR" -type l 2>/dev/null | wc -l)
+  files=$(find "$GUIDE_MODEL_DIR" -type f 2>/dev/null | wc -l)
+  on_disk=$(du -sh "$GUIDE_MODEL_DIR" 2>/dev/null | cut -f1)
+  resolved=$(find -L "$GUIDE_MODEL_DIR" -type f -printf '%s\n' 2>/dev/null |
+    awk '{total += $1} END {
+      if (total > 1073741824) printf "%.1f GB", total / 1073741824;
+      else if (total > 1048576) printf "%.1f MB", total / 1048576;
+      else printf "%d B", total
+    }')
+  found "   $files files, $links symlinks, ${on_disk:-?} on disk here"
+  found "   ${resolved:-unknown} once the symlinks are followed"
+  if [[ "$links" -gt 0 ]]; then
+    target=$(find "$GUIDE_MODEL_DIR" -type l -exec readlink -f {} \; 2>/dev/null |
+      head -1)
+    [[ -n "$target" ]] && found "   links point into $(dirname "$target")"
+  fi
+  # A link whose target is gone reads as present to -e but loads as nothing.
+  MODEL_OK=1
+  broken=$(find "$GUIDE_MODEL_DIR" -xtype l 2>/dev/null | wc -l)
+  if [[ "$broken" -gt 0 ]]; then
+    diff_ "$broken broken symlink(s) -- the target is missing"
+    MODEL_OK=0
+  fi
   for required in weights tokenizer.json model_desc.json; do
     if [[ -e "$GUIDE_MODEL_DIR/$required" ]]; then
       found "   $required present"
     else
       diff_ "$required missing from $GUIDE_MODEL_DIR"
+      MODEL_OK=0
     fi
   done
-  same
+  # Only after every check above, or the section would contradict itself by
+  # reporting a broken link and then a match.
+  [[ "$MODEL_OK" -eq 1 ]] && same
 else
   found "$GUIDE_MODEL_DIR does not exist"
   diff_ "the model was never extracted, or went somewhere else"
@@ -214,7 +244,11 @@ if [[ $DO_REQUEST -eq 1 ]]; then
     -H "Stream-Off: 1" -H "Reset-En: 1" \
     --data "Hello" --output "$OUT"
   rc=$?
-  found "curl exit $rc, $(wc -c < "$OUT" 2>/dev/null || echo 0) bytes"
+  # curl writes no output file at all when the connection fails, so reading
+  # it unguarded printed a shell error on top of the failure being reported.
+  bytes=0
+  [[ -f "$OUT" ]] && bytes=$(wc -c < "$OUT" 2>/dev/null || echo 0)
+  found "curl exit $rc, $bytes bytes"
   [[ $rc -eq 0 ]] && same || diff_ "the guide's own example does not complete"
 
   python3 - "$GUIDE_URL" <<'PYEOF'
