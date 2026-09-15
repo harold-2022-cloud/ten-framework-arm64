@@ -29,14 +29,25 @@ ORT_VER="1.16.3"
 # monolingual models are smaller but would need switching per utterance.
 ASR_MODEL="sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
 
-FROM_SOURCE=0
+# Separate, because the two build very differently on this board: sherpa-onnx
+# compiles cleanly, while piper wants a static libstdc++ that Fedora ships in
+# a package conflicting with the vendor's patched gcc.
+ASR_SOURCE=0
+TTS_SOURCE=0
 FORCE=0
 for arg in "$@"; do
   case "$arg" in
-    --from-source) FROM_SOURCE=1 ;;
-    --force)       FORCE=1 ;;
+    --from-source)     ASR_SOURCE=1; TTS_SOURCE=1 ;;
+    --asr-from-source) ASR_SOURCE=1 ;;
+    --tts-from-source) TTS_SOURCE=1 ;;
+    --force)           FORCE=1 ;;
     -h|--help)
-      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+      echo
+      echo "  --from-source      build both from source"
+      echo "  --asr-from-source  build only sherpa-onnx from source"
+      echo "  --tts-from-source  build only piper from source"
+      echo "  --force            redo a step already done"
       exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -72,12 +83,15 @@ say "0. Preflight"
 ok "aarch64"
 
 for t in wget tar; do have "$t" || die "$t is required"; done
-if [[ "$FROM_SOURCE" -eq 1 ]]; then
+if [[ "$ASR_SOURCE" -eq 1 || "$TTS_SOURCE" -eq 1 ]]; then
   for t in git cmake g++ make; do
     have "$t" || die "$t is required for --from-source"
   done
   ok "git, cmake, g++, make present"
 
+fi
+
+if [[ "$TTS_SOURCE" -eq 1 ]]; then
   # Piper links with -static-libstdc++, so it needs the static archive, not
   # the shared library that g++ alone brings. Missing, the linker reports
   # "cannot find -lstdc++" -- indistinguishable from libstdc++-devel being
@@ -85,9 +99,12 @@ if [[ "$FROM_SOURCE" -eq 1 ]]; then
   STATIC_LIBSTDCXX="$(g++ -print-file-name=libstdc++.a)"
   if [[ "$STATIC_LIBSTDCXX" == "libstdc++.a" || ! -f "$STATIC_LIBSTDCXX" ]]; then
     die "libstdc++.a is missing, and piper links -static-libstdc++ against it.
-  On Fedora it is in libstdc++-static, which libstdc++-devel does NOT include:
-    sudo dnf install libstdc++-static
-  Debian and Ubuntu carry it inside libstdc++-<version>-dev."
+  Fedora keeps it in libstdc++-static, which libstdc++-devel does NOT include.
+  On an Ambarella board that package conflicts with the vendor's patched gcc
+  (14.3.1-N.lch2025 against 14.3.1-N.fc41), and forcing it risks the
+  toolchain the rest of the board depends on.
+  Use the prebuilt Piper instead -- drop --tts-from-source, or pass
+  --asr-from-source to build only sherpa-onnx."
   fi
   ok "libstdc++.a at $STATIC_LIBSTDCXX"
 else
@@ -112,7 +129,7 @@ mkdir -p "$ASR_ROOT"/{dl,models} "$TTS_ROOT"/{dl,voices/en,voices/zh}
 # ------------------------------------------------------------------ 1
 say "1. ASR engine (sherpa-onnx $SHERPA_VER)"
 SHERPA_BIN=""
-if [[ "$FROM_SOURCE" -eq 1 ]]; then
+if [[ "$ASR_SOURCE" -eq 1 ]]; then
   SRC="$ASR_ROOT/src/sherpa-onnx"
   if [[ ! -d "$SRC" || "$FORCE" -eq 1 ]]; then
     rm -rf "$SRC"; mkdir -p "$ASR_ROOT/src"
@@ -180,7 +197,7 @@ ok "joiner  $(basename "$JOINER")"
 
 # ------------------------------------------------------------------ 3
 say "3. TTS engine (Piper $PIPER_VER)"
-if [[ "$FROM_SOURCE" -eq 1 ]]; then
+if [[ "$TTS_SOURCE" -eq 1 ]]; then
   SRC="$TTS_ROOT/src/piper"
   if [[ ! -d "$SRC" || "$FORCE" -eq 1 ]]; then
     rm -rf "$SRC"; mkdir -p "$TTS_ROOT/src"
