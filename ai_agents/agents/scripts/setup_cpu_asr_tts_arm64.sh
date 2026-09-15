@@ -137,6 +137,9 @@ if [[ "$ASR_SOURCE" -eq 1 ]]; then
     git clone --depth 1 --branch "$SHERPA_VER" \
       https://github.com/k2-fsa/sherpa-onnx.git "$SRC" || die "clone failed"
   fi
+  if [[ -x "$ASR_ROOT/install/bin/sherpa-onnx" && "$FORCE" -eq 0 ]]; then
+    ok "already built; pass --force to rebuild"
+  else
   step "cmake + make (this pulls ONNX Runtime from GitHub, and takes a while)"
   mkdir -p "$SRC/build"
   ( cd "$SRC/build" && cmake \
@@ -150,6 +153,7 @@ if [[ "$ASR_SOURCE" -eq 1 ]]; then
       -DSHERPA_ONNX_ENABLE_PORTAUDIO=ON \
       -DCMAKE_INSTALL_PREFIX="$ASR_ROOT/install" .. \
     && make -j"$(nproc)" && make install ) || die "sherpa-onnx build failed"
+  fi
   SHERPA_HOME="$ASR_ROOT/install"
 else
   TARBALL="$ASR_ROOT/dl/sherpa-onnx-$SHERPA_VER-linux-aarch64-shared-cpu.tar.bz2"
