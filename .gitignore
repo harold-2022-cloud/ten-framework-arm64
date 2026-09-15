@@ -150,8 +150,10 @@ ai_agents/*.pem
 
 # ...but the built aarch64 packages are carried, so an arm64 board can install
 # them without a toolchain or an SDK download. *.so is ignored repo-wide, so
-# this path needs an explicit exception. Both lines are required: a negation
-# cannot re-include a file whose parent directory is still excluded.
+# this path needs an explicit exception -- and a second one in
+# ai_agents/agents/.gitignore, whose `lib/` rule sits nearer the files and so
+# wins over this one. In both places the directory has to be re-included
+# before its contents can be: git does not descend into an excluded directory.
 !/ai_agents/agents/prebuilt/
 !/ai_agents/agents/prebuilt/**
 
