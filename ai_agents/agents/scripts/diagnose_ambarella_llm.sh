@@ -33,6 +33,27 @@ kv()  { printf '  %-34s %s\n' "$1" "$2"; }
 
 # Collected for the verdict at the end.
 GO_PORT=""; LLM_OWNER=""; CLIENT_PROC=0; DEVICE_ENABLE=0
+
+# test_llm writes its log into the directory it was started from, so the path
+# is not fixed. Assuming /tmp/log.txt made this script report a model as
+# missing when it had only looked in the wrong place. Ask the running process
+# which files it has open, and fall back to its working directory.
+find_llm_log() {
+  local pid target cwd
+  for pid in $(pgrep -f test_llm 2>/dev/null); do
+    for target in $(ls -l "/proc/$pid/fd" 2>/dev/null | sed -n 's/.* -> //p'); do
+      case "$target" in
+        /*log.txt|/*.log) [[ -r "$target" ]] && { echo "$target"; return; } ;;
+      esac
+    done
+  done
+  for pid in $(pgrep -f test_llm 2>/dev/null); do
+    cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
+    [[ -r "$cwd/log.txt" ]] && { echo "$cwd/log.txt"; return; }
+  done
+  [[ -r /tmp/log.txt ]] && echo /tmp/log.txt
+}
+LLM_LOG="${AMBARELLA_LLM_LOG:-$(find_llm_log)}"
 declare -A RC BYTES
 
 sec "0. Context"
@@ -78,16 +99,20 @@ echo "    test_llm -d 1"
 echo "    test_llm_client --ip 127.0.0.1 --port 9005 -v 0 -m <model> --model-type N ..."
 
 # --------------------------------------------------------------- 3. model ready
-sec "3. Model readiness (/tmp/log.txt)"
-if [[ -r /tmp/log.txt ]]; then
-  MATCHES=$(grep -c 'Device ENABLE' /tmp/log.txt 2>/dev/null || echo 0)
+sec "3. Model readiness"
+kv "log" "${LLM_LOG:-<not found>}"
+if [[ -n "$LLM_LOG" && -r "$LLM_LOG" ]]; then
+  MATCHES=$(grep -c 'Device ENABLE' "$LLM_LOG" 2>/dev/null || echo 0)
   kv "'Device ENABLE' lines" "$MATCHES"
-  [[ "$MATCHES" -gt 0 ]] && DEVICE_ENABLE=1
-  grep 'Device ENABLE' /tmp/log.txt 2>/dev/null | tail -2 | sed 's/^/  /'
-  echo "  --- last 5 lines of /tmp/log.txt ---"
-  tail -5 /tmp/log.txt | sed 's/^/  /'
+  if [[ "$MATCHES" -gt 0 ]]; then DEVICE_ENABLE=1; else DEVICE_ENABLE=0; fi
+  grep 'Device ENABLE' "$LLM_LOG" 2>/dev/null | tail -2 | sed 's/^/  /'
+  echo "  --- last 5 lines ---"
+  tail -5 "$LLM_LOG" | sed 's/^/  /'
 else
-  echo "  /tmp/log.txt not readable"
+  # Unknown is not the same as absent, and reporting it as absent sends the
+  # reader looking for a model that may be loaded and fine.
+  DEVICE_ENABLE=-1
+  echo "  no readable log; set AMBARELLA_LLM_LOG to point at it"
 fi
 
 # --------------------------------------------------------------- 4. ten env
@@ -117,16 +142,16 @@ probe() {
   sleep "$SETTLE"
 
   local before=0
-  [[ -r /tmp/log.txt ]] && before=$(wc -l < /tmp/log.txt)
+  [[ -n "$LLM_LOG" && -r "$LLM_LOG" ]] && before=$(wc -l < "$LLM_LOG")
 
   curl -sS -X POST --url "$URL/" --max-time "$TIMEOUT" --output "$out" "$@"
   local rc=$?
 
-  if [[ -r /tmp/log.txt ]]; then
-    local after; after=$(wc -l < /tmp/log.txt)
+  if [[ -n "$LLM_LOG" && -r "$LLM_LOG" ]]; then
+    local after; after=$(wc -l < "$LLM_LOG")
     if [[ "$after" -gt "$before" ]]; then
-      echo "  --- /tmp/log.txt lines added by this request ---"
-      tail -n "$((after - before))" /tmp/log.txt | sed 's/^/    /'
+      echo "  --- log lines added by this request ---"
+      tail -n "$((after - before))" "$LLM_LOG" | sed 's/^/    /'
     else
       echo "  (the server logged nothing for this request)"
     fi
@@ -174,7 +199,7 @@ echo "Each probe changes exactly one thing from the one above it."
 #
 # Session-Id must be a DECIMAL INTEGER. The server parses it numerically and
 # rejects a zero: a non-numeric value logs "session_id=0 should not be 0" in
-# /tmp/log.txt and the connection closes with no HTTP response at all, which
+# the LLM's log and the connection closes with no HTTP response at all, which
 # curl reports as (52) Empty reply from server.
 probe B1 "guide example verbatim (ASCII body, non-streaming)" \
   -H "Session-Id: $SESSION_ID" -H "Model-Type: $MODEL_TYPE" \
@@ -217,7 +242,11 @@ sec "6. Verdict"
 kv "Go API server"        "$([[ -n "$GO_PORT" ]] && echo "listening on $GO_PORT" || echo '**NOT RUNNING** -- /start will fail')"
 kv "port 8080 held by"    "${LLM_OWNER:-<nothing>}"
 kv "test_llm_client"      "$([[ $CLIENT_PROC -eq 1 ]] && echo present || echo '**MISSING**')"
-kv "Device ENABLE seen"   "$([[ $DEVICE_ENABLE -eq 1 ]] && echo yes || echo '**NO** -- model may still be loading')"
+case "$DEVICE_ENABLE" in
+  1)  kv "Device ENABLE seen" "yes" ;;
+  0)  kv "Device ENABLE seen" "**NO** -- model may still be loading" ;;
+  *)  kv "Device ENABLE seen" "unknown -- no log was found to read" ;;
+esac
 echo
 printf '  %-6s %-8s %-8s %s\n' probe exit bytes meaning
 for t in B1 B2 B3 B4 B5; do
@@ -233,9 +262,15 @@ echo "                  \"current user num (2) > max_user_num (1)\", a session i
 echo "                  still open; it is freed 180s after its last use."
 echo "                  Re-run with SETTLE=30 $0"
 echo
-echo "  Where the ladder first fails names the cause:"
+echo "  If EVERY probe failed with curl exit 8, curl is refusing to parse the
+  response rather than the server refusing to answer. curl will not show you
+  a response it rejects; this will:
+
+    python3 tools/ambarella/probe_llm_wire.py
+
+  Where the ladder first fails names the cause:"
 echo "    B1 -> the service itself, unrelated to TEN. Check test_llm_client above,"
-echo "          and grep /tmp/log.txt for the reason the request was refused."
+echo "          and grep the log above for the reason the request was refused."
 echo "    B2 -> multibyte body handling."
 echo "    B3 -> the Content-Type header at ambarella.py:123."
 echo "    B4 -> streaming specifically; non-streaming would still work."
