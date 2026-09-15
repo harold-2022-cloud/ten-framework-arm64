@@ -319,6 +319,12 @@ export SHERPA_ONNX_JOINER="$JOINER"
 export PIPER_BIN="$PIPER_BIN"
 export PIPER_VOICE_EN="$TTS_ROOT/voices/en/en_US-lessac-medium.onnx"
 export PIPER_VOICE_ZH="$TTS_ROOT/voices/zh/zh_CN-huayan-medium.onnx"
+# Measured on an N1-655 (4 cores) against a 3 s clip: 0.61 s on one thread,
+# 0.53 s on two, 0.73 s on four -- the model is small enough that four
+# oversubscribe. Two is fastest by 13%, and one is the better default anyway:
+# the same four cores also carry piper, the LLM server, the TEN runtime and
+# the Go server, and an RTF of 0.2 is already five times faster than realtime.
+export SHERPA_ONNX_NUM_THREADS=1
 export LD_LIBRARY_PATH="$SHERPA_HOME/lib:$PIPER_HOME:\${LD_LIBRARY_PATH:-}"
 EOF
 ok "$ENVFILE"
