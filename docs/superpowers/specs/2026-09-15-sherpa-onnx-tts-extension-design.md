@@ -39,12 +39,25 @@ rather than from Hugging Face directly: `OfflineTtsVitsModelConfig` wants
 `tokens` and `data_dir` (espeak-ng data), which the raw `.onnx` +
 `.onnx.json` pair on Hugging Face does not carry.
 
-| Voice | Bundle | Rate |
-| --- | --- | --- |
-| Mandarin | `vits-piper-zh_CN-huayan-medium` | 22050 Hz |
-| English | `vits-piper-en_US-lessac-medium` | 22050 Hz |
+| Voice | Bundle | Size | Rate |
+| --- | --- | --- | --- |
+| Mandarin | `vits-piper-zh_CN-huayan-medium` | 67 MB | 22050 Hz |
+| Mandarin + English | `vits-melo-tts-zh_en` | 167 MB | 44100 Hz |
 
-English also has 16000 Hz voices (`-low`, `-x_low`); Mandarin does not.
+A Piper voice speaks one language: the VITS models are trained per language,
+which is the architecture rather than an oversight. One voice carrying both
+is available -- `vits-melo-tts-zh_en` -- and because it is also a VITS model
+it loads through the same `OfflineTtsVitsModelConfig`. Moving to it is a path
+change, not a code change. Its speed on this board is unmeasured, and it is
+two and a half times the size, so Mandarin alone comes first.
+
+The multilingual alternatives that are *not* VITS are out of scope: Matcha
+(`matcha-icefall-zh-en`, 79 MB) needs a separate vocoder file, and Kokoro
+(`kokoro-int8-multi-lang-v1_1`, 147 MB) needs per-language lexicons. Both use
+a different config class.
+
+English also has 16000 Hz voices (`-low`, `-x_low`); Mandarin does not, so
+rate conversion is on the path from the start rather than deferred.
 
 ## Behaviour
 
@@ -101,10 +114,11 @@ engine's, not ours. There is no subprocess.
 ## Not in scope
 
 - ASR. `sherpa_onnx_asr_python` is a separate piece of work.
-- Choosing a voice per utterance. The decision was two graph nodes, one per
-  language, which puts the choice in `main_control` and needs a change to
-  `_send_to_tts`, whose destination is currently the literal `"tts"`. That
-  is the second step; the adapter itself is identical either way.
+- Anything but VITS. Supporting `OfflineTtsVitsModelConfig` alone covers both
+  the Mandarin voice this starts with and the bilingual one it can move to.
+- English. Mandarin first; a second language is either a second node or the
+  bilingual model, and that choice is better made after the first one is
+  heard on the board.
 - Long-text splitting. The engine has no length limit that requires it.
 
 ## Testing
