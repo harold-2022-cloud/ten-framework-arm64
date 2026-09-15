@@ -248,7 +248,44 @@ file -b "$PIPER_BIN" | grep -q 'ARM aarch64' || die "piper is not aarch64"
 ok "$PIPER_BIN"
 
 # ------------------------------------------------------------------ 4
-say "4. Piper voices"
+say "4. Piper voices, as sherpa-onnx repackages them"
+# The Hugging Face voice is an .onnx and an .onnx.json. sherpa-onnx's
+# OfflineTtsVitsModelConfig also wants tokens.txt and the espeak-ng data
+# directory, which only its own bundles carry -- same model, same voice,
+# different packaging. VOICES selects which to fetch; English alone is enough
+# to bring a graph up, and Mandarin has no 16 kHz option so it always needs
+# resampling.
+# Mandarin first: it is the language the board is being brought up in, and
+# swapping to the bilingual voice later is a path change rather than a code
+# change -- vits-melo-tts-zh_en uses the same OfflineTtsVitsModelConfig.
+VOICES="${VOICES:-zh}"
+declare -A VITS_BUNDLE=(
+  [en]="vits-piper-en_US-lessac-medium"
+  [zh]="vits-piper-zh_CN-huayan-medium"
+  # Mandarin and English in one VITS model, for when one voice has to carry
+  # both. Larger, and its speed on this board is unmeasured.
+  [zh_en]="vits-melo-tts-zh_en"
+)
+for lang in $VOICES; do
+  bundle="${VITS_BUNDLE[$lang]:-}"
+  [[ -n "$bundle" ]] || die "unknown voice '$lang' (known: ${!VITS_BUNDLE[*]})"
+  dest="$TTS_ROOT/vits/$bundle"
+  if [[ ! -d "$dest" || "$FORCE" -eq 1 ]]; then
+    arch="$TTS_ROOT/dl/$bundle.tar.bz2"
+    fetch "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$bundle.tar.bz2" "$arch"
+    mkdir -p "$TTS_ROOT/vits"
+    rm -rf "$dest"
+    step "extracting $bundle"
+    tar xf "$arch" -C "$TTS_ROOT/vits"
+  fi
+  for f in "$dest"/*.onnx "$dest/tokens.txt"; do
+    [[ -e "$f" ]] || die "$bundle is missing $(basename "$f")"
+  done
+  [[ -d "$dest/espeak-ng-data" ]] || warn "$bundle has no espeak-ng-data"
+  ok "$bundle"
+done
+
+say "4b. Piper binary voices (for the vendor document's own examples)"
 fetch "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx" \
       "$TTS_ROOT/voices/en/en_US-lessac-medium.onnx"
 fetch "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json" \
@@ -319,6 +356,9 @@ export SHERPA_ONNX_JOINER="$JOINER"
 export PIPER_BIN="$PIPER_BIN"
 export PIPER_VOICE_EN="$TTS_ROOT/voices/en/en_US-lessac-medium.onnx"
 export PIPER_VOICE_ZH="$TTS_ROOT/voices/zh/zh_CN-huayan-medium.onnx"
+# What the TEN extension loads: a directory, not a file. sherpa-onnx needs the
+# tokens and espeak-ng data beside the model.
+export VITS_VOICE_DIR="$TTS_ROOT/vits"
 # Measured on an N1-655 (4 cores) against a 3 s clip: 0.61 s on one thread,
 # 0.53 s on two, 0.73 s on four -- the model is small enough that four
 # oversubscribe. Two is fastest by 13%, and one is the better default anyway:
