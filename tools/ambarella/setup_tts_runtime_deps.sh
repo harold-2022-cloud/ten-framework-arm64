@@ -34,10 +34,100 @@ for arg in "$@"; do
 done
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# Set by step 3. Declared here because the diagnosis can run before it, from
+# step 2, when a package is installed but unusable.
+SUDO=()
+INSTALLER=(pip install)
 TASK_LOG="${TASK_LOG:-/tmp/task_run.log}"
 PACKAGES=(numpy scipy sherpa_onnx)
 # Import name -> what to install it by.
 declare -A DIST=([numpy]="numpy>=1.24.0" [scipy]="scipy" [sherpa_onnx]="sherpa-onnx>=1.13.8")
+
+# An ImportError that names a shared object is not a missing package: the
+# package is installed and its native library is somewhere the loader will not
+# look. The wheels rely on RPATH $ORIGIN, so the two have to sit in the same
+# directory -- and a distribution split across lib and lib64, as Fedora splits
+# them, puts them in different ones.
+diagnose_missing_object() {
+  local module="$1" message="$2"
+  local object
+  object=$(echo "$message" | sed -n 's/.*ImportError: \([^:]*\.so[^:]*\): cannot open.*/\1/p')
+  [[ -n "$object" ]] || return 0
+
+  info ""
+  info "  $object is a shared library, not a python module."
+  local dirs
+  dirs=$("$PY" -c '
+import site, sys
+seen = []
+try:
+    seen += list(site.getsitepackages())
+except AttributeError:
+    pass
+seen += [p for p in sys.path if p.endswith("site-packages") or p.endswith("dist-packages")]
+for d in dict.fromkeys(seen):
+    print(d)
+' 2>/dev/null)
+
+  local exact="" similar="" needer=""
+  while IFS= read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] || continue
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] || continue
+      # The loader asked for this name exactly. A file whose name merely
+      # starts with it -- libonnxruntime.so.1.23.2, shipped by a different
+      # package -- is not what is missing, and offering it as the fix sends
+      # the reader to the wrong file.
+      if [[ "$(basename "$hit")" == "$object" ]]; then
+        exact="$exact$hit"$'\n'
+      else
+        similar="$similar$hit"$'\n'
+      fi
+    done < <(find "$dir" -name "$object*" 2>/dev/null)
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] && needer="$needer$hit"$'\n'
+    done < <(find "$dir/$module" -name "_${module}*.so" 2>/dev/null)
+  done <<< "$dirs"
+
+  if [[ -n "$needer" ]]; then
+    info "  the module that needs it:"
+    echo "$needer" | sed '/^$/d;s/^/          /'
+  fi
+
+  if [[ -z "$exact" ]]; then
+    info "  no file of that exact name exists under the interpreter's site"
+    info "  directories, so the wheel carrying it did not install. sherpa-onnx"
+    info "  splits its native libraries into a separate sherpa-onnx-core"
+    info "  distribution; install that for this interpreter."
+    if [[ -n "$similar" ]]; then
+      info "  (these have similar names but are not it:)"
+      echo "$similar" | sed '/^$/d;s/^/          /'
+    fi
+    return 0
+  fi
+
+  info "  found at:"
+  echo "$exact" | sed '/^$/d;s/^/          /'
+  [[ -n "$needer" ]] || return 0
+
+  local lib_dir module_dir
+  lib_dir=$(dirname "$(echo "$exact" | sed '/^$/d' | head -1)")
+  module_dir=$(dirname "$(echo "$needer" | sed '/^$/d' | head -1)")
+  [[ "$lib_dir" != "$module_dir" ]] || return 0
+
+  info ""
+  warn "  they are in different directories. The wheel finds its library"
+  warn "  through RPATH \$ORIGIN, which looks only beside the module, so"
+  warn "  this split is the failure:"
+  info "    library  $lib_dir"
+  info "    module   $module_dir"
+  info ""
+  info "  Confirm without changing anything:"
+  info "    LD_LIBRARY_PATH=$lib_dir $PY -c 'import $module'"
+  info ""
+  info "  If that works, put the library where RPATH looks:"
+  info "    ${SUDO[*]:-} cp $(echo "$exact" | sed '/^$/d' | head -1) $module_dir/"
+}
 
 step() { printf '\n\033[1m----- %s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -94,17 +184,34 @@ fi
 step "2. What does that interpreter already have?"
 
 MISSING=()
+BROKEN=0
 for module in "${PACKAGES[@]}"; do
   if line=$("$PY" -c "
 import $module
 print('%s %s' % (getattr($module, '__version__', '?'), $module.__file__))
-" 2>/dev/null); then
+" 2>&1); then
     ok "$module $line"
-  else
-    info "$module: MISSING"
+  elif echo "$line" | grep -q "No module named"; then
+    info "$module: not installed"
     MISSING+=("${DIST[$module]}")
+  else
+    # Installed, and still not importable. Reinstalling will not help, and
+    # adding it to the install list would hide the real fault behind a
+    # successful-looking install.
+    bad "$module is installed but does not import"
+    echo "$line" | sed 's/^/        /'
+    BROKEN=1
+    diagnose_missing_object "$module" "$line"
   fi
 done
+
+if [[ $BROKEN -eq 1 ]]; then
+  step "Stopping"
+  bad "a dependency is present but unusable; installing more will not fix it"
+  info "The diagnosis above names the file and where it is."
+  info "log: $LOG"
+  exit 1
+fi
 
 if [[ ${#MISSING[@]} -eq 0 ]]; then
   step "Nothing to do"
@@ -134,7 +241,6 @@ fi
 # The target directory is root-owned on this board, so the install needs sudo.
 TARGET=$("$PY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null)
 info "target directory: ${TARGET:-unknown}"
-SUDO=()
 if [[ -n "$TARGET" && ! -w "$TARGET" ]]; then
   if command -v sudo >/dev/null 2>&1; then
     SUDO=(sudo)
@@ -193,6 +299,7 @@ print('%s %s' % (getattr($module, '__version__', '?'), $module.__file__))
     bad "$module still not importable by $PY"
     echo "$line" | sed 's/^/        /'
     FAILED=1
+    diagnose_missing_object "$module" "$line"
   fi
 done
 
