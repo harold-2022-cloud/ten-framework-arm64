@@ -1,0 +1,16 @@
+{
+    "subscribe_audio_sample_rate": 16000,
+    "subscribe_audio_num_of_channels": 1,
+    "subscribe_audio_frame_source": "on_playback_before_mixing",
+    "stream_id": 0,
+    "remote_stream_id": 0,
+    "encryption_key": "",
+    "encryption_salt": "",
+    "encryption_mode": 0,
+    "datastream_encryption_enabled": false,
+    "area_code": -1,
+    "enable_asr_log": false,
+    "use_frame_counted_audio_timestamp": false,
+    "shift_audio_timestamp": false,
+    "agora_asr_shift_timestamp": false
+}

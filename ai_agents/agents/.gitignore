@@ -36,6 +36,13 @@ crash_context_v1
 include/
 interface/
 lib/
+
+# The prebuilt arm64 packages are an exception: their lib/ holds the shipped
+# binaries, not build output. The directory has to be re-included before the
+# files can be, because git does not descend into an excluded directory.
+!/prebuilt/**/lib/
+!/prebuilt/**/lib/**
+
 /out/
 *.pcm
 !**/test_data/**/*.pcm

@@ -1,0 +1,1037 @@
+{
+  "type": "extension",
+  "name": "agora_rtc",
+  "version": "0.23.9-t1",
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "lib/**"
+    ]
+  },
+  "supports": [
+    {
+      "os": "linux",
+      "arch": "x64"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64"
+    }
+  ],
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime",
+      "version": "0.11"
+    },
+    {
+      "type": "system",
+      "name": "agora_rtc_sdk",
+      "version": "=4.4.32-141"
+    }
+  ],
+  "dev_dependencies": [
+    {
+      "type": "system",
+      "name": "nlohmann_json",
+      "version": "=3.11.2"
+    }
+  ],
+  "api": {
+    "property": {
+      "properties": {
+        "app_id": {
+          "type": "string"
+        },
+        "app_certificate": {
+          "type": "string"
+        },
+        "token_expire_seconds": {
+          "type": "uint32"
+        },
+        "privilege_expire_seconds": {
+          "type": "uint32"
+        },
+        "token": {
+          "type": "string"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "uint32"
+        },
+        "remote_stream_id": {
+          "type": "uint32"
+        },
+        "subscribe_remote_stream_ids": {
+          "type": "array",
+          "items": {
+            "type": "uint32"
+          }
+        },
+        "unsubscribe_remote_stream_ids": {
+          "type": "array",
+          "items": {
+            "type": "uint32"
+          }
+        },
+        "subscribe_audio": {
+          "type": "bool"
+        },
+        "subscribe_audio_sample_rate": {
+          "type": "int32"
+        },
+        "subscribe_audio_num_of_channels": {
+          "type": "int32"
+        },
+        "subscribe_audio_samples_per_frame": {
+          "type": "int32"
+        },
+        "subscribe_audio_frame_source": {
+          "type": "string"
+        },
+        "publish_audio": {
+          "type": "bool"
+        },
+        "publish_audio_auto_publishing": {
+          "type": "bool"
+        },
+        "audio_scenario": {
+          "type": "int32"
+        },
+        "audio_frame_send_delay_ms": {
+          "type": "int32"
+        },
+        "subscribe_video": {
+          "type": "bool"
+        },
+        "subscribe_video_pix_fmt": {
+          "type": "int32"
+        },
+        "subscribe_video_encoded": {
+          "type": "bool"
+        },
+        "publish_video": {
+          "type": "bool"
+        },
+        "publish_video_width": {
+          "type": "int32"
+        },
+        "publish_video_height": {
+          "type": "int32"
+        },
+        "publish_video_frame_rate": {
+          "type": "int32"
+        },
+        "publish_video_encoded": {
+          "type": "bool"
+        },
+        "publish_video_auto_publishing": {
+          "type": "bool"
+        },
+        "publish_data": {
+          "type": "bool"
+        },
+        "area_code": {
+          "type": "int32"
+        },
+        "enable_agora_asr": {
+          "type": "bool"
+        },
+        "enable_asr_log": {
+          "type": "bool"
+        },
+        "use_frame_counted_audio_timestamp": {
+          "type": "bool"
+        },
+        "agora_asr_shift_timestamp": {
+          "type": "bool"
+        },
+        "agora_asr_vendor_name": {
+          "type": "string"
+        },
+        "agora_asr_language": {
+          "type": "string"
+        },
+        "agora_asr_vendor_key": {
+          "type": "string"
+        },
+        "agora_asr_vendor_secret": {
+          "type": "string"
+        },
+        "agora_asr_vendor_app_id": {
+          "type": "string"
+        },
+        "agora_asr_vendor_region": {
+          "type": "string"
+        },
+        "agora_asr_vendor_uri": {
+          "type": "string"
+        },
+        "agora_asr_session_control_file_path": {
+          "type": "string"
+        },
+        "agora_asr_full_config": {
+          "type": "string"
+        },
+        "encryption_key": {
+          "type": "string"
+        },
+        "encryption_salt": {
+          "type": "string"
+        },
+        "encryption_mode": {
+          "type": "int32"
+        },
+        "datastream_encryption_enabled": {
+          "type": "bool"
+        },
+        "sdk_log_file_path": {
+          "type": "string"
+        },
+        "auto_join": {
+          "type": "bool"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "remote_user_id": {
+          "type": "string"
+        },
+        "subscribe_remote_user_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unsubscribe_remote_user_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enable_string_uid": {
+          "type": "bool"
+        },
+        "sdk_params": {
+          "type": "string"
+        },
+        "sid": {
+          "type": "string"
+        },
+        "uid_agora_asr_full_config": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uid": {
+                "type": "string"
+              },
+              "asr_full_config_with_language": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  },
+                  "asr_full_config": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "language",
+                  "asr_full_config"
+                ]
+              }
+            },
+            "required": [
+              "uid",
+              "asr_full_config_with_language"
+            ]
+          }
+        }
+      }
+    },
+    "cmd_in": [
+      {
+        "name": "flush"
+      },
+      {
+        "name": "join"
+      },
+      {
+        "name": "leave"
+      },
+      {
+        "name": "publish",
+        "property": {
+          "properties": {
+            "video": {
+              "type": "bool"
+            },
+            "audio": {
+              "type": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "unpublish",
+        "property": {
+          "properties": {
+            "video": {
+              "type": "bool"
+            },
+            "audio": {
+              "type": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "update_asr",
+        "property": {
+          "properties": {
+            "agora_asr_language": {
+              "type": "string"
+            },
+            "agora_asr_hotwords": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agora_asr_full_config": {
+              "type": "string"
+            },
+            "uid_agora_asr_full_config": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "uid": {
+                    "type": "string"
+                  },
+                  "asr_full_config_with_language": {
+                    "type": "object",
+                    "properties": {
+                      "language": {
+                        "type": "string"
+                      },
+                      "asr_full_config": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "language",
+                      "asr_full_config"
+                    ]
+                  }
+                },
+                "required": [
+                  "uid",
+                  "asr_full_config_with_language"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "update_subscription_rules",
+        "property": {
+          "properties": {
+            "subscribe_remote_user_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unsubscribe_remote_user_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "subscribe_remote_stream_ids": {
+              "type": "array",
+              "items": {
+                "type": "uint32"
+              }
+            },
+            "unsubscribe_remote_stream_ids": {
+              "type": "array",
+              "items": {
+                "type": "uint32"
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "ten_event",
+        "property": {
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "payload": {
+              "type": "buf"
+            }
+          }
+        }
+      },
+      {
+        "name": "get_subscribed_remote_users"
+      }
+    ],
+    "cmd_out": [
+      {
+        "name": "on_user_joined",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "remote_user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_left",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "remote_user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_info_updated",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "user_media_info": {
+              "type": "int32"
+            },
+            "value": {
+              "type": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_video_track_state_changed",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "state": {
+              "type": "int32"
+            },
+            "reason": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_audio_track_state_changed",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "state": {
+              "type": "int32"
+            },
+            "reason": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_track_state_subscribed",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "video": {
+              "type": "bool"
+            },
+            "audio": {
+              "type": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_user_track_state_unsubscribed",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "video": {
+              "type": "bool"
+            },
+            "audio": {
+              "type": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_remote_audio_track_statistics",
+        "property": {
+          "properties": {
+            "stream_id": {
+              "type": "uint32"
+            },
+            "network_transport_delay": {
+              "type": "int32"
+            },
+            "jitter_buffer_delay": {
+              "type": "uint32"
+            },
+            "e2e_delay_ms": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_connected",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "stream_id": {
+              "type": "uint32"
+            },
+            "reason_type": {
+              "type": "int32"
+            },
+            "sid": {
+              "type": "string"
+            },
+            "cid": {
+              "type": "uint32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_disconnected",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "reason_type": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_connection_lost",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_connection_failure",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "reason_type": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_connection_error",
+        "property": {
+          "properties": {
+            "error": {
+              "type": "int32"
+            },
+            "msg": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_token_expired",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_token_will_expire",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_first_remote_video_frame",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "width": {
+              "type": "int32"
+            },
+            "height": {
+              "type": "int32"
+            },
+            "elapsed": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_first_remote_video_decoded",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "width": {
+              "type": "int32"
+            },
+            "height": {
+              "type": "int32"
+            },
+            "elapsed": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_first_remote_audio_frame",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "elapsed": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_first_remote_audio_decoded",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            },
+            "elapsed": {
+              "type": "int32"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_datastream_error",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "data_stream_id": {
+              "type": "int32"
+            },
+            "error_code": {
+              "type": "int32"
+            },
+            "error_message": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "on_subscribed_remote_users_changed",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "user_count": {
+              "type": "uint32"
+            }
+          }
+        }
+      }
+    ],
+    "data_in": [
+      {
+        "name": "data"
+      }
+    ],
+    "data_out": [
+      {
+        "name": "data",
+        "property": {
+          "properties": {
+            "remote_user_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "asr_result",
+        "property": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "final": {
+              "type": "bool"
+            },
+            "start_ms": {
+              "type": "int64"
+            },
+            "duration_ms": {
+              "type": "int64"
+            },
+            "language": {
+              "type": "string"
+            },
+            "words": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "word": {
+                    "type": "string"
+                  },
+                  "start_ms": {
+                    "type": "int64"
+                  },
+                  "duration_ms": {
+                    "type": "int64"
+                  },
+                  "stable": {
+                    "type": "bool"
+                  }
+                }
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "final",
+          "start_ms",
+          "duration_ms",
+          "language"
+        ]
+      },
+      {
+        "name": "error",
+        "property": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "module": {
+              "type": "string"
+            },
+            "code": {
+              "type": "int64"
+            },
+            "message": {
+              "type": "string"
+            },
+            "vendor_info": {
+              "type": "object",
+              "properties": {
+                "vendor": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            },
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "module",
+          "code",
+          "message"
+        ]
+      },
+      {
+        "name": "on_asr_worker_count_changed",
+        "property": {
+          "properties": {
+            "count": {
+              "type": "uint32"
+            }
+          }
+        }
+      },
+      {
+        "name": "sos",
+        "property": {
+          "properties": {
+            "timestamp": {
+              "type": "int64"
+            },
+            "timestamp_raw": {
+              "type": "int64"
+            },
+            "pre_padding_len_of_sos_ms": {
+              "type": "int64"
+            },
+            "persistent_voice_len_of_sos_ms": {
+              "type": "int64"
+            },
+            "sos_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "timestamp",
+            "timestamp_raw",
+            "pre_padding_len_of_sos_ms",
+            "persistent_voice_len_of_sos_ms",
+            "sos_id"
+          ]
+        }
+      },
+      {
+        "name": "eos",
+        "property": {
+          "properties": {
+            "timestamp": {
+              "type": "int64"
+            },
+            "silence_duration_ms": {
+              "type": "int64"
+            },
+            "eos_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "timestamp",
+            "silence_duration_ms",
+            "eos_id"
+          ]
+        }
+      }
+    ],
+    "audio_frame_in": [
+      {
+        "name": "pcm_frame"
+      }
+    ],
+    "audio_frame_out": [
+      {
+        "name": "pcm_frame",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "stream_id": {
+              "type": "uint32"
+            },
+            "source": {
+              "type": "string"
+            },
+            "remote_user_id": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "session_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session_id"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "video_frame_in": [
+      {
+        "name": "video_frame"
+      },
+      {
+        "name": "encoded_video_frame",
+        "property": {
+          "properties": {
+            "dts": {
+              "type": "int64"
+            },
+            "codec_type": {
+              "type": "int32"
+            },
+            "frame_type": {
+              "type": "int32"
+            },
+            "stream_type": {
+              "type": "int32"
+            },
+            "frame_rate": {
+              "type": "int32"
+            },
+            "rotation": {
+              "type": "int32"
+            }
+          },
+          "required": [
+            "dts",
+            "codec_type"
+          ]
+        }
+      }
+    ],
+    "video_frame_out": [
+      {
+        "name": "video_frame",
+        "property": {
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "stream_id": {
+              "type": "uint32"
+            }
+          },
+          "required": [
+            "stream_id"
+          ]
+        }
+      },
+      {
+        "name": "encoded_video_frame",
+        "property": {
+          "properties": {
+            "stream_id": {
+              "type": "uint32"
+            },
+            "dts": {
+              "type": "int64"
+            },
+            "codec_type": {
+              "type": "int32"
+            },
+            "frame_type": {
+              "type": "int32"
+            },
+            "stream_type": {
+              "type": "int32"
+            },
+            "frame_rate": {
+              "type": "int32"
+            },
+            "rotation": {
+              "type": "int32"
+            }
+          },
+          "required": [
+            "stream_id",
+            "dts",
+            "codec_type"
+          ]
+        }
+      }
+    ]
+  }
+}
