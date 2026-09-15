@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+
+# task test-extension installs the runtime into .ten/app first. When it has
+# not, fall back to the shared system packages so the tests that need no
+# install still run.
+if [[ -d .ten/app ]]; then
+  BASE=".ten/app/ten_packages/system"
+  export PYTHONPATH=".ten/app:$PYTHONPATH"
+else
+  BASE="${TEN_SYSTEM_DIR:-../../system}"
+fi
+export PYTHONPATH="..:$BASE/ten_runtime_python/lib:$BASE/ten_runtime_python/interface:$BASE/ten_ai_base/interface:$PYTHONPATH"
+
+exec pytest -s tests/ "$@"

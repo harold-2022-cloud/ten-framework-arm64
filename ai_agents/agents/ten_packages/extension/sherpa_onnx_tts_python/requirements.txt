@@ -1,0 +1,5 @@
+numpy>=1.24.0
+scipy
+pydantic>=2
+sherpa-onnx>=1.13.8
+pytest-asyncio
