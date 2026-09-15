@@ -78,23 +78,43 @@ for name in (
 PY
 
 section "rpm ownership of the system python path"
-# A pip install into the system path would overwrite these.
+# What a `pip install --system` would overwrite. The question is about the
+# copy in the SYSTEM path, so the system path is what gets asked about: an
+# earlier version imported each module and ran rpm -qf on that, which resolves
+# to the --user copy whenever one exists and then reports "not owned by any
+# package" -- true, and about the wrong file.
 if command -v rpm >/dev/null 2>&1; then
-  for name in numpy scipy pydantic; do
-    file=$(python3 -c "
-import importlib
+  SYSTEM_DIRS=$(python3 -c "
+import site
 try:
-    print(importlib.import_module('$name').__file__ or '')
-except Exception:
-    print('')
+    print('\n'.join(site.getsitepackages()))
+except AttributeError:
+    pass
 " 2>/dev/null)
-    if [[ -z "$file" ]]; then
-      echo "  $name: not installed"
-      continue
-    fi
-    owner=$(rpm -qf "$file" 2>&1)
-    echo "  $name: $owner"
-  done
+  if [[ -z "$SYSTEM_DIRS" ]]; then
+    echo "  could not determine the system site-packages path"
+  else
+    for name in numpy scipy pydantic; do
+      hit=""
+      while IFS= read -r dir; do
+        [[ -n "$dir" ]] || continue
+        for candidate in "$dir/$name/__init__.py" "$dir/$name.py"; do
+          [[ -e "$candidate" ]] && { hit="$candidate"; break 2; }
+        done
+      done <<< "$SYSTEM_DIRS"
+      if [[ -z "$hit" ]]; then
+        echo "  $name: absent from the system path (nothing to overwrite)"
+        continue
+      fi
+      owner=$(rpm -qf "$hit" 2>&1)
+      echo "  $name: $hit"
+      echo "      $owner"
+    done
+  fi
+  echo "  system path searched:"
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] && echo "      $dir"
+  done <<< "$SYSTEM_DIRS"
 else
   echo "  rpm not on PATH"
 fi

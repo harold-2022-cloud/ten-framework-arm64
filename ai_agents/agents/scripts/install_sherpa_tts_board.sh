@@ -40,6 +40,7 @@ done
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
 EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/sherpa_onnx_tts_python"
+TENAPP_EXT="$EXAMPLE/tenapp/ten_packages/extension"
 TTS_ROOT="${TTS_ROOT:-$HOME/piper_tts}"
 VOICE_BUNDLE="${VOICE_BUNDLE:-vits-piper-zh_CN-huayan-medium}"
 VOICE_DIR="$TTS_ROOT/vits/$VOICE_BUNDLE"
@@ -95,26 +96,39 @@ PIP=$(command -v pip3 || command -v pip)
 ok "pip at $PIP"
 
 # What a system-wide install would have overwritten, named rather than
-# implied. This script does not do that, but the number is the reason.
+# implied. This script does not do that, but the risk is the reason it does
+# not. Ask about the copy in the SYSTEM path: importing the module and asking
+# about that file resolves to the --user copy whenever one exists, and then
+# reports nothing rpm-owned -- a reassurance about the wrong file.
 if command -v rpm >/dev/null 2>&1; then
   owned=""
-  for name in numpy scipy pydantic; do
-    file=$(python3 -c "
-import importlib
+  checked=0
+  while IFS= read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] || continue
+    checked=1
+    for name in numpy scipy pydantic; do
+      for candidate in "$dir/$name/__init__.py" "$dir/$name.py"; do
+        [[ -e "$candidate" ]] || continue
+        if rpm -qf "$candidate" >/dev/null 2>&1; then
+          owned="$owned $name($(rpm -qf "$candidate" 2>/dev/null))"
+        fi
+        break
+      done
+    done
+  done < <(python3 -c "
+import site
 try:
-    print(importlib.import_module('$name').__file__ or '')
-except Exception:
-    print('')
+    print('\n'.join(site.getsitepackages()))
+except AttributeError:
+    pass
 " 2>/dev/null)
-    [[ -n "$file" ]] || continue
-    if rpm -qf "$file" >/dev/null 2>&1; then
-      owned="$owned $name($(rpm -qf "$file" 2>/dev/null))"
-    fi
-  done
-  if [[ -n "$owned" ]]; then
+
+  if [[ "$checked" -eq 0 ]]; then
+    warn "could not determine the system site-packages path; not checked"
+  elif [[ -n "$owned" ]]; then
     warn "rpm owns:$owned -- installing to --user so these are left alone"
   else
-    ok "no rpm-owned python package among numpy, scipy, pydantic"
+    ok "no rpm-owned numpy, scipy or pydantic in the system path"
   fi
 fi
 
@@ -197,6 +211,21 @@ else
   step "task install, with pip redirected to the user path"
   ( cd "$EXAMPLE" && run env PIP_INSTALL_CMD="$PIP install --user" task install ) ||
     die "task install failed"
+
+  # tman install rebuilds tenapp/ten_packages from the manifest, and the
+  # arm64 agora_rtc is not in the registry -- it was copied in by hand. Left
+  # here, the step above would hand back a board that cannot join a channel,
+  # with nothing to say why.
+  PREBUILT="$REPO_ROOT/ai_agents/agents/scripts/install_prebuilt_agora_rtc_arm64.sh"
+  if [[ ! -x "$PREBUILT" ]]; then
+    warn "no prebuilt RTC installer; agora_rtc was removed by tman install"
+  elif [[ -d "$TENAPP_EXT/agora_rtc" ]]; then
+    ok "agora_rtc survived"
+  else
+    step "restoring the prebuilt arm64 agora_rtc that tman install removed"
+    run "$PREBUILT" "$(basename "$EXAMPLE")" ||
+      die "agora_rtc could not be restored; RTC will not work"
+  fi
 fi
 
 # ------------------------------------------------------------------ 4
