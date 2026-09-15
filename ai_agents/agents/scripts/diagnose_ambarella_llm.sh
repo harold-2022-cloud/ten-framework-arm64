@@ -38,16 +38,19 @@ GO_PORT=""; LLM_OWNER=""; CLIENT_PROC=0; DEVICE_ENABLE=0
 # is not fixed. Assuming /tmp/log.txt made this script report a model as
 # missing when it had only looked in the wrong place. Ask the running process
 # which files it has open, and fall back to its working directory.
+# Match the process NAME, not the whole command line: -f would also match
+# any shell whose arguments merely mention test_llm -- an editor, a grep, or
+# this script being written -- and report it as the daemon.
 find_llm_log() {
   local pid target cwd
-  for pid in $(pgrep -f test_llm 2>/dev/null); do
+  for pid in $(pgrep -x 'test_llm|test_llm_client' 2>/dev/null); do
     for target in $(ls -l "/proc/$pid/fd" 2>/dev/null | sed -n 's/.* -> //p'); do
       case "$target" in
         /*log.txt|/*.log) [[ -r "$target" ]] && { echo "$target"; return; } ;;
       esac
     done
   done
-  for pid in $(pgrep -f test_llm 2>/dev/null); do
+  for pid in $(pgrep -x 'test_llm|test_llm_client' 2>/dev/null); do
     cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
     [[ -r "$cwd/log.txt" ]] && { echo "$cwd/log.txt"; return; }
   done

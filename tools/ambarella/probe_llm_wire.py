@@ -56,11 +56,15 @@ def find_llm_processes():
     for entry in sorted(os.listdir("/proc")):
         if not entry.isdigit():
             continue
+        # Match the executable name, not the command line: a shell whose
+        # arguments merely mention test_llm -- an editor, a grep, this script
+        # being written -- would otherwise be reported as the daemon.
+        name = read_proc(entry, "comm").decode("utf-8", "replace").strip()
+        if name not in ("test_llm", "test_llm_client"):
+            continue
         cmdline = read_proc(entry, "cmdline").replace(b"\0", b" ").decode(
             "utf-8", "replace"
         ).strip()
-        if "test_llm" not in cmdline:
-            continue
         try:
             cwd = os.readlink(f"/proc/{entry}/cwd")
         except OSError:
