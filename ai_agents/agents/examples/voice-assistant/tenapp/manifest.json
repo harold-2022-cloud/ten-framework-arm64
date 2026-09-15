@@ -179,6 +179,9 @@
     },
     {
       "path": "../../../ten_packages/extension/smallest_tts_python"
+    },
+    {
+      "path": "../../../ten_packages/extension/sherpa_onnx_tts_python"
     }
   ],
   "scripts": {
