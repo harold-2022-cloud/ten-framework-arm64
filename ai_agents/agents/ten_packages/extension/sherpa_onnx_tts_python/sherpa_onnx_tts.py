@@ -231,10 +231,18 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
         # here for the next sentence rather than being padded or dropped,
         # either of which would be audible over a long reply.
         pending = bytearray()
+        # Whether this generator reached the end of the stream, as opposed to
+        # being stopped. It cannot be asked of the worker: the sentinel is
+        # queued from inside synthesise(), and the executor only marks the
+        # future done after that function returns, so a normal completion is
+        # still "not done" at the moment the consumer sees the sentinel.
+        # Reading it there reported every finished turn as an interruption.
+        drained = False
         try:
             while True:
                 pcm = await queue.get()
                 if pcm is None:
+                    drained = True
                     break
                 pending.extend(pcm)
                 while len(pending) >= frame_bytes and not self._is_cancelled:
@@ -250,7 +258,7 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
             # Whoever stops reading stops the synthesis: a consumer that
             # breaks out of this generator would otherwise leave a thread
             # synthesising a reply nobody will hear.
-            if not worker.done():
+            if not drained:
                 self._is_cancelled = True
             await worker
 

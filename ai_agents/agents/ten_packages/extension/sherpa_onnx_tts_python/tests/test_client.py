@@ -350,3 +350,24 @@ async def test_barge_in_stops_within_a_sentence_already_synthesised():
         "the whole second of audio was delivered after cancellation; a "
         "barge-in during a long sentence would keep talking over the user"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_completed_turn_ends_rather_than_flushing():
+    """END and FLUSH are not interchangeable: FLUSH means interrupted.
+
+    The generator cannot decide between them from the worker's state. The
+    sentinel is queued from inside the worker function, and the executor only
+    marks the future done once that function returns, so at the moment the
+    consumer sees the sentinel a normal completion still looks unfinished.
+
+    The repetition is not proof; it widens a timing window that showed up on
+    the board and not in the container.
+    """
+    for _ in range(30):
+        engine = FakeEngine(num_chunks=3, samples_per_chunk=320)
+        client = make_client(engine, output_sample_rate=16000)
+        events = await drain(client)
+
+        assert kinds_of(events)[-1] == TTS2HttpResponseEventType.END
+        assert client._is_cancelled is False  # pylint: disable=protected-access
