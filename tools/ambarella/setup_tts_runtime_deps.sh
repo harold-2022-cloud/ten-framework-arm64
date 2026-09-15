@@ -10,6 +10,9 @@
 #   tools/ambarella/setup_tts_runtime_deps.sh --check    # report only
 #   tools/ambarella/setup_tts_runtime_deps.sh --yes      # install even if the
 #                                                        # plan cannot be shown
+#   tools/ambarella/setup_tts_runtime_deps.sh --fix-split # copy native libraries
+#                                                        # that landed in the
+#                                                        # wrong site directory
 #
 # The runtime embeds one interpreter and the shell has another. On the arm64
 # board the runtime loads libpython3.12 while `python3` is 3.13, and the
@@ -24,10 +27,12 @@ set -uo pipefail
 
 CHECK_ONLY=0
 ASSUME_YES=0
+FIX_SPLIT=0
 for arg in "$@"; do
   case "$arg" in
     --check|--dry-run) CHECK_ONLY=1 ;;
     --yes) ASSUME_YES=1 ;;
+    --fix-split) FIX_SPLIT=1 ;;
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -124,9 +129,55 @@ for d in dict.fromkeys(seen):
   info ""
   info "  Confirm without changing anything:"
   info "    LD_LIBRARY_PATH=$lib_dir $PY -c 'import $module'"
+
+  # The split is per distribution, not per file: the half that landed in the
+  # other directory carries every native library, not only the one the loader
+  # happened to ask for first. Copying one at a time would just move the error
+  # along to the next name.
+  local pending=()
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    [[ -e "$module_dir/$(basename "$candidate")" ]] || pending+=("$candidate")
+  done < <(find "$lib_dir" -maxdepth 1 -name '*.so*' 2>/dev/null | sort)
+
+  if [[ ${#pending[@]} -eq 0 ]]; then
+    return 0
+  fi
+
   info ""
-  info "  If that works, put the library where RPATH looks:"
-  info "    ${SUDO[*]:-} cp $(echo "$exact" | sed '/^$/d' | head -1) $module_dir/"
+  info "  ${#pending[@]} file(s) are in $lib_dir but not beside the module:"
+  local file
+  for file in "${pending[@]}"; do
+    info "    $(basename "$file")  ($(du -h "$file" 2>/dev/null | cut -f1))"
+  done
+
+  if [[ $FIX_SPLIT -eq 0 ]]; then
+    info ""
+    info "  Re-run with --fix-split to copy them into"
+    info "    $module_dir"
+    info "  Nothing else is touched, and the originals stay where they are."
+    return 0
+  fi
+
+  info ""
+  info "  copying into $module_dir"
+  local copier=()
+  [[ -w "$module_dir" ]] || copier=(sudo)
+  for file in "${pending[@]}"; do
+    if "${copier[@]}" cp -p "$file" "$module_dir/"; then
+      ok "    $(basename "$file")"
+    else
+      bad "    $(basename "$file") could not be copied"
+      return 0
+    fi
+  done
+
+  if "$PY" -c "import $module" >/dev/null 2>&1; then
+    ok "  $module imports now"
+    FIXED_SPLIT=1
+  else
+    bad "  $module still does not import; the error above will have changed"
+  fi
 }
 
 step() { printf '\n\033[1m----- %s\033[0m\n' "$*"; }
@@ -200,8 +251,14 @@ print('%s %s' % (getattr($module, '__version__', '?'), $module.__file__))
     # successful-looking install.
     bad "$module is installed but does not import"
     echo "$line" | sed 's/^/        /'
-    BROKEN=1
+    FIXED_SPLIT=0
     diagnose_missing_object "$module" "$line"
+    if [[ $FIXED_SPLIT -eq 1 ]]; then
+      # Repaired in place, so this module is no longer a reason to stop.
+      ok "$module recovered"
+    else
+      BROKEN=1
+    fi
   fi
 done
 
