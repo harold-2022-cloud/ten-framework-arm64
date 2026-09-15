@@ -35,6 +35,11 @@ SENTENCES = [
     "我是一個在安霸開發板上執行的語音助理,可以幫你回答問題。",
     "這是一段比較長的測試句子,用來看看合成時間會不會隨著文字長度線性增加,"
     "因為如果不是線性的,那麼把長句切短就有意義。",
+    # Several sentences, the shape an LLM reply actually has. generate()
+    # hands back one chunk per sentence, so 'first' should be far below
+    # 'synth' here while the single-sentence rows above have them equal.
+    "好的,我幫你查一下。台北今天多雲,氣溫攝氏二十六度。"
+    "下午可能會下雨,出門記得帶傘。還需要我查別的城市嗎?",
 ]
 
 
@@ -129,12 +134,35 @@ def main():
     print(f"  sample rate {tts.sample_rate} Hz, {tts.num_speakers} speaker(s)")
 
     print(f"\n=== Synthesis, {args.num_threads} thread(s)")
-    print(f"  {'chars':>5}  {'synth':>7}  {'audio':>7}  {'RTF':>5}  text")
+    # Time to the first chunk is what a listener feels; the total is what the
+    # CPU costs. generate() calls back once per sentence as it goes, so the
+    # two differ by most of a multi-sentence reply -- and the cloud provider
+    # this replaces answered its first byte in 361 ms.
+    print(
+        f"  {'chars':>5}  {'first':>7}  {'synth':>7}  {'audio':>7}  "
+        f"{'RTF':>5}  {'calls':>5}  text"
+    )
     failures = 0
     for index, text in enumerate(SENTENCES):
         started = time.monotonic()
-        audio = tts.generate(text, sid=0, speed=args.speed)
+        first_at = [None]
+        calls = [0]
+
+        def on_chunk(samples, progress, _f=first_at, _c=calls):
+            # Return non-zero to CONTINUE, zero to stop -- the opposite of
+            # what generate()'s own docstring says, measured against
+            # sherpa-onnx 1.13.8. Returning 0 here truncates every reply to
+            # its first sentence, which is how the mistake shows up.
+            _c[0] += 1
+            if _f[0] is None:
+                _f[0] = time.monotonic()
+            return 1
+
+        audio = tts.generate(
+            text, sid=0, speed=args.speed, callback=on_chunk
+        )
         elapsed = time.monotonic() - started
+        first = (first_at[0] - started) if first_at[0] else elapsed
         seconds = len(audio.samples) / audio.sample_rate if audio.sample_rate else 0
         if seconds <= 0:
             print(f"  {len(text):>5}  FAILED: no audio for {text!r}")
@@ -143,8 +171,9 @@ def main():
         # Real-time factor: below 1.0 means it synthesises faster than it
         # plays, which is what a conversation needs.
         print(
-            f"  {len(text):>5}  {elapsed:>6.2f}s  {seconds:>6.2f}s  "
-            f"{elapsed / seconds:>5.2f}  {text[:28]}"
+            f"  {len(text):>5}  {first:>6.2f}s  {elapsed:>6.2f}s  "
+            f"{seconds:>6.2f}s  {elapsed / seconds:>5.2f}  {calls[0]:>5}  "
+            f"{text[:24]}"
         )
         out = os.path.join(args.out_dir, f"piper_probe_{index}.wav")
         write_wav(out, audio.samples, audio.sample_rate)
@@ -156,6 +185,13 @@ def main():
     print("\n  Every sentence synthesised.")
     print("  RTF below 1.0 means it keeps up with speech; the lower the more")
     print("  headroom for the LLM and the runtime sharing these cores.")
+    print()
+    print("  'first' is the number a listener feels. Compare it against the")
+    print("  cloud provider being replaced: elevenlabs answered its first")
+    print("  byte in 361 ms and 454 ms, measured on this board on 2026-09-14.")
+    print("  'calls' is how many times generate() handed audio back, one per")
+    print("  sentence. A single call for multi-sentence text means the")
+    print("  callback's return value stopped generation early.")
     return 0
 
 
