@@ -2264,7 +2264,7 @@
               "addon": "main_python",
               "extension_group": "control",
               "property": {
-                "greeting": "TEN Agent connected. How can I help you today?"
+                "greeting": "你好，我是在安霸開發板上執行的語音助理，有什麼可以幫你的嗎？"
               }
             },
             {
