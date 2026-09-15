@@ -56,6 +56,9 @@
         "reset_after_abort": {
           "type": "bool"
         },
+        "reset_every_turn": {
+          "type": "bool"
+        },
         "connect_timeout_s": {
           "type": "float64"
         },

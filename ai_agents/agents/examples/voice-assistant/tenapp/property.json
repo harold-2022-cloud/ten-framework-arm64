@@ -2240,7 +2240,8 @@
                 "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
                 "model_type": 9,
                 "prompt": "你是一個在安霸 N1-655 開發板上執行的語音助理。一律用繁體中文回答,不要使用英文或其他語言,因為語音合成的音色只會中文,英文會被念成亂碼。回答要簡短,像說話一樣,不要用條列或標記符號。",
-                "response_format": "sse"
+                "response_format": "sse",
+                "reset_every_turn": false
               }
             },
             {
@@ -2436,7 +2437,8 @@
                 "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
                 "model_type": 9,
                 "prompt": "你是一個在安霸 N1-655 開發板上執行的語音助理。一律用繁體中文回答,不要使用英文或其他語言,因為語音合成的音色只會中文,英文會被念成亂碼。回答要簡短,像說話一樣,不要用條列或標記符號。",
-                "response_format": "sse"
+                "response_format": "sse",
+                "reset_every_turn": false
               }
             },
             {

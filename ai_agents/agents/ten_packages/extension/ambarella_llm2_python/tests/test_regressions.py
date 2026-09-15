@@ -373,3 +373,63 @@ async def test_the_done_token_is_not_spoken():
         m.delta for m in out if isinstance(m, LLMResponseMessageDelta)
     )
     assert "<DONE>" not in spoken and spoken == "Hi"
+
+
+# --- Latency: the board re-processes its own history --------------------
+
+
+def test_reset_every_turn_is_off_by_default():
+    """Off, because it trades the conversation for speed."""
+    from ambarella_llm2_python.ambarella import AmbarellaLLM2Config
+
+    assert AmbarellaLLM2Config().reset_every_turn is False
+
+
+def test_reset_every_turn_sends_reset_on_every_request():
+    """Measured on the board: an 8-character query took 39 s with the history
+    kept, against 8 s on the first turn, which resets. This makes that
+    comparison a setting rather than a rebuild."""
+    from ten_ai_base.struct import LLMRequest
+
+    from ambarella_llm2_python.ambarella import (
+        AmbarellaChatClient,
+        AmbarellaLLM2Config,
+    )
+
+    class _Env:
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    client = AmbarellaChatClient(
+        _Env(), AmbarellaLLM2Config(reset_every_turn=True)
+    )
+    # The first turn resets anyway; the point is that the second still does.
+    client._needs_reset = False  # pylint: disable=protected-access
+
+    assert (
+        client._reset_for_this_turn() is True
+    )  # pylint: disable=protected-access
+    assert (
+        client._headers(True, client._reset_for_this_turn())[
+            "Reset-En"
+        ]  # pylint: disable=protected-access
+        == "1"
+    )
+
+
+def test_history_is_kept_when_the_option_is_off():
+    from ambarella_llm2_python.ambarella import (
+        AmbarellaChatClient,
+        AmbarellaLLM2Config,
+    )
+
+    class _Env:
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    client = AmbarellaChatClient(_Env(), AmbarellaLLM2Config())
+    client._needs_reset = False  # pylint: disable=protected-access
+
+    assert (
+        client._reset_for_this_turn() is False
+    )  # pylint: disable=protected-access

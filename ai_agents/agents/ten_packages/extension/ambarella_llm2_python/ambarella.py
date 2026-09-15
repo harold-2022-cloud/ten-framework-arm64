@@ -27,6 +27,9 @@ from ten_ai_base.struct import (
 )
 from ten_runtime import AsyncTenEnv
 
+# The runtime's own category for lines a human reads when something is slow.
+LOG_CATEGORY_KEY_POINT = "key_point"
+
 SSE_PREFIX = "data:"
 # The board terminates with <DONE>; [DONE] is the convention elsewhere and is
 # accepted too, since nothing documents which one to expect.
@@ -217,6 +220,16 @@ class AmbarellaLLM2Config(BaseModel):
     # context after a barge-in; off by default, because barge-in is routine
     # in a voice pipeline and wiping history on each one is worse.
     reset_after_abort: bool = False
+    # Send Reset-En on every turn, so the board answers the question rather
+    # than re-reading the conversation that led to it. Measured on an N1-655
+    # on 2026-09-15: the first turn, which resets, answered in 8 s; the two
+    # after it, with the history kept, took 39 s and 28 s for an eight-
+    # character question. The board re-processes its own history and there is
+    # no way to ask it not to except by clearing it.
+    #
+    # Off by default: this buys latency with the conversation itself. The
+    # assistant stops being able to answer "and what about tomorrow?".
+    reset_every_turn: bool = False
     # Networking. The total timeout is generous: a 7B model at W4A16 on
     # CVflow has no published token rate, and the first load after boot can
     # take up to 80 s.
@@ -258,6 +271,10 @@ class AmbarellaChatClient:
         # The guide posts to the server root:
         #   curl -X POST --url http://127.0.0.1:8080/
         return self.config.base_url.rstrip("/") + "/"
+
+    def _reset_for_this_turn(self) -> bool:
+        """Whether this request clears the board-side history."""
+        return self._needs_reset or self.config.reset_every_turn
 
     def _headers(self, streaming: bool, reset: bool) -> dict:
         return {
@@ -423,12 +440,18 @@ class AmbarellaChatClient:
             query = f"{system_prompt}\n\n{query}"
 
         streaming = self.config.streaming and request_input.streaming
-        reset = self._needs_reset
+        reset = self._reset_for_this_turn()
 
         await self._ensure_session()
         assert self._session is not None
 
         full_content = ""
+        # How long the board takes is the pipeline's dominant cost and is not
+        # visible anywhere else: the metrics the base class emits are the
+        # TTS's. Logging it here saves correlating timestamps across three
+        # extensions to answer "why was that slow".
+        started = time.monotonic()
+        first_delta_at: Optional[float] = None
         async with self._turn_lock:
             self.ten_env.log_info(
                 f"[Ambarella] POST {self._url()} "
@@ -499,6 +522,14 @@ class AmbarellaChatClient:
                                     created=created,
                                 )
                                 continue
+                            if first_delta_at is None:
+                                first_delta_at = time.monotonic()
+                                self.ten_env.log_info(
+                                    "[Ambarella] first answer token after "
+                                    f"{first_delta_at - started:.1f}s "
+                                    f"(reset={reset}, query_len={len(query)})",
+                                    category=LOG_CATEGORY_KEY_POINT,
+                                )
                             full_content += text
                             yield LLMResponseMessageDelta(
                                 response_id=response_id,
@@ -523,6 +554,14 @@ class AmbarellaChatClient:
                 )
                 raise
 
+        elapsed = time.monotonic() - started
+        ttft = (first_delta_at - started) if first_delta_at else elapsed
+        self.ten_env.log_info(
+            f"[Ambarella] turn done in {elapsed:.1f}s, "
+            f"first token at {ttft:.1f}s, {len(full_content)} chars "
+            f"(reset={reset})",
+            category=LOG_CATEGORY_KEY_POINT,
+        )
         yield LLMResponseMessageDone(
             response_id=response_id,
             role="assistant",
