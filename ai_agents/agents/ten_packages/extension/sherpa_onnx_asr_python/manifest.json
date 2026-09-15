@@ -1,0 +1,70 @@
+{
+  "type": "extension",
+  "name": "sherpa_onnx_asr_python",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    },
+    {
+      "type": "system",
+      "name": "ten_ai_base",
+      "version": "0.7"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "pyproject.toml",
+      "requirements.txt",
+      "tests/**"
+    ]
+  },
+  "api": {
+    "interface": [
+      {
+        "import_uri": "../../system/ten_ai_base/api/asr-interface.json"
+      }
+    ],
+    "property": {
+      "properties": {
+        "model_dir": {
+          "type": "string"
+        },
+        "num_threads": {
+          "type": "int64"
+        },
+        "enable_endpoint_detection": {
+          "type": "bool"
+        },
+        "rule1_min_trailing_silence": {
+          "type": "float64"
+        },
+        "rule2_min_trailing_silence": {
+          "type": "float64"
+        },
+        "rule3_min_utterance_length": {
+          "type": "float64"
+        },
+        "language": {
+          "type": "string"
+        },
+        "dump": {
+          "type": "bool"
+        },
+        "dump_path": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  }
+}
