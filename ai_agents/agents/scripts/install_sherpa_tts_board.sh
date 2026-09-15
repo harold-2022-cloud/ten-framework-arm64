@@ -58,11 +58,16 @@ die()  { printf '\n\033[31mFATAL\033[0m %s\n' "$*" >&2; exit 1; }
 # Every mutating command goes through this, so --dry-run is honest rather
 # than a second code path that can drift from the real one.
 run() {
+  # printf %q so an argument carrying spaces -- PIP_INSTALL_CMD is one --
+  # shows its own quoting. "$*" would print it as three bare words and read
+  # as a different command from the one that runs.
+  local shown
+  shown=$(printf '%q ' "$@")
   if [[ $DRY_RUN -eq 1 ]]; then
-    printf '  would run: %s\n' "$*"
+    printf '  would run: %s\n' "${shown% }"
     return 0
   fi
-  step "$*"
+  step "${shown% }"
   "$@"
 }
 
