@@ -44,9 +44,19 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SUDO=()
 INSTALLER=(pip install)
 TASK_LOG="${TASK_LOG:-/tmp/task_run.log}"
-PACKAGES=(numpy scipy sherpa_onnx)
+# pytest and pytest-asyncio are here because the extensions' own suites run
+# under this interpreter. Without pytest-asyncio, pytest skips every async
+# test, still exits zero, and reports "N passed" -- on the board that was 20
+# of 23 tests silently not run.
+PACKAGES=(numpy scipy sherpa_onnx pytest pytest_asyncio)
 # Import name -> what to install it by.
-declare -A DIST=([numpy]="numpy>=1.24.0" [scipy]="scipy" [sherpa_onnx]="sherpa-onnx>=1.13.8")
+declare -A DIST=(
+  [numpy]="numpy>=1.24.0"
+  [scipy]="scipy"
+  [sherpa_onnx]="sherpa-onnx>=1.13.8"
+  [pytest]="pytest"
+  [pytest_asyncio]="pytest-asyncio"
+)
 
 # An ImportError that names a shared object is not a missing package: the
 # package is installed and its native library is somewhere the loader will not

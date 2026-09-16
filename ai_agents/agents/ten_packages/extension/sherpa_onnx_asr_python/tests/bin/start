@@ -35,6 +35,16 @@ if [[ -z "$PY" ]]; then
 fi
 
 echo "running tests under $("$PY" -c 'import sys; print(sys.executable, sys.version.split()[0])')"
+# pytest-asyncio as well as pytest: without it every async test is skipped
+# with a warning and the run still reports "N passed", which reads as success
+# and verified nothing. On the board that was 20 of 23 tests.
+if ! "$PY" -c 'import pytest_asyncio' >/dev/null 2>&1; then
+  echo "FATAL: $PY has pytest but not pytest-asyncio." >&2
+  echo "       Every async test would be skipped and the run would still" >&2
+  echo "       report success. Install it for this interpreter:" >&2
+  echo "         tools/ambarella/setup_tts_runtime_deps.sh" >&2
+  exit 1
+fi
 if ! "$PY" -c 'import pytest' >/dev/null 2>&1; then
   echo "FATAL: $PY has no pytest." >&2
   echo "       This is the interpreter the runtime uses, so install it there" >&2
