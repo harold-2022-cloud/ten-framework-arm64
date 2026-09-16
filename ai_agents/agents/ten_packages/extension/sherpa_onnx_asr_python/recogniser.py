@@ -24,10 +24,10 @@ from .const import LOG_CATEGORY_KEY_POINT, SAMPLE_RATE
 
 BYTES_PER_SAMPLE = 2
 
-# How far the decoder may fall behind the audio before it is worth saying so,
-# and how far it has to recover before the next time counts as new. Hysteresis
-# rather than a level, so draining the start-up buffer is two lines and not one
-# per frame.
+# How much further than its own best the decoder may trail the audio before
+# it is worth saying so, and how far it has to recover before the next time
+# counts as new. Hysteresis rather than a level, so a slow patch is two lines
+# and not one per frame.
 BEHIND_WARN_MS = 500
 BEHIND_CLEAR_MS = 200
 
@@ -125,6 +125,8 @@ class SherpaOnnxRecogniser:
         # across six lines, which is not a thing to do twice.
         self._clock = clock
         self._clock_start: Optional[float] = None
+        self._lag_floor: Optional[int] = None
+        self._lag_start_reported = False
         self._last_text_change_ms = 0
         self._decodes = 0
         self._behind = False
@@ -160,6 +162,8 @@ class SherpaOnnxRecogniser:
         self._samples_accepted = 0
         self._utterance_start_ms = 0
         self._clock_start = None
+        self._lag_floor = None
+        self._lag_start_reported = False
         self._last_text_change_ms = 0
         self._decodes = 0
         self._behind = False
@@ -197,10 +201,11 @@ class SherpaOnnxRecogniser:
     def _lag_ms(self) -> int:
         """How far the audio accepted trails the clock since start().
 
-        Relative, not absolute: capture may begin a little before or after the
-        extension does, so the useful reading is the shape -- large while the
-        buffer that built up during the model load drains, near zero once the
-        decoder is keeping up.
+        Carries an unknown constant: capture begins a little before or after
+        the extension does, and that offset never comes out. On the board the
+        reading sat at 674 ms for three minutes while the decoder was in fact
+        keeping up perfectly. So this number is never compared against a
+        threshold -- only against the least it has ever been.
         """
         if self._clock_start is None:
             return 0
@@ -210,17 +215,44 @@ class SherpaOnnxRecogniser:
         return round(wall_ms - self._elapsed_ms)
 
     def _report_lag(self) -> None:
+        """Report the backlog once, then only movement away from the floor.
+
+        Comparing the raw lag against a threshold latched on the board: the
+        constant 674 ms offset was over the warn level and under nothing, so
+        the recovery line never came and the flag stayed set for the rest of
+        the session -- which is precisely when a real backlog would have gone
+        unreported.
+        """
         lag = self._lag_ms
-        if not self._behind and lag >= BEHIND_WARN_MS:
+        if not self._lag_start_reported:
+            # The first reading is the audio that piled up while the model
+            # loaded. It is worth one line and is not evidence of anything
+            # afterwards, so it seeds the floor rather than raising an alarm.
+            self._lag_start_reported = True
+            self._lag_floor = lag
+            self.ten_env.log_info(
+                f"decoding starts {lag} ms behind the audio; from here the "
+                f"measure is movement away from the least it ever trails",
+                category=LOG_CATEGORY_KEY_POINT,
+            )
+            return
+
+        assert self._lag_floor is not None
+        if lag < self._lag_floor:
+            self._lag_floor = lag
+        drift = lag - self._lag_floor
+
+        if not self._behind and drift >= BEHIND_WARN_MS:
             self._behind = True
             self.ten_env.log_warn(
-                f"decoder {lag} ms behind the audio "
-                f"({self._elapsed_ms} ms accepted)"
+                f"decoder falling behind: {drift} ms further than its best "
+                f"({lag} ms against a floor of {self._lag_floor} ms, "
+                f"{self._elapsed_ms} ms accepted)"
             )
-        elif self._behind and lag <= BEHIND_CLEAR_MS:
+        elif self._behind and drift <= BEHIND_CLEAR_MS:
             self._behind = False
             self.ten_env.log_info(
-                f"decoder caught up, {lag} ms behind "
+                f"decoder caught up, {drift} ms off its best "
                 f"({self._elapsed_ms} ms accepted)",
                 category=LOG_CATEGORY_KEY_POINT,
             )
@@ -254,12 +286,17 @@ class SherpaOnnxRecogniser:
             if endpoint:
                 if text:
                     out.append(self._make(text, final=True))
-                # sherpa-onnx says an endpoint happened, never which rule
-                # said so. The trailing silence is the thing that tells them
-                # apart -- rule1 and rule2 are exactly that, and rule3 shows
-                # up as a long utterance instead -- so measure it here rather
-                # than reconstruct it from timestamps afterwards.
-                self._note_endpoint(text)
+                    # sherpa-onnx says an endpoint happened, never which rule
+                    # said so. The trailing silence tells them apart -- rule1
+                    # and rule2 are exactly that, and rule3 shows up as a long
+                    # utterance instead -- so measure it here rather than
+                    # reconstruct it from timestamps afterwards.
+                    self._note_endpoint(text)
+                # A silent endpoint gets no line. rule1 fires on every 2.56 s
+                # of quiet, so on the board that was 64 of 67 lines saying the
+                # same thing, about 1300 an hour, burying the three that
+                # carried speech.
+                self._decodes = 0
                 # Reset even with no text: silence long enough to end an
                 # utterance still ends it, and the next one must start clean.
                 engine.reset(stream)
@@ -284,7 +321,6 @@ class SherpaOnnxRecogniser:
             f"utterance={utterance} ms decodes={self._decodes} "
             f"lag={self._lag_ms} ms text={text!r}"
         )
-        self._decodes = 0
 
     def _make(self, text: str, final: bool) -> Transcript:
         start = self._utterance_start_ms

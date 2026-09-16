@@ -97,50 +97,114 @@ async def test_the_endpoint_line_counts_the_decodes_behind_each_utterance():
 
 
 @pytest.mark.asyncio
-async def test_a_decoder_falling_behind_says_so_once_and_not_per_frame():
-    """The start-up backlog was 1.65 s and took six lines of algebra to see.
-
-    Edge-triggered: a level would put a line on every frame of the drain,
-    which is 50 a second and reads as noise rather than as a backlog.
-    """
+async def test_the_backlog_at_the_start_is_reported_once():
+    """The audio that piled up while the model loaded is worth one line."""
     clock = FakeClock()
     engine = FakeRecogniser(script=[("讲", False)] * 40)
     rec, env = await make(engine, clock=clock)
 
-    # A second of wall time with no audio accepted: the model was loading.
-    clock.advance_ms(1000)
-
+    clock.advance_ms(6500)  # the board's model load
     for _ in range(10):
         clock.advance_ms(FRAME_MS)
         await rec.accept(FRAME)
 
-    behind = lines_with(env, "behind the audio")
-    assert len(behind) == 1, behind
-    assert "1000 ms behind the audio" in behind[0]
+    started = lines_with(env, "decoding starts")
+    assert len(started) == 1, started
+    assert "6500 ms behind the audio" in started[0]
+    assert lines_with(env, "falling behind") == []
+
+
+@pytest.mark.asyncio
+async def test_a_constant_offset_is_never_reported_as_falling_behind():
+    """Replayed from task_run.log 11:41-11:44: 674 ms, flat, for three minutes.
+
+    The decoder was keeping up exactly -- a constant lag is an offset, not a
+    deficit, because one that cannot keep up accumulates. Comparing the raw
+    number against a threshold called that a backlog, latched, and then could
+    not report the real thing if it happened.
+    """
+    clock = FakeClock()
+    engine = FakeRecogniser(script=[("讲", False)] * 400)
+    rec, env = await make(engine, clock=clock)
+
+    clock.advance_ms(674)  # whatever separates capture from start()
+    for _ in range(200):
+        clock.advance_ms(FRAME_MS)
+        await rec.accept(FRAME)
+
+    assert lines_with(env, "falling behind") == []
     assert lines_with(env, "caught up") == []
 
 
 @pytest.mark.asyncio
-async def test_catching_up_is_reported_so_the_backlog_has_an_end():
+async def test_drifting_further_than_the_floor_is_reported_once_then_cleared():
+    """What the measure is actually for: the decoder losing ground."""
     clock = FakeClock()
-    engine = FakeRecogniser(script=[("讲", False)] * 200)
+    engine = FakeRecogniser(script=[("讲", False)] * 400)
     rec, env = await make(engine, clock=clock)
 
-    clock.advance_ms(1000)
-    await rec.accept(FRAME)
-    assert len(lines_with(env, "behind the audio")) == 1
+    clock.advance_ms(674)
+    for _ in range(20):  # settle, establishing the floor
+        clock.advance_ms(FRAME_MS)
+        await rec.accept(FRAME)
+    assert lines_with(env, "falling behind") == []
 
-    # Frames arriving faster than real time, which is how the base class
-    # replays what it buffered while the model loaded.
-    for _ in range(60):
+    # Wall time running at twice the audio: each frame loses 20 ms, so 40 of
+    # them put 800 ms between the decoder and its own best.
+    for _ in range(40):
+        clock.advance_ms(FRAME_MS * 2)
         await rec.accept(FRAME)
 
-    (line,) = lines_with(env, "caught up")
-    assert "caught up" in line
-    # And it does not then say it again on every later frame.
-    for _ in range(10):
+    behind = lines_with(env, "falling behind")
+    assert len(behind) == 1, behind
+    assert "further than its best" in behind[0]
+
+    # Frames arriving with no wall time passing, which is the buffer being
+    # replayed: each one gives 20 ms back.
+    for _ in range(40):
         await rec.accept(FRAME)
+
     assert len(lines_with(env, "caught up")) == 1
+    assert len(lines_with(env, "falling behind")) == 1
+
+
+@pytest.mark.asyncio
+async def test_silence_endpoints_are_not_logged():
+    """64 of 67 lines on the board said the same thing about quiet.
+
+    rule1 ends an utterance on every 2.56 s of silence whether anyone spoke
+    or not, and each one carried utterance == trailing and nothing else.
+    """
+    engine = FakeRecogniser(
+        script=[
+            ("", True),
+            ("", True),
+            ("讲一个笑话", False),
+            ("讲一个笑话", True),
+        ]
+    )
+    rec, env = await make(engine)
+
+    for _ in range(4):
+        await rec.accept(FRAME)
+
+    (line,) = lines_with(env, "endpoint after")
+    assert "text='讲一个笑话'" in line
+
+
+@pytest.mark.asyncio
+async def test_silent_endpoints_do_not_inflate_the_next_decode_count():
+    """The counter belongs to an utterance, not to the session."""
+    engine = FakeRecogniser(
+        script=[("", True), ("", True), ("讲", False), ("讲", True)]
+    )
+    rec, env = await make(engine)
+
+    for _ in range(4):
+        await rec.accept(FRAME)
+
+    (line,) = lines_with(env, "endpoint after")
+    assert "decodes=2" in line
 
 
 @pytest.mark.asyncio
