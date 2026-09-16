@@ -18,11 +18,15 @@
 # each stage is somewhere you can go and read:
 #
 #   1  setup_cpu_asr_tts_arm64.sh     the Zipformer ASR model and the Piper voice
-#   2  task install                   the tenapp, then the prebuilt arm64 RTC
-#                                     that tman install removes
-#   3  setup_tts_runtime_deps.sh      the Python packages, for the interpreter
-#                                     the runtime loads rather than the shell's
-#   4  verify_asr_board.sh            the tests, against the real model
+#   2  tman install, without agora_rtc in the manifest, then the prebuilt
+#      install_prebuilt_agora_rtc_arm64.sh     arm64 RTC placed by hand
+#   3  finish_example_install_arm64.sh the Go app, the Python packages and the
+#      setup_tts_runtime_deps.sh       frontend, then sherpa's lib/lib64 split
+#   4  verify_asr_board.sh             the tests, against the real model
+#
+# `task install` is not used: the registry has no arm64 agora_rtc and the
+# manifest pins it exactly, so tman resolves nothing and says only
+# "Dependency resolution failed without specific error details".
 #
 # Every stage is idempotent, so running this twice is not destructive and a
 # failed run can be restarted without undoing anything.
@@ -119,7 +123,8 @@ else
   warn "stages 3 and 4 will say so rather than guess"
 fi
 
-command -v task >/dev/null 2>&1 || warn "task is not on PATH; stage 2 will fail"
+command -v tman >/dev/null 2>&1 || warn "tman is not on PATH; stage 2 will fail"
+command -v task >/dev/null 2>&1 || warn "task is not on PATH; only stage 5 needs it"
 
 # ------------------------------------------------------------------ 1
 say "1. Speech models on the CPU"
@@ -135,31 +140,76 @@ run env VOICES=zh "$CPU_SPEECH" "${CPU_ARGS[@]}" ||
 # ------------------------------------------------------------------ 2
 say "2. The example's tenapp"
 
-step "task install"
-run bash -c "cd '$EXAMPLE' && task install" ||
-  die "task install failed; its output is above and in $LOG"
+# `task install` is the x86 path and cannot work here. The registry has no
+# arm64 build of agora_rtc and the manifest pins it exactly, so tman -- which
+# resolves the whole tree or nothing -- returns no model at all, reported as
+# "Dependency resolution failed without specific error details". Drop the
+# dependency for the resolve, then put the prebuilt arm64 build in by hand.
+TENAPP="$EXAMPLE/tenapp"
+[[ -f "$TENAPP/manifest.json" ]] || die "no manifest at $TENAPP/manifest.json"
 
-# tman install rebuilds tenapp/ten_packages from the manifest and the arm64
-# agora_rtc is not in the registry -- it was put there by hand. Left as is,
-# the board joins no channel and nothing says why.
-PREBUILT="$SCRIPTS/install_prebuilt_agora_rtc_arm64.sh"
-TENAPP_EXT="$EXAMPLE/tenapp/ten_packages/extension"
-if [[ -d "$TENAPP_EXT/agora_rtc" ]]; then
-  ok "agora_rtc survived task install"
-elif [[ -x "$PREBUILT" ]]; then
-  step "restoring the prebuilt arm64 agora_rtc"
-  run "$PREBUILT" "$EXAMPLE_NAME" || die "agora_rtc could not be restored"
-else
-  warn "agora_rtc is absent and $PREBUILT is not here; RTC will not work"
+if [[ -f "$TENAPP/manifest.json.bak" ]]; then
+  die "manifest.json.bak is left from an interrupted run, which means
+       manifest.json is the edited one with no agora_rtc dependency:
+         mv $TENAPP/manifest.json.bak $TENAPP/manifest.json"
 fi
 
+restore_manifest() {
+  if [[ -f "$TENAPP/manifest.json.bak" ]]; then
+    mv -f "$TENAPP/manifest.json.bak" "$TENAPP/manifest.json"
+    ok "manifest restored"
+  fi
+}
+
+if [[ $DRY_RUN -eq 1 ]]; then
+  step "would drop agora_rtc from the manifest, run tman -y install, restore it"
+else
+  cp "$TENAPP/manifest.json" "$TENAPP/manifest.json.bak"
+  # On ANY exit, including a failed resolve: otherwise the tenapp is left
+  # permanently without the dependency and nothing says why RTC is gone.
+  trap restore_manifest EXIT
+  step "resolving without agora_rtc (the registry has no arm64 build)"
+  (cd "$TENAPP" && python3 - <<'DROP'
+import collections, json, pathlib
+p = pathlib.Path("manifest.json")
+d = json.loads(p.read_text(), object_pairs_hook=collections.OrderedDict)
+before = len(d["dependencies"])
+d["dependencies"] = [x for x in d["dependencies"] if x.get("name") != "agora_rtc"]
+p.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+print(f"        {before} -> {len(d['dependencies'])} dependencies")
+DROP
+  ) || { restore_manifest; die "could not edit the manifest"; }
+
+  (cd "$TENAPP" && tman -y install) || {
+    restore_manifest
+    trap - EXIT
+    die "tman install failed even without agora_rtc; its output is above"
+  }
+  restore_manifest
+  trap - EXIT
+fi
+
+PREBUILT="$SCRIPTS/install_prebuilt_agora_rtc_arm64.sh"
+[[ -x "$PREBUILT" ]] || die "missing $PREBUILT; RTC cannot be installed"
+step "placing the prebuilt arm64 agora_rtc and its SDK"
+run "$PREBUILT" "$EXAMPLE_NAME" || die "agora_rtc could not be placed"
+
 # ------------------------------------------------------------------ 3
-say "3. Python packages, where the runtime will look"
+say "3. The Go app, the Python packages and the frontend"
+
+# What task install does after tman, minus the parts that assume x86. It
+# elevates only the `uv pip install --system` step, so expect a sudo prompt.
+FINISH="$SCRIPTS/finish_example_install_arm64.sh"
+[[ -x "$FINISH" ]] || die "missing $FINISH"
+step "sudo is used for the pip step only, not for go build or bun"
+run env UV_PYTHON="$(command -v "$PY" || echo "$PY")" \
+  "$FINISH" "$EXAMPLE_NAME" || die "the example could not be finished"
 
 DEPS="$TOOLS/setup_tts_runtime_deps.sh"
-[[ -x "$DEPS" ]] || die "missing $DEPS"
-step "installing for ${TEN_PYTHON_LIB_PATH:-<unresolved>}, not for whatever python3 is"
-run "$DEPS" --yes || die "the runtime's Python dependencies are not in place"
+if [[ -x "$DEPS" ]]; then
+  step "sherpa-onnx splits itself across lib and lib64; this repairs that"
+  run "$DEPS" --yes || die "the runtime's Python dependencies are not in place"
+fi
 
 # ------------------------------------------------------------------ 4
 say "4. Verify"

@@ -167,9 +167,19 @@ ai_agents/agents/scripts/install_board_arm64.sh --run       # ... and start it
 
 It sequences the scripts that do the work rather than repeating them, so every
 stage is somewhere you can go and read: the Zipformer model and the Piper voice,
-then the tenapp, then the Python packages for the interpreter the runtime loads,
-then the tests against the real model. Each stage is idempotent, so a failed run
-can be restarted without undoing anything.
+then the tenapp, then the Go app and the Python packages, then the tests against
+the real model. Each stage is idempotent, so a failed run can be restarted
+without undoing anything.
+
+It does not use `task install`. The registry has no arm64 build of `agora_rtc`
+and the tenapp manifest pins it exactly, so tman -- which resolves the whole
+dependency tree or none of it -- returns no model at all and reports only
+`Dependency resolution failed without specific error details`. `--locked` fails
+the same way, because the pinned version is the one with no arm64 build. The
+dependency is dropped from the manifest for the resolve and restored on any
+exit, and the prebuilt arm64 extension and SDK from
+`ai_agents/agents/prebuilt/linux-arm64` are placed by hand afterwards, which is
+what `install_agora_rtc_arm64.sh` has always done.
 
 It resolves `TEN_PYTHON_LIB_PATH` itself, with the finder CI uses, because the
 runtime dlopens its interpreter rather than linking it -- the library cannot be
