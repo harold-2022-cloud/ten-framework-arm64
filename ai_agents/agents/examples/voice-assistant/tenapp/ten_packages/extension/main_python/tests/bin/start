@@ -10,4 +10,35 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 SYS="${TEN_SYSTEM_DIR:-/app/agents/ten_packages/system}"
 export PYTHONPATH="..:$SYS/ten_runtime_python/lib:$SYS/ten_runtime_python/interface:$SYS/ten_ai_base/interface:$PYTHONPATH"
 
-exec python3 -m pytest tests/ "$@"
+# Run under the interpreter the TEN runtime embeds, not whichever python3 is
+# on PATH. On the board those differ -- the runtime loads libpython3.12 while
+# the shell's python3 is 3.13 -- and this suite passed under 3.13 while the
+# extension it covers only ever runs under 3.12.
+PY=""
+if [[ -n "${TEN_PYTHON_LIB_PATH:-}" ]]; then
+  version=$(basename "$TEN_PYTHON_LIB_PATH" | grep -oE '3\.[0-9]+' || true)
+  if [[ -n "$version" ]] && command -v "python$version" >/dev/null 2>&1; then
+    PY="python$version"
+  fi
+fi
+if [[ -z "$PY" ]]; then
+  PY="${PYTHON:-python3}"
+  if [[ -n "${TEN_PYTHON_LIB_PATH:-}" ]]; then
+    echo "WARNING: TEN_PYTHON_LIB_PATH names ${TEN_PYTHON_LIB_PATH##*/} but no" >&2
+    echo "         matching interpreter is on PATH; falling back to $PY." >&2
+    echo "         A pass here does not speak for the runtime." >&2
+  fi
+fi
+
+echo "running tests under $("$PY" -c 'import sys; print(sys.executable, sys.version.split()[0])')"
+# pytest-asyncio as well as pytest: without it every async test is skipped
+# with a warning and the run still reports "N passed", which reads as success
+# and verified nothing.
+if ! "$PY" -c 'import pytest_asyncio' >/dev/null 2>&1; then
+  echo "FATAL: $PY has pytest but not pytest-asyncio." >&2
+  echo "       Every async test here is async; the run would skip them all" >&2
+  echo "       and still report success." >&2
+  exit 1
+fi
+
+exec "$PY" -m pytest tests/ "$@"

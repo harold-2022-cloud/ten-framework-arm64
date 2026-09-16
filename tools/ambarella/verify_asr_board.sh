@@ -160,24 +160,28 @@ fi
 echo "  $SYSTEM_DIR"
 export TEN_SYSTEM_DIR="$SYSTEM_DIR"
 
-# --- 4. the tests that need the real model, with no skip allowed -------------
-step "engine contract against the real model"
-CONTRACT_OUT=$("$ASR_EXT/tests/bin/start" tests/test_engine_contract.py -v 2>&1)
-echo "$CONTRACT_OUT" | tail -20
-# Matched in the shell for the same SIGPIPE reason. This is the check the
-# script exists for; a pipeline that always reports 141 would disable it
-# silently, which is the exact failure it is meant to catch.
-if [[ "$CONTRACT_OUT" =~ ([0-9]+)\ skipped ]]; then
-  fail "${BASH_REMATCH[1]} engine-contract tests skipped. They are the only
-       ones that touch the real model, so a run without them proves nothing."
-fi
-[[ "$CONTRACT_OUT" =~ [0-9]+\ passed ]] ||
-  fail "the engine-contract tests did not pass"
-
-# --- 5. the rest of the ASR suite -------------------------------------------
+# --- 4. the whole suite, under that interpreter, with nothing skipped --------
 step "sherpa_onnx_asr_python, full suite"
-"$ASR_EXT/tests/bin/start" -q 2>&1 | tail -6 ||
-  fail "the ASR suite did not pass"
+# One run. The runner hands pytest tests/ itself, so naming a file here adds
+# to that rather than narrowing it -- the first version of this script ran the
+# whole suite twice and called the first time "engine contract".
+SUITE_OUT=$("$ASR_EXT/tests/bin/start" -v 2>&1)
+echo "$SUITE_OUT" | tail -8
+# Matched in the shell, not through a pipe: `grep -q` exits on its first match
+# and the writer dies of SIGPIPE, which under pipefail reports 141 and would
+# silently disable the check this script exists for.
+if [[ "$SUITE_OUT" =~ ([0-9]+)\ skipped ]]; then
+  fail "${BASH_REMATCH[1]} tests skipped. The ones that put real audio through
+       the real model skip when SHERPA_ONNX_ASR_MODEL_DIR is unset, and pytest
+       still exits 0, so a run with skips proves less than it looks like."
+fi
+[[ "$SUITE_OUT" =~ [0-9]+\ passed ]] || fail "the ASR suite did not pass"
+
+REAL_MODEL=$(echo "$SUITE_OUT" | grep -c "test_engine_contract.*PASSED")
+[[ "$REAL_MODEL" -gt 0 ]] ||
+  fail "no test_engine_contract case ran. Those are the only ones that touch
+       the model on this board; without them the run says nothing about it."
+echo "  cases that ran against the real model: $REAL_MODEL"
 
 # --- 6. main_control, where the commit-delay change lives --------------------
 step "main_python, full suite"
