@@ -10,7 +10,11 @@ from typing import Any, Dict
 from pydantic import Field
 from ten_ai_base.tts2_http import AsyncTTS2HttpConfig
 
-from .const import DEFAULT_NUM_THREADS, OUTPUT_SAMPLE_RATE
+from .const import (
+    DEFAULT_NUM_THREADS,
+    MAX_CHARS_BEFORE_SPLIT,
+    OUTPUT_SAMPLE_RATE,
+)
 
 
 class SherpaOnnxTTSConfig(AsyncTTS2HttpConfig):
@@ -25,6 +29,10 @@ class SherpaOnnxTTSConfig(AsyncTTS2HttpConfig):
     num_threads: int = DEFAULT_NUM_THREADS
     speed: float = 1.0
     speaker_id: int = 0
+
+    # Text longer than this is handed to the engine one clause at a time, so
+    # the first audio does not wait for the last word. Zero disables it.
+    max_chars_before_split: int = MAX_CHARS_BEFORE_SPLIT
 
     dump: bool = Field(default=False)
     dump_path: str = Field(default="/tmp")

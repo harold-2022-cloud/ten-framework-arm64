@@ -27,3 +27,15 @@ CALLBACK_CONTINUE = 1
 # sees. 20 ms is what the rest of the chain is built around, and it also
 # bounds how much already-synthesised audio a barge-in has to talk over.
 FRAME_MS = 20
+
+# sherpa-onnx calls back once per sentence, and it ends a sentence only at
+# 。！？ and their western equivalents. A greeting written as one sentence
+# with commas is therefore one callback, and the first audio waits for the
+# whole thing: measured against the engine, 4.37 s as written against 0.47 s
+# when broken in two. Above this many characters the text is handed over a
+# clause at a time instead. Zero disables it.
+MAX_CHARS_BEFORE_SPLIT = 24
+
+# Where a clause may end. The sentence marks are here too, so a long run of
+# sentences is also broken up rather than handed over whole.
+CLAUSE_MARKS = "，,、；;：:。.！!？?"

@@ -29,6 +29,7 @@ from .config import SherpaOnnxTTSConfig
 from .const import (
     CALLBACK_CONTINUE,
     CALLBACK_STOP,
+    CLAUSE_MARKS,
     FRAME_MS,
     LOG_CATEGORY_KEY_POINT,
     LOG_CATEGORY_VENDOR,
@@ -40,6 +41,52 @@ _WHITESPACE = re.compile(r"\s+")
 def sanitise(text: str) -> str:
     """Fold whitespace runs into single spaces and trim the result."""
     return _WHITESPACE.sub(" ", text).strip()
+
+
+def split_for_latency(text: str, max_chars: int) -> list:
+    """Break a long run of clauses so the first audio does not wait.
+
+    The engine ends a sentence only at 。！？, so a line written with commas
+    is one callback however long it is. Splitting on clause punctuation gives
+    the listener the first clause while the rest is still being synthesised.
+
+    Never splits mid-clause: a cut inside a word changes how it is read, and
+    a clause with no punctuation is returned whole however long it is.
+    """
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text]
+
+    # Cut at every clause mark first, keeping the mark with the clause it
+    # ends so the phrasing survives.
+    clauses = []
+    current = ""
+    for char in text:
+        current += char
+        if char in CLAUSE_MARKS:
+            clauses.append(current)
+            current = ""
+    if current:
+        clauses.append(current)
+    if len(clauses) < 2:
+        # Nothing to cut on. A cut inside a word changes how it is read.
+        return [text]
+
+    # The first piece is the first clause alone, however short: it is the one
+    # the listener is waiting for, and everything after it is synthesised
+    # while that clause plays. Later pieces are packed up to the limit,
+    # because by then the only thing that matters is keeping ahead of
+    # playback, and fewer calls do that better.
+    pieces = [clauses[0]]
+    current = ""
+    for clause in clauses[1:]:
+        if current and len(current) + len(clause) > max_chars:
+            pieces.append(current)
+            current = clause
+        else:
+            current += clause
+    if current:
+        pieces.append(current)
+    return pieces
 
 
 def load_vits_engine(config: SherpaOnnxTTSConfig):
@@ -213,14 +260,21 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
             # by tests/test_engine_contract.py.
             return CALLBACK_STOP if self._is_cancelled else CALLBACK_CONTINUE
 
+        pieces = split_for_latency(
+            clean_text, self.config.max_chars_before_split
+        )
+
         def synthesise() -> None:
             try:
-                engine.generate(
-                    clean_text,
-                    sid=self.config.speaker_id,
-                    speed=self.config.speed,
-                    callback=on_chunk,
-                )
+                for piece in pieces:
+                    if self._is_cancelled:
+                        break
+                    engine.generate(
+                        piece,
+                        sid=self.config.speaker_id,
+                        speed=self.config.speed,
+                        callback=on_chunk,
+                    )
             except Exception as err:  # pylint: disable=broad-except
                 failure.append(err)
             finally:

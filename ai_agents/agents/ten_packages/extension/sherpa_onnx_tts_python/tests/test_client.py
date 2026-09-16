@@ -371,3 +371,77 @@ async def test_a_completed_turn_ends_rather_than_flushing():
 
         assert kinds_of(events)[-1] == TTS2HttpResponseEventType.END
         assert client._is_cancelled is False  # pylint: disable=protected-access
+
+
+# --- Behaviour: a long sentence must not hold back its own first audio ----
+
+
+def test_a_short_text_is_not_split():
+    from sherpa_onnx_tts_python.sherpa_onnx_tts import split_for_latency
+
+    assert split_for_latency("你好。", 24) == ["你好。"]
+
+
+def test_a_long_clause_run_is_split_on_its_punctuation():
+    """Measured against the real engine: the greeting as one sentence gave
+    one callback and first audio at the full synthesis time; broken in two it
+    gave the first audio nine times sooner."""
+    from sherpa_onnx_tts_python.sherpa_onnx_tts import split_for_latency
+
+    text = "你好，我是在安霸开发板上运行的语音助理，有什么可以帮你的吗？"
+    pieces = split_for_latency(text, 24)
+
+    assert len(pieces) > 1
+    assert "".join(pieces) == text
+    # The first piece is the first clause alone -- the one being waited for.
+    assert pieces[0] == "你好，"
+
+
+def test_splitting_keeps_every_character():
+    from sherpa_onnx_tts_python.sherpa_onnx_tts import split_for_latency
+
+    text = "第一句，第二句；第三句。第四句！第五句？尾巴"
+    assert "".join(split_for_latency(text, 4)) == text
+
+
+def test_text_without_punctuation_is_left_whole():
+    """Cutting mid-word would change the pronunciation."""
+    from sherpa_onnx_tts_python.sherpa_onnx_tts import split_for_latency
+
+    text = "一二三四五六七八九十一二三四五六七八九十"
+    assert split_for_latency(text, 5) == [text]
+
+
+@pytest.mark.asyncio
+async def test_the_first_frame_arrives_before_the_whole_text_is_synthesised():
+    """The engine is called once per piece, so the listener hears the first
+    clause while the rest is still being made."""
+    engine = FakeEngine(
+        sample_rate=16000, num_chunks=1, samples_per_chunk=320, chunk_delay=0.05
+    )
+    client = make_client(
+        engine, output_sample_rate=16000, max_chars_before_split=8
+    )
+
+    text = "你好，我是在安霸开发板上运行的语音助理，有什么可以帮你的吗？"
+    async for chunk, kind in client.get(text, "req-1"):
+        if kind == TTS2HttpResponseEventType.RESPONSE and chunk:
+            break
+
+    # The first audio came from the first clause, not from the whole line.
+    # How many further pieces the worker has reached by now is a race; that
+    # the first one is a clause is not.
+    assert engine.texts[0].endswith("，")
+    assert engine.texts[0] != text
+
+
+@pytest.mark.asyncio
+async def test_splitting_is_off_when_the_limit_is_zero():
+    engine = FakeEngine(sample_rate=16000, num_chunks=1, samples_per_chunk=320)
+    client = make_client(
+        engine, output_sample_rate=16000, max_chars_before_split=0
+    )
+    text = "你好，我是在安霸开发板上运行的语音助理。"
+    await drain(client, text=text)
+
+    assert engine.texts == [text]
