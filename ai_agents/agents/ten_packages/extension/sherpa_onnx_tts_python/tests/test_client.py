@@ -464,3 +464,14 @@ async def test_the_pieces_and_the_audio_are_logged():
     assert "piece(s)" in joined, "the split is not recorded"
     assert "frames sent" in joined, "the audio produced is not recorded"
     assert "done" in joined
+
+
+def test_splitting_is_off_by_default():
+    """It buys first-audio latency by resynthesising a sentence in pieces,
+    and nobody has listened to the result. Measured on 2026-09-16: the same
+    twenty-character greeting produced 3827 ms of audio whole and 4191 ms
+    split, which is a different reading, not a faster one."""
+    from sherpa_onnx_tts_python.const import MIN_CHARS_TO_SPLIT
+
+    assert MIN_CHARS_TO_SPLIT == 0
+    assert SherpaOnnxTTSConfig(voice_dir="/x").min_chars_to_split == 0

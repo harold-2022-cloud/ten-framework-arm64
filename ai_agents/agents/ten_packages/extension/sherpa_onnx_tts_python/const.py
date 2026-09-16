@@ -45,7 +45,16 @@ FRAME_MS = 20
 # 0.62 s, 12 at 0.47 s, 16 at 0.38 s. Eight is the value here because it is
 # also low enough to split a 12-character answer (1.74 s to 0.98 s), which
 # the higher ones leave whole.
-MIN_CHARS_TO_SPLIT = 8
+# Off. Splitting a sentence means two independent generate() calls, each with
+# its own onset, release and prosody, and a seam between them. The greeting --
+# 你好，我是在安霸开发板上运行的语音助理。-- went from one call to two when this
+# was 8, and its audio from 3827 ms to 4191 ms for the same twenty characters:
+# not a faster reply, a different reading of it.
+#
+# The latency it buys is real and measured: first audio 3.41 s to 0.46 s. What
+# was never measured is what it does to the sound. Until somebody listens to
+# both, the reply that arrives late is better than the one that arrives wrong.
+MIN_CHARS_TO_SPLIT = 0
 CHARS_PER_PIECE = 24
 
 # Where a clause may end. The sentence marks are here too, so a long run of
