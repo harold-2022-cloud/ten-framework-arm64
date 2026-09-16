@@ -547,6 +547,7 @@ class AmbarellaChatClient:
                         # N1-655 on 2026-09-14.
                         splitter = _ReasoningSplitter()
                         reasoning = ""
+                        reasoning_done = False
 
                         async def _pairs():
                             async for chunk in self._iter_deltas(resp):
@@ -565,13 +566,21 @@ class AmbarellaChatClient:
                                     delta=text,
                                     created=created,
                                 )
+                                continue
+
+                            if reasoning and not reasoning_done:
+                                # The thinking ended here, once, at the tag.
+                                # Sending Done beside every delta gave the
+                                # display 262 completed thoughts for one,
+                                # measured on 2026-09-16: main_control marks
+                                # each one final (extension.py:128-133).
+                                reasoning_done = True
                                 yield LLMResponseReasoningDone(
                                     response_id=response_id,
                                     role="assistant",
                                     content=reasoning,
                                     created=created,
                                 )
-                                continue
                             if first_delta_at is None:
                                 first_delta_at = time.monotonic()
                                 self.ten_env.log_info(
@@ -603,6 +612,15 @@ class AmbarellaChatClient:
                     f"{len(full_content)} chars"
                 )
                 raise
+
+        if streaming and reasoning and not reasoning_done:
+            # The stream ended without the tag, so the thinking ended with it.
+            yield LLMResponseReasoningDone(
+                response_id=response_id,
+                role="assistant",
+                content=reasoning,
+                created=created,
+            )
 
         elapsed = time.monotonic() - started
         ttft = (first_delta_at - started) if first_delta_at else elapsed

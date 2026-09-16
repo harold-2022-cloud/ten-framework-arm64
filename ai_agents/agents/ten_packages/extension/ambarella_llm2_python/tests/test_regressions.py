@@ -593,3 +593,32 @@ def test_escapes_inside_reasoning_are_decoded():
         ("reasoning", " "),
         ("reasoning", "二"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_is_done_once_not_once_per_character():
+    """Measured on the board: 262 reasoning deltas and 262 reasoning dones.
+
+    main_control turns every Done into a transcript marked final
+    (extension.py:128-133), so the display received 262 completed thoughts
+    for one. Done means the thinking ended, which happens once, at the tag.
+    """
+    client = make_client()
+    out = await collect(client, list("想了很久</think>答案") + ["<DONE>"])
+
+    deltas = [r for r in out if isinstance(r, LLMResponseReasoningDelta)]
+    dones = [r for r in out if isinstance(r, LLMResponseReasoningDone)]
+
+    assert len(deltas) > 1, "reasoning should still stream"
+    assert len(dones) == 1
+    assert dones[0].content == "想了很久"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_is_done_when_the_stream_ends_without_the_tag():
+    """No tag ever came, so the thinking ended when the stream did."""
+    client = make_client()
+    out = await collect(client, list("沒有標籤") + ["<DONE>"])
+
+    dones = [r for r in out if isinstance(r, LLMResponseReasoningDone)]
+    assert len(dones) == 1
