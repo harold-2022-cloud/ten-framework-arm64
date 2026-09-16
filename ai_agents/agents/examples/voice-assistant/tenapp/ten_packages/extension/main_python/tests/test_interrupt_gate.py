@@ -151,3 +151,52 @@ def test_the_logged_sequence_no_longer_cuts_the_answer_off():
     # Four interrupts before; now only the final one, which is the user
     # genuinely having spoken.
     assert fired == [" 如果用于。"]
+
+
+# --- While the assistant is thinking ---------------------------------------
+
+
+def test_a_partial_does_not_interrupt_while_the_assistant_thinks():
+    """The window the first fix missed.
+
+    From task_run.log 01:27:53-01:27:55: the question went to the LLM, and
+    2.3 seconds later the partial ' 加法' -- the tail of the user's own
+    sentence -- cancelled the turn before it had produced a character. Two of
+    five questions died this way; the third was the user asking 你还在吗？
+    """
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    assert gate.should_interrupt(" 加法", final=False) is False
+
+
+def test_a_final_still_interrupts_while_the_assistant_thinks():
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    assert gate.should_interrupt("算了不用了", final=True) is True
+
+
+def test_thinking_and_speaking_clear_independently():
+    """Thinking ends when the answer starts; speaking ends when it stops."""
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    gate.set_speaking(True)
+
+    gate.set_thinking(False)
+    assert gate.should_interrupt("還在講", final=False) is False
+
+    gate.set_speaking(False)
+    assert gate.should_interrupt("講完了", final=False) is True
+
+
+def test_the_old_behaviour_covers_thinking_too():
+    gate = InterruptGate(interrupt_on_partial_while_speaking=True)
+    gate.set_thinking(True)
+    assert gate.should_interrupt(" 加法", final=False) is True
+
+
+def test_the_logged_question_survives_its_own_tail():
+    """The exact partials that killed Q2, with the assistant thinking."""
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    observed = [(" 家", False), (" 加法", False), (" 家法", False)]
+    assert [t for t, f in observed if gate.should_interrupt(t, f)] == []

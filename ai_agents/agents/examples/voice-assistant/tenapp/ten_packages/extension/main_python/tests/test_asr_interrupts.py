@@ -62,3 +62,35 @@ async def test_a_final_still_interrupts_while_speaking():
     await ext._on_tts_speaking(_Speaking(True))
     await ext._on_asr_result(_Result("停一下", final=True))
     assert ext._interrupt.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_question_is_not_killed_by_the_tail_of_its_own_sentence():
+    """Replayed from task_run.log 01:27:53-01:27:55.
+
+    The question went to the model; 2.3 seconds later ' 加法' arrived and
+    cancelled the turn before a character came back. Two of five questions
+    died this way.
+    """
+    ext = make_extension()
+    await ext._on_asr_result(
+        _Result("那你告诉我如何教会六岁小孩加法", final=True)
+    )
+    ext._interrupt.reset_mock()
+
+    for tail in (" 家", " 加法", " 家法"):
+        await ext._on_asr_result(_Result(tail, final=False))
+
+    assert ext._interrupt.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_the_gate_reopens_when_the_answer_has_been_heard():
+    ext = make_extension()
+    await ext._on_asr_result(_Result("問題", final=True))
+    await ext._on_tts_speaking(_Speaking(True))
+    await ext._on_tts_speaking(_Speaking(False))
+    ext._interrupt.reset_mock()
+
+    await ext._on_asr_result(_Result("下一句話", final=False))
+    assert ext._interrupt.await_count == 1
