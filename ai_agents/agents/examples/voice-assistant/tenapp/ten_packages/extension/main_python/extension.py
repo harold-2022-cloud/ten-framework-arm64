@@ -49,7 +49,15 @@ class MainControlExtension(AsyncExtension):
         self._asr_partial_commit_text = ""
         self._asr_partial_commit_generation = 0
 
-    ASR_PARTIAL_COMMIT_DELAY_SECONDS = 1.2
+    # A stand-in final for an ASR that never sends one. It must stay longer
+    # than the ASR's own endpoint takes, or it pre-empts it: sherpa_onnx_asr
+    # runs rule2_min_trailing_silence=1.2 s, and its final still has to wait
+    # for that silence to arrive as audio and be decoded, so it lands ~1.32 s
+    # after the last partial (measured, task_run.log 10:20:28.514-30.070).
+    # At 1.2 s the timer won every race and the engine's own final was thrown
+    # away as a duplicate; the acoustic decision has to beat the clock, so
+    # this is kept clear of that 1.32 s.
+    ASR_PARTIAL_COMMIT_DELAY_SECONDS = 2.0
 
     def _current_metadata(self) -> dict:
         return {"session_id": self.session_id, "turn_id": self.turn_id}

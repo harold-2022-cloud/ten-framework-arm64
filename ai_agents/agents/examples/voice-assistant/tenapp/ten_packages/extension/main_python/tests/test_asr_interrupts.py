@@ -278,3 +278,49 @@ async def test_an_asr_final_cancels_the_stable_partial_fallback():
     await asyncio.sleep(0.06)
 
     ext.agent.queue_llm_input.assert_awaited_once_with("讲一个笑话。")
+
+
+# Measured on the board in task_run.log, 10:20:28.514 -> 10:20:30.070: with
+# rule2_min_trailing_silence=1.2 s the engine's final landed 1.316 s after the
+# last partial. The extra 0.116 s over rule2 is that silence arriving as audio
+# and being decoded, which a wall-clock timer does not have to wait for.
+ASR_FINAL_AFTER_LAST_PARTIAL_SECONDS = 1.316
+
+
+def test_the_commit_timer_stays_clear_of_the_asr_engine():
+    """The fallback must not pre-empt the ASR that does finalise.
+
+    At 1.2 s it did: the timer committed at +1.465 s and the engine's own
+    final, 0.09 s behind, was dropped as a repeat of a question already in
+    flight. Lower this below the engine and every final in the graph comes
+    from a clock that cannot hear the speaker.
+    """
+    assert (
+        MainControlExtension.ASR_PARTIAL_COMMIT_DELAY_SECONDS
+        > ASR_FINAL_AFTER_LAST_PARTIAL_SECONDS
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_asr_final_wins_the_race_at_the_real_timings():
+    """Replayed from task_run.log 10:20:28.514-10:20:30.070, real gaps.
+
+    The partials and the final keep the spacing they had on the board, so
+    what is under test is the production delay against the engine that was
+    actually running.
+    """
+    ext = make_extension()
+
+    await ext._on_asr_result(_Result("再讲讲一", final=False))
+    await asyncio.sleep(0.241)
+    await ext._on_asr_result(_Result("再讲讲一个", final=False))
+    await asyncio.sleep(ASR_FINAL_AFTER_LAST_PARTIAL_SECONDS)
+
+    assert ext.agent.queue_llm_input.await_count == 0, "the timer pre-empted"
+
+    await ext._on_asr_result(_Result("再讲讲一个", final=True))
+    ext.agent.queue_llm_input.assert_awaited_once_with("再讲讲一个")
+
+    # And the timer, still armed, must not ask a second time behind it.
+    await asyncio.sleep(0.1)
+    assert ext.agent.queue_llm_input.await_count == 1, "asked twice"
