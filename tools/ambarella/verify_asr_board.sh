@@ -44,7 +44,6 @@ exec > >(tee "$LOG") 2>&1
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ASR_EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/sherpa_onnx_asr_python"
 MAIN_EXT="$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/extension/main_python"
-SYSTEM_DIR="$REPO_ROOT/ai_agents/agents/ten_packages/system"
 
 fail() { echo; echo "FAILED: $*"; echo "log: $LOG"; exit 1; }
 step() { echo; echo "=== $* ==="; }
@@ -116,6 +115,49 @@ for pattern in 'encoder-*.onnx' 'decoder-*.onnx' 'joiner-*.onnx' 'tokens.txt'; d
 done
 echo "  $MODEL_DIR"
 export SHERPA_ONNX_ASR_MODEL_DIR="$MODEL_DIR"
+
+# --- 3b. where the runtime and the base classes actually are -----------------
+step "system packages"
+# Not a fixed path. These are registry dependencies that tman materialises,
+# so a machine that installed the example has them under its tenapp while a
+# plain checkout has them under agents/. Guessing one produced
+# "No module named ten_runtime" on the board with the directory sitting
+# somewhere else in the same tree.
+CANDIDATES=(
+  "${TEN_SYSTEM_DIR:-}"
+  "$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/system"
+  "$REPO_ROOT/ai_agents/agents/ten_packages/system"
+  "$ASR_EXT/.ten/app/ten_packages/system"
+)
+SYSTEM_DIR=""
+for candidate in "${CANDIDATES[@]}"; do
+  [[ -n "$candidate" ]] || continue
+  if [[ -d "$candidate/ten_runtime_python/interface" &&
+        -d "$candidate/ten_ai_base/interface" ]]; then
+    SYSTEM_DIR="$candidate"
+    break
+  fi
+done
+if [[ -z "$SYSTEM_DIR" ]]; then
+  while IFS= read -r hit; do
+    parent=$(dirname "$hit")
+    if [[ -d "$parent/ten_ai_base/interface" ]]; then
+      SYSTEM_DIR="$parent"
+      break
+    fi
+  done < <(find "$REPO_ROOT" -type d -name ten_runtime_python 2>/dev/null)
+fi
+if [[ -z "$SYSTEM_DIR" ]]; then
+  echo "  looked in:"
+  for candidate in "${CANDIDATES[@]}"; do
+    [[ -n "$candidate" ]] && echo "    $candidate"
+  done
+  fail "no directory holds both ten_runtime_python/interface and
+       ten_ai_base/interface. They are registry dependencies rather than
+       source, so they exist only where tman put them:
+         cd $REPO_ROOT/ai_agents/agents/examples/voice-assistant && task install"
+fi
+echo "  $SYSTEM_DIR"
 export TEN_SYSTEM_DIR="$SYSTEM_DIR"
 
 # --- 4. the tests that need the real model, with no skip allowed -------------
