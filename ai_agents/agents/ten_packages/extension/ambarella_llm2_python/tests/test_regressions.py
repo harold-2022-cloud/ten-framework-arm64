@@ -433,3 +433,73 @@ def test_history_is_kept_when_the_option_is_off():
     assert (
         client._reset_for_this_turn() is False
     )  # pylint: disable=protected-access
+
+
+# --- A pinned framing must not discard the answer in silence -------------
+
+
+def _fake_response(chunks):
+    class _Content:
+        async def iter_any(self):
+            for chunk in chunks:
+                yield chunk
+
+    class _Resp:
+        content = _Content()
+
+    return _Resp()
+
+
+def _client(**overrides):
+    from ambarella_llm2_python.ambarella import (
+        AmbarellaChatClient,
+        AmbarellaLLM2Config,
+    )
+
+    class _Env:
+        def __init__(self):
+            self.lines = []
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: self.lines.append(a[0] if a else "")
+
+    env = _Env()
+    return AmbarellaChatClient(env, AmbarellaLLM2Config(**overrides)), env
+
+
+# What the board actually returned, read off the socket on 2026-09-15:
+# Content-Type said text/event-stream and the body carried no 'data:' framing.
+UNFRAMED = [
+    b'Alright, the user said "Hello." ',
+    "你好！有什么可以帮你的吗？\n".encode(),
+]
+
+
+@pytest.mark.asyncio
+async def test_an_unframed_body_is_not_discarded_when_sse_is_pinned():
+    """Pinned to sse, every line without 'data:' was dropped by a continue,
+    and the turn ended with no text, no error and no log line."""
+    client, _ = _client(response_format="sse")
+    out = [text async for text in client._iter_deltas(_fake_response(UNFRAMED))]
+
+    assert "".join(out).strip(), "the whole answer was swallowed"
+
+
+@pytest.mark.asyncio
+async def test_a_framing_mismatch_is_reported():
+    client, env = _client(response_format="sse")
+    async for _ in client._iter_deltas(_fake_response(UNFRAMED)):
+        pass
+
+    assert any(
+        "framing" in str(line).lower() for line in env.lines
+    ), f"nothing said the framing did not match: {env.lines}"
+
+
+@pytest.mark.asyncio
+async def test_a_properly_framed_sse_body_is_unaffected():
+    client, _ = _client(response_format="sse")
+    framed = [b"data: hello\n", b"data:  world\n", b"data: <DONE>\n"]
+    out = [text async for text in client._iter_deltas(_fake_response(framed))]
+
+    assert "".join(out) == "hello world"

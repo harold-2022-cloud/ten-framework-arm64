@@ -29,6 +29,7 @@ from ten_runtime import AsyncTenEnv
 
 # The runtime's own category for lines a human reads when something is slow.
 LOG_CATEGORY_KEY_POINT = "key_point"
+LOG_CATEGORY_VENDOR = "vendor"
 
 SSE_PREFIX = "data:"
 # The board terminates with <DONE>; [DONE] is the convention elsewhere and is
@@ -342,6 +343,13 @@ class AmbarellaChatClient:
         """
         mode = self.config.response_format
         buffer = ""
+        # A pinned framing is a claim about the server, and the server can
+        # stop honouring it. Every line that does not match used to be
+        # dropped by the continue below, so a body in the other framing
+        # produced no text, no error and no log line -- the turn simply had
+        # nothing in it. Track whether anything matched, and say so.
+        sse_lines_seen = 0
+        unmatched_lines = 0
         # iter_any() yields arbitrary TCP chunks, so a multi-byte character
         # can straddle two of them. A per-chunk bytes.decode() would turn
         # every split CJK character into U+FFFD, silently: the stream is
@@ -374,7 +382,29 @@ class AmbarellaChatClient:
                 line, buffer = buffer.split("\n", 1)
                 line = line.rstrip("\r\n")
                 if not line.startswith(SSE_PREFIX):
+                    # A blank line separates SSE events and carries nothing;
+                    # only a non-empty line that is not an event is evidence
+                    # of the wrong framing.
+                    if line.strip():
+                        unmatched_lines += 1
+                        if sse_lines_seen == 0:
+                            # Nothing has parsed as SSE, so this is not a
+                            # stray comment inside a stream -- it is the
+                            # whole body in another framing. Switch rather
+                            # than discard it.
+                            self.ten_env.log_error(
+                                "[Ambarella] framing mismatch: pinned "
+                                f"response_format={self.config.response_format}"
+                                " but the body has no 'data:' prefix; "
+                                "reading it as raw text instead. Pin "
+                                'response_format to "raw" if this persists.',
+                                category=LOG_CATEGORY_VENDOR,
+                            )
+                            mode = "raw"
+                            buffer = line + "\n" + buffer
+                            break
                     continue
+                sse_lines_seen += 1
                 payload = _sse_payload(line)
                 if payload.strip() in SSE_DONE_TOKENS:
                     return
@@ -392,6 +422,15 @@ class AmbarellaChatClient:
             return
         tail = buffer.rstrip("\r\n")
         if not tail.startswith(SSE_PREFIX):
+            if tail.strip() and sse_lines_seen == 0:
+                # A body with no newline at all, in the other framing.
+                self.ten_env.log_error(
+                    "[Ambarella] framing mismatch: pinned "
+                    f"response_format={self.config.response_format} but the "
+                    "body has no 'data:' prefix; reading it as raw text.",
+                    category=LOG_CATEGORY_VENDOR,
+                )
+                yield tail
             return
         payload = _sse_payload(tail)
         if payload.strip() and payload.strip() not in SSE_DONE_TOKENS:
