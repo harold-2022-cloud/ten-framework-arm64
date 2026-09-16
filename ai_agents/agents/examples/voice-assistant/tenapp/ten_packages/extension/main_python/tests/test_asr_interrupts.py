@@ -94,3 +94,18 @@ async def test_the_gate_reopens_when_the_answer_has_been_heard():
 
     await ext._on_asr_result(_Result("下一句話", final=False))
     assert ext._interrupt.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_three_questions_in_a_row_all_reach_the_model():
+    """Replayed from task_run.log 03:16:45-03:17:10: three questions went to
+    the model and none was answered, each cancelled by the next."""
+    ext = make_extension()
+
+    for text in ("讲一个故事。", " 你还在吗？", " 你是谁？"):
+        await ext._on_asr_result(_Result(text, final=True))
+
+    assert ext.agent.queue_llm_input.await_count == 3
+    # The first was interrupted by nothing; the two after it arrived while
+    # the model was still thinking and must not have cancelled it.
+    assert ext._interrupt.await_count == 1

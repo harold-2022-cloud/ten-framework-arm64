@@ -58,6 +58,15 @@ class InterruptGate:
             # The turn is over, so the next one may open with the same words
             # and must still count as new speech.
             self._last_text = ""
+            if self._thinking and not self._speaking:
+                # Nothing is playing, so there is nothing to cut in on -- and
+                # the model is mid-answer to the question before this one.
+                # Cancelling it throws that answer away; the queue behind the
+                # model will take this question next. Measured on 2026-09-16:
+                # three questions, three cancellations, no answer at all,
+                # because the board takes fifteen to forty seconds and the
+                # user spoke every twenty.
+                return False
             return True
         if self._busy and not self._interrupt_on_partial_while_speaking:
             # Measured on 2026-09-16, once while speaking and once while

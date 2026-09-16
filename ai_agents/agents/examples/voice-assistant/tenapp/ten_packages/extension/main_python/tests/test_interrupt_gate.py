@@ -169,10 +169,16 @@ def test_a_partial_does_not_interrupt_while_the_assistant_thinks():
     assert gate.should_interrupt(" 加法", final=False) is False
 
 
-def test_a_final_still_interrupts_while_the_assistant_thinks():
+def test_a_final_while_thinking_is_queued_rather_than_cancelling():
+    """Written the other way round this morning, before the session that
+    showed why. A final did cancel the turn in flight, and with a model that
+    takes tens of seconds every question cancelled the one before it: three
+    asked, none answered. There is nothing playing to cut in on while the
+    model thinks, and the queue behind it holds the new question."""
     gate = InterruptGate()
     gate.set_thinking(True)
-    assert gate.should_interrupt("算了不用了", final=True) is True
+    assert gate.should_interrupt("算了不用了", final=False) is False
+    assert gate.should_interrupt("算了不用了", final=True) is False
 
 
 def test_thinking_and_speaking_clear_independently():
@@ -200,3 +206,41 @@ def test_the_logged_question_survives_its_own_tail():
     gate.set_thinking(True)
     observed = [(" 家", False), (" 加法", False), (" 家法", False)]
     assert [t for t, f in observed if gate.should_interrupt(t, f)] == []
+
+
+# --- A new question must not starve the one before it ----------------------
+
+
+def test_a_final_while_thinking_does_not_cancel_the_turn():
+    """From task_run.log at 03:16-03:17: three questions, no answers.
+
+    Each final cancelled the turn before it, and the board takes fifteen to
+    forty seconds to answer, so a user speaking every twenty seconds starves
+    every turn. The queue behind the model holds the new question; cancelling
+    is what threw it away.
+    """
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    assert gate.should_interrupt("你还在吗？", final=True) is False
+
+
+def test_a_final_while_speaking_still_interrupts():
+    """Cutting in on an answer you can hear is barge-in, and should work."""
+    gate = InterruptGate()
+    gate.set_thinking(False)
+    gate.set_speaking(True)
+    assert gate.should_interrupt("停，我問別的", final=True) is True
+
+
+def test_a_final_interrupts_when_the_assistant_is_idle():
+    gate = InterruptGate()
+    assert gate.should_interrupt("你是谁？", final=True) is True
+
+
+def test_a_final_while_both_thinking_and_speaking_interrupts():
+    """The model is still writing while its first sentences play; the user
+    can hear something, so cutting in is deliberate."""
+    gate = InterruptGate()
+    gate.set_thinking(True)
+    gate.set_speaking(True)
+    assert gate.should_interrupt("停", final=True) is True
