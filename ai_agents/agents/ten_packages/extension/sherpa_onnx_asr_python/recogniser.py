@@ -13,6 +13,7 @@ changed, one final per utterance.
 import asyncio
 import glob
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
@@ -22,6 +23,13 @@ from .config import SherpaOnnxASRConfig
 from .const import LOG_CATEGORY_KEY_POINT, SAMPLE_RATE
 
 BYTES_PER_SAMPLE = 2
+
+# How far the decoder may fall behind the audio before it is worth saying so,
+# and how far it has to recover before the next time counts as new. Hysteresis
+# rather than a level, so draining the start-up buffer is two lines and not one
+# per frame.
+BEHIND_WARN_MS = 500
+BEHIND_CLEAR_MS = 200
 
 
 @dataclass
@@ -97,6 +105,7 @@ class SherpaOnnxRecogniser:
         config: SherpaOnnxASRConfig,
         ten_env,
         load_engine: Optional[Callable[[SherpaOnnxASRConfig], Any]] = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.config = config
         self.ten_env = ten_env
@@ -110,6 +119,19 @@ class SherpaOnnxRecogniser:
         self._samples_accepted = 0
         self._utterance_start_ms = 0
 
+        # What the last run's log could not answer was in here and never said:
+        # which rule ended an utterance, and how far behind the audio the
+        # decoder was running. Both had to be reconstructed by arithmetic
+        # across six lines, which is not a thing to do twice.
+        self._clock = clock
+        self._clock_start: Optional[float] = None
+        self._last_text_change_ms = 0
+        self._decodes = 0
+        self._behind = False
+        # Filled on the worker thread, drained on the loop: ten_env is not
+        # ours to call from inside run_in_executor.
+        self._notes: List[str] = []
+
     # --- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
@@ -117,6 +139,10 @@ class SherpaOnnxRecogniser:
         async with self._lock:
             if self.engine is not None:
                 return
+            # Before the load, not after: the audio clock is measured against
+            # this, and the frames that arrive while the model loads are the
+            # ones that put the decoder behind in the first place.
+            self._clock_start = self._clock()
             engine = await asyncio.get_running_loop().run_in_executor(
                 None, self._load_engine, self.config
             )
@@ -133,6 +159,11 @@ class SherpaOnnxRecogniser:
         self._last_emitted = ""
         self._samples_accepted = 0
         self._utterance_start_ms = 0
+        self._clock_start = None
+        self._last_text_change_ms = 0
+        self._decodes = 0
+        self._behind = False
+        self._notes.clear()
 
     def is_running(self) -> bool:
         return self.engine is not None
@@ -157,7 +188,47 @@ class SherpaOnnxRecogniser:
         self.stream.accept_waveform(SAMPLE_RATE, samples)
         self._samples_accepted += samples.size
 
-        return await self._drain()
+        out = await self._drain()
+        self._report_lag()
+        self._flush_notes()
+        return out
+
+    @property
+    def _lag_ms(self) -> int:
+        """How far the audio accepted trails the clock since start().
+
+        Relative, not absolute: capture may begin a little before or after the
+        extension does, so the useful reading is the shape -- large while the
+        buffer that built up during the model load drains, near zero once the
+        decoder is keeping up.
+        """
+        if self._clock_start is None:
+            return 0
+        wall_ms = (self._clock() - self._clock_start) * 1000
+        # Rounded, not truncated: a difference that is exactly 1020 ms comes
+        # out of the float subtraction a hair under, and int() would log 999.
+        return round(wall_ms - self._elapsed_ms)
+
+    def _report_lag(self) -> None:
+        lag = self._lag_ms
+        if not self._behind and lag >= BEHIND_WARN_MS:
+            self._behind = True
+            self.ten_env.log_warn(
+                f"decoder {lag} ms behind the audio "
+                f"({self._elapsed_ms} ms accepted)"
+            )
+        elif self._behind and lag <= BEHIND_CLEAR_MS:
+            self._behind = False
+            self.ten_env.log_info(
+                f"decoder caught up, {lag} ms behind "
+                f"({self._elapsed_ms} ms accepted)",
+                category=LOG_CATEGORY_KEY_POINT,
+            )
+
+    def _flush_notes(self) -> None:
+        for note in self._notes:
+            self.ten_env.log_info(note, category=LOG_CATEGORY_KEY_POINT)
+        self._notes.clear()
 
     async def _drain(self) -> List[Transcript]:
         """Decode while the engine has enough, collecting what changed."""
@@ -176,24 +247,44 @@ class SherpaOnnxRecogniser:
 
         while engine.is_ready(stream):
             engine.decode_stream(stream)
+            self._decodes += 1
             text = engine.get_result(stream).strip()
             endpoint = engine.is_endpoint(stream)
 
             if endpoint:
                 if text:
                     out.append(self._make(text, final=True))
+                # sherpa-onnx says an endpoint happened, never which rule
+                # said so. The trailing silence is the thing that tells them
+                # apart -- rule1 and rule2 are exactly that, and rule3 shows
+                # up as a long utterance instead -- so measure it here rather
+                # than reconstruct it from timestamps afterwards.
+                self._note_endpoint(text)
                 # Reset even with no text: silence long enough to end an
                 # utterance still ends it, and the next one must start clean.
                 engine.reset(stream)
                 self._last_emitted = ""
                 self._utterance_start_ms = self._elapsed_ms
+                self._last_text_change_ms = self._elapsed_ms
                 continue
 
             if text and text != self._last_emitted:
                 self._last_emitted = text
+                self._last_text_change_ms = self._elapsed_ms
                 out.append(self._make(text, final=False))
 
         return out
+
+    def _note_endpoint(self, text: str) -> None:
+        # Runs on the worker thread; the line is logged once back on the loop.
+        trailing = max(0, self._elapsed_ms - self._last_text_change_ms)
+        utterance = max(0, self._elapsed_ms - self._utterance_start_ms)
+        self._notes.append(
+            f"endpoint after {trailing} ms of trailing silence: "
+            f"utterance={utterance} ms decodes={self._decodes} "
+            f"lag={self._lag_ms} ms text={text!r}"
+        )
+        self._decodes = 0
 
     def _make(self, text: str, final: bool) -> Transcript:
         start = self._utterance_start_ms
@@ -216,9 +307,17 @@ class SherpaOnnxRecogniser:
 
         self.stream.input_finished()
         out = await self._drain()
+        self._flush_notes()
 
         pending = self._last_emitted
         if pending:
+            self.ten_env.log_info(
+                f"finalize took the utterance before any endpoint: "
+                f"{self._elapsed_ms - self._utterance_start_ms} ms of audio, "
+                f"{max(0, self._elapsed_ms - self._last_text_change_ms)} ms of "
+                f"trailing silence, text={pending!r}",
+                category=LOG_CATEGORY_KEY_POINT,
+            )
             out.append(self._make(pending, final=True))
             self._last_emitted = ""
 
@@ -226,4 +325,5 @@ class SherpaOnnxRecogniser:
         # a finalized stream accepts no more audio.
         self.stream = self.engine.create_stream()
         self._utterance_start_ms = self._elapsed_ms
+        self._last_text_change_ms = self._elapsed_ms
         return out
