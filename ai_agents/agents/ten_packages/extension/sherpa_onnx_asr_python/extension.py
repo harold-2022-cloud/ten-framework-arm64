@@ -10,6 +10,7 @@ The base class still owns buffering, reconnection and the metrics.
 """
 
 import asyncio
+import os
 from typing import Optional
 
 from typing_extensions import override
@@ -20,17 +21,20 @@ from ten_ai_base.asr import (
     ASRResult,
     AsyncASRBaseExtension,
 )
+from ten_ai_base.dumper import Dumper
+from ten_ai_base.helper import generate_file_name
 from ten_ai_base.message import ModuleError, ModuleErrorCode
 from ten_runtime import AsyncTenEnv, AudioFrame
 
 from .config import SherpaOnnxASRConfig
 from .const import (
+    DUMP_FILE_PREFIX,
     LOG_CATEGORY_KEY_POINT,
     LOG_CATEGORY_VENDOR,
     MODULE_NAME_ASR,
     SAMPLE_RATE,
 )
-from .recogniser import SherpaOnnxRecogniser, Transcript
+from .recogniser import SherpaOnnxRecogniser, Transcript, whole_samples
 
 # Thirty seconds of 16 kHz mono PCM16, matching what the daemon sibling keeps.
 MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * 30
@@ -44,6 +48,7 @@ class SherpaOnnxASRExtension(AsyncASRBaseExtension):
         self.config: Optional[SherpaOnnxASRConfig] = None
         self.recogniser: Optional[SherpaOnnxRecogniser] = None
         self._start_task: Optional[asyncio.Task] = None
+        self.audio_dumper: Optional[Dumper] = None
 
     @override
     def vendor(self) -> str:
@@ -74,6 +79,47 @@ class SherpaOnnxASRExtension(AsyncASRBaseExtension):
             f"sherpa_onnx_asr: model_dir={self.config.model_dir} "
             f"threads={self.config.num_threads} "
             f"endpointing={self.config.enable_endpoint_detection}",
+            category=LOG_CATEGORY_KEY_POINT,
+        )
+
+        if self.config.dump:
+            await self._open_dump(ten_env)
+
+    @override
+    async def on_deinit(self, ten_env: AsyncTenEnv) -> None:
+        await super().on_deinit(ten_env)
+        if self.audio_dumper is not None:
+            await self.audio_dumper.stop()
+            self.audio_dumper = None
+
+    async def _open_dump(self, ten_env: AsyncTenEnv) -> None:
+        """Start writing the audio the recogniser is about to be given.
+
+        Raw PCM16 at 16 kHz, mono, no header, which is what arrives and what
+        the engine takes -- so a byte offset in the file is a position in the
+        transcript's own clock, and the tail of a session can be replayed
+        through the model with a different endpoint rule to see where it
+        would have cut. To listen:
+            ffplay -f s16le -ar 16000 -ac 1 <file>
+        """
+        assert self.config is not None
+        path = os.path.join(
+            self.config.dump_path, generate_file_name(DUMP_FILE_PREFIX)
+        )
+        try:
+            dumper = Dumper(path)
+            await dumper.start()
+        except Exception as err:  # pylint: disable=broad-except
+            # A debugging aid must not be able to end the session. An
+            # unwritable dump_path is a mistake in the graph, not a reason to
+            # stop transcribing -- and the ways a path can be unopenable are
+            # not all OSError: a null byte in it raises ValueError.
+            ten_env.log_warn(f"audio dump disabled, cannot write {path}: {err}")
+            return
+        self.audio_dumper = dumper
+        ten_env.log_info(
+            f"sherpa_onnx_asr: dumping input audio to {path} "
+            f"(PCM16 mono {SAMPLE_RATE} Hz)",
             category=LOG_CATEGORY_KEY_POINT,
         )
 
@@ -117,6 +163,11 @@ class SherpaOnnxASRExtension(AsyncASRBaseExtension):
             pcm = bytes(buf)
         finally:
             frame.unlock_buf(buf)
+
+        if self.audio_dumper is not None:
+            # Trimmed the same way the recogniser trims it, so the file stays
+            # sample-aligned with the timestamps on the results.
+            await self.audio_dumper.push_bytes(whole_samples(pcm))
 
         for transcript in await self.recogniser.accept(pcm):
             await self._emit(transcript)

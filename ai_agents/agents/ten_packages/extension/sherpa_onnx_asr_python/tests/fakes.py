@@ -10,6 +10,7 @@ means the adapter drives the engine the way the engine expects. The model is
 300 MB and lives on the board.
 """
 
+import json
 import threading
 import time
 from typing import List, Optional
@@ -87,8 +88,17 @@ class FakeRecogniser:
 
 
 class FakeTenEnv:
-    def __init__(self) -> None:
+    def __init__(self, properties: Optional[dict] = None) -> None:
         self.lines: List[str] = []
+        self.properties = properties or {}
+
+    async def get_property_to_json(self, _path: str):
+        return json.dumps(self.properties), None
+
+    async def get_property_bool(self, name: str):
+        if name not in self.properties:
+            return False, "not found"
+        return bool(self.properties[name]), None
 
     def _record(self, message: str, **_kwargs) -> None:
         self.lines.append(message)

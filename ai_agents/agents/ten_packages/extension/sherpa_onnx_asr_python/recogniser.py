@@ -34,14 +34,20 @@ class Transcript:
     duration_ms: int
 
 
-def pcm16_to_float32(pcm: bytes) -> np.ndarray:
-    """Scale 16-bit PCM to the [-1, 1] floats accept_waveform expects.
+def whole_samples(pcm: bytes) -> bytes:
+    """The part of a frame that is complete samples.
 
     A frame can arrive cut mid-sample. Dropping the stray byte keeps the
-    stream going; raising would end the turn over one byte.
+    stream going; raising would end the turn over one byte. The dump goes
+    through here too, so what is written is exactly what was recognised and a
+    byte offset in the file converts to the start_ms of a transcript.
     """
-    usable = len(pcm) - (len(pcm) % BYTES_PER_SAMPLE)
-    samples = np.frombuffer(pcm[:usable], dtype=np.int16)
+    return pcm[: len(pcm) - (len(pcm) % BYTES_PER_SAMPLE)]
+
+
+def pcm16_to_float32(pcm: bytes) -> np.ndarray:
+    """Scale 16-bit PCM to the [-1, 1] floats accept_waveform expects."""
+    samples = np.frombuffer(whole_samples(pcm), dtype=np.int16)
     return (samples.astype(np.float32) / 32768.0).copy()
 
 

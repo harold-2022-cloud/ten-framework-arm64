@@ -16,3 +16,9 @@ MODULE_NAME_ASR = "asr"
 
 LOG_CATEGORY_KEY_POINT = "key_point"
 LOG_CATEGORY_VENDOR = "vendor"
+
+# generate_file_name appends a timestamp and the extension. Captured audio is
+# named per run rather than with one fixed name because the reason to turn the
+# dump on is to compare several sessions, and a fixed name means each run
+# destroys the evidence from the last.
+DUMP_FILE_PREFIX = "sherpa_onnx_asr_in"
