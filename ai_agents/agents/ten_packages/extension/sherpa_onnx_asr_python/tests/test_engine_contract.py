@@ -107,18 +107,54 @@ async def test_a_pause_produces_a_final_without_anyone_asking():
 
 
 @pytest.mark.asyncio
-async def test_no_pause_produces_no_final_until_finalize():
-    """Mid-sentence, the transcript is provisional and stays that way."""
+async def test_a_final_is_always_preceded_by_partials():
+    """Text is provisional until something ends the utterance.
+
+    Written first as "no final arrives while feeding", which assumed the
+    bundle's audio holds no pause. The bilingual bundle's does: it finalised
+    昨天是 MONDAY mid-file, correctly. What is true of any bundle is that a
+    final never appears from nothing -- the words were shown as they were
+    heard, then confirmed.
+    """
     speech, _ = _speech()
 
     recogniser = SherpaOnnxRecogniser(config=_config(), ten_env=_Env())
     await recogniser.start()
-    during = await _feed(recogniser, speech)
+    results = await _feed(recogniser, speech)
+    results.extend(await recogniser.finalize())
+    await recogniser.stop()
+
+    assert results, "nothing was recognised at all"
+    seen_partial = False
+    for item in results:
+        if item.final:
+            assert (
+                seen_partial
+            ), f"a final appeared with no partial before it: {item.text!r}"
+            seen_partial = False
+        else:
+            seen_partial = True
+
+
+@pytest.mark.asyncio
+async def test_finalize_never_loses_what_was_being_said():
+    """main_control ends a turn without waiting for silence."""
+    speech, _ = _speech()
+    # Half of it, so the utterance is certainly unfinished.
+    half = speech[: len(speech) // 2]
+
+    recogniser = SherpaOnnxRecogniser(config=_config(), ten_env=_Env())
+    await recogniser.start()
+    during = await _feed(recogniser, half)
     closing = await recogniser.finalize()
     await recogniser.stop()
 
-    assert not [r for r in during if r.final]
-    assert [r for r in closing if r.final]
+    spoken = [r for r in during if not r.final]
+    if not spoken:
+        pytest.skip("half the clip produced no transcript to lose")
+    assert [
+        r for r in closing if r.final
+    ], f"{spoken[-1].text!r} was being said and finalize() emitted nothing"
 
 
 @pytest.mark.asyncio
