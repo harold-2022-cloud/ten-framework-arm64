@@ -157,13 +157,36 @@ which the raw `.onnx` + `.onnx.json` pair does not carry.
 
 ## Installing it on the board
 
+One script, from a fresh checkout to a verified install:
+
 ```bash
-ai_agents/agents/scripts/install_sherpa_tts_board.sh --dry-run   # read first
-ai_agents/agents/scripts/install_sherpa_tts_board.sh
+ai_agents/agents/scripts/install_board_arm64.sh --dry-run   # read the plan first
+ai_agents/agents/scripts/install_board_arm64.sh             # install and verify
+ai_agents/agents/scripts/install_board_arm64.sh --run       # ... and start it
 ```
 
-It installs the Python packages, fetches the voice, installs the example's
-tenapp, and prints the exact test and run commands with paths resolved.
+It sequences the scripts that do the work rather than repeating them, so every
+stage is somewhere you can go and read: the Zipformer model and the Piper voice,
+then the tenapp, then the Python packages for the interpreter the runtime loads,
+then the tests against the real model. Each stage is idempotent, so a failed run
+can be restarted without undoing anything.
+
+It resolves `TEN_PYTHON_LIB_PATH` itself, with the finder CI uses, because the
+runtime dlopens its interpreter rather than linking it -- the library cannot be
+read out of the binding's ELF, which is why that variable exists at all. On this
+board `python3` is 3.13 and the runtime loads 3.12; pass `--python X.Y` to
+choose another.
+
+The LLM is not installed by it. That is the vendor's daemon on
+`127.0.0.1:8080`; `tools/ambarella/check_llm_board.sh` compares what the board
+has against what the kit's guide says it should.
+
+For the TTS extension alone, without the ASR side:
+
+```bash
+ai_agents/agents/scripts/install_sherpa_tts_board.sh --dry-run
+ai_agents/agents/scripts/install_sherpa_tts_board.sh
+```
 
 **Every pip call is `--user`.** The board runs a vendor-patched Fedora with no
 backup, and the example's own `install_python_deps.sh` defaults to
@@ -183,7 +206,16 @@ cd ai_agents/agents/examples/voice-assistant
 task run 2>&1 | tee /tmp/task_run.log
 ```
 
-Pick `voice_assistant_sherpa_tts` in the playground on port 3000.
+Pick a graph in the playground on port 3000:
+
+| Graph | ASR | TTS |
+| --- | --- | --- |
+| `voice_assistant_sherpa_full` | sherpa-onnx, on the CPU | sherpa-onnx, on the CPU |
+| `voice_assistant_sherpa_tts` | soniox, over the network | sherpa-onnx, on the CPU |
+
+After a conversation, `tools/ambarella/check_asr_log.sh` reads the log and says
+whether the ASR path behaved, so the checking is not a matter of remembering
+which lines to grep for.
 
 Adding a graph is not hot-reloadable: the frontend caches `/graphs`, so both
 the server and the playground need a full restart after pulling this branch.
@@ -195,14 +227,29 @@ the server and the playground need a full restart after pulling this branch.
 | `tools/ambarella/check_tts_env.sh` | Report what is installed. Changes nothing. |
 | `tools/ambarella/probe_piper_tts.py` | Measure a voice: load time, rate, RTF, time to first audio. Writes WAVs to listen to. |
 | `tools/ambarella/vp_concurrency_probe.py` | Measure what the Vector Processor does with two and three models at once. |
-| `ai_agents/agents/scripts/setup_cpu_asr_tts_arm64.sh` | Fetch sherpa-onnx and the voices. |
-| `ai_agents/agents/scripts/install_sherpa_tts_board.sh` | Everything above, in order, for this extension. |
+| `tools/ambarella/verify_asr_board.sh` | Run the ASR tests on the board, under the interpreter the runtime loads, against the real model. Refuses a run with skips in it. |
+| `tools/ambarella/check_asr_log.sh` | Read a `task_run.log` and say whether the ASR path behaved. |
+| `tools/ambarella/check_llm_board.sh` | Compare the board's LLM against the vendor guide. Reads only. |
+| `tools/ambarella/setup_tts_runtime_deps.sh` | Put the Python packages where the runtime will look, which is not where `pip install --user` puts them. |
+| `ai_agents/agents/scripts/setup_cpu_asr_tts_arm64.sh` | Fetch sherpa-onnx, the Zipformer ASR model and the voices. |
+| `ai_agents/agents/scripts/install_sherpa_tts_board.sh` | The TTS extension alone, in order. |
+| `ai_agents/agents/scripts/install_board_arm64.sh` | **All of the above, in order, ending in a verified install.** |
 
 ## Status
 
-The extension's 24 unit tests and 3 engine-contract tests pass, and pylint
-rates it 10.00/10. The contract tests have been run against sherpa-onnx 1.13.8
-with a real voice bundle.
+Verified on the board on 2026-09-16.
+
+`sherpa_onnx_asr_python`: 39 tests pass under `/usr/bin/python3.12`, the
+interpreter the runtime loads, with no skips -- six of them put real audio
+through the real model. pylint 10.00/10.
+
+`sherpa_onnx_tts_python`: 24 unit tests and 3 engine-contract tests pass
+against sherpa-onnx 1.13.8 with a real voice bundle.
+
+A three-minute conversation through `voice_assistant_sherpa_full` transcribed
+three utterances, each ended by the engine's own endpoint after 1280 ms of
+trailing silence, each reaching the model once. Time from the last partial to
+the final was 1.28 s, and from the final to the request 6-7 ms.
 
 What has **not** yet been done on the board: the graph has not been brought up
 end to end, and nobody has listened to the Mandarin voice through the RTC
