@@ -168,15 +168,38 @@ class LLMExec:
         # Queue the new message to the context
         await self._queue_context(ten_env, new_message)
 
+        saw_response = False
         async for cmd_result, _ in response:
-            if cmd_result and cmd_result.is_final() is False:
-                if cmd_result.get_status_code() == StatusCode.OK:
-                    response_json, _ = cmd_result.get_property_to_json(None)
-                    ten_env.log_info(
-                        f"_send_to_llm: response_json {response_json}"
+            if cmd_result is None:
+                continue
+            if cmd_result.is_final():
+                # The terminating result was dropped without a word. If the
+                # extension failed, this is where it said so, and the turn
+                # would otherwise end with no answer and no reason.
+                if cmd_result.get_status_code() != StatusCode.OK:
+                    detail, _ = cmd_result.get_property_to_json(None)
+                    ten_env.log_error(
+                        f"_send_to_llm: turn {request_id} ended with status "
+                        f"{cmd_result.get_status_code()}: {detail}"
                     )
-                    completion = parse_llm_response(response_json)
-                    await self._handle_llm_response(completion)
+                continue
+            if cmd_result.get_status_code() != StatusCode.OK:
+                detail, _ = cmd_result.get_property_to_json(None)
+                ten_env.log_error(
+                    f"_send_to_llm: turn {request_id} returned status "
+                    f"{cmd_result.get_status_code()}: {detail}"
+                )
+                continue
+            saw_response = True
+            response_json, _ = cmd_result.get_property_to_json(None)
+            ten_env.log_info(f"_send_to_llm: response_json {response_json}")
+            completion = parse_llm_response(response_json)
+            await self._handle_llm_response(completion)
+
+        if not saw_response:
+            ten_env.log_error(
+                f"_send_to_llm: turn {request_id} produced nothing at all"
+            )
 
     async def _handle_llm_response(self, llm_output: LLMResponse | None):
         self.ten_env.log_info(f"_handle_llm_response: {llm_output}")
@@ -195,6 +218,14 @@ class LLMExec:
                 self.current_text = None
                 if self.on_response and text:
                     await self.on_response(self.ten_env, "", text, True)
+                elif not text:
+                    # No final goes out for an empty answer, so whoever is
+                    # counting outstanding questions never hears about this
+                    # one.
+                    self.ten_env.log_warn(
+                        "_handle_llm_response: the turn finished with an "
+                        "empty answer; no final was emitted"
+                    )
             case LLMResponseReasoningDelta():
                 delta = llm_output.delta
                 text = llm_output.content

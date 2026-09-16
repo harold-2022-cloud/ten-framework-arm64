@@ -94,7 +94,16 @@ class MainControlExtension(AsyncExtension):
         stream_id = int(self.session_id)
         if not event.text:
             return
-        if self._interrupt_gate.should_interrupt(event.text, event.final):
+        allow = self._interrupt_gate.should_interrupt(event.text, event.final)
+        # Every suppressed transcript used to be invisible, so a session that
+        # went quiet gave no way to tell a gate decision from a lost message.
+        self.ten_env.log_info(
+            f"[gate] {'INTERRUPT' if allow else 'hold'}: "
+            f"{self._interrupt_gate.last_reason()} "
+            f"[{self._interrupt_gate.explain()}] "
+            f"final={event.final} text={event.text!r}"
+        )
+        if allow:
             await self._interrupt()
         if event.final:
             self.turn_id += 1

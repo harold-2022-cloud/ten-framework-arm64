@@ -37,6 +37,7 @@ class InterruptGate:
         self._pending: int = 0
         self._pending_since: float = 0.0
         self._clock = clock or time.monotonic
+        self._reason: str = ""
         # Partial results are unreliable exactly when the assistant is
         # talking: the microphone hears the speaker, and a user who thinks
         # they were not heard repeats themselves. Both arrive as partials and
@@ -92,6 +93,17 @@ class InterruptGate:
         # against 14 s of speech, measured on 2026-09-16.
         return self._speaking or self._thinking
 
+    def explain(self) -> str:
+        """The state a decision was made in, for the log."""
+        return (
+            f"pending={self._pending} speaking={self._speaking} "
+            f"last={self._last_text!r}"
+        )
+
+    def last_reason(self) -> str:
+        """Why the last decision went the way it did."""
+        return self._reason
+
     def should_interrupt(self, text: str, final: bool) -> bool:
         if final:
             # The turn is over, so the next one may open with the same words
@@ -105,7 +117,9 @@ class InterruptGate:
                 # three questions, three cancellations, no answer at all,
                 # because the board takes fifteen to forty seconds and the
                 # user spoke every twenty.
+                self._reason = "final queued behind a turn in flight"
                 return False
+            self._reason = "final"
             return True
         if self._busy and not self._interrupt_on_partial_while_speaking:
             # Measured on 2026-09-16, once while speaking and once while
@@ -115,10 +129,18 @@ class InterruptGate:
             # the turn 2.3 s after it was sent, before a character came back.
             # Each partial differed from the one before, so the check below
             # never fired once.
+            self._reason = (
+                "partial while speaking"
+                if self._speaking
+                else "partial while thinking"
+            )
             return False
         if len(text) <= self.MIN_CHARS:
+            self._reason = f"partial shorter than {self.MIN_CHARS + 1} chars"
             return False
         if text == self._last_text:
+            self._reason = "partial unchanged"
             return False
         self._last_text = text
+        self._reason = "partial changed while idle"
         return True
