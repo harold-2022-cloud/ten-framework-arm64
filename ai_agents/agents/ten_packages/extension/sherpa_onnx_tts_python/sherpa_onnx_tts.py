@@ -29,6 +29,7 @@ from .config import SherpaOnnxTTSConfig
 from .const import (
     CALLBACK_CONTINUE,
     CALLBACK_STOP,
+    CHARS_PER_PIECE,
     CLAUSE_MARKS,
     FRAME_MS,
     LOG_CATEGORY_KEY_POINT,
@@ -43,7 +44,9 @@ def sanitise(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
 
 
-def split_for_latency(text: str, max_chars: int) -> list:
+def split_for_latency(
+    text: str, min_chars: int, chars_per_piece: int = CHARS_PER_PIECE
+) -> list:
     """Break a long run of clauses so the first audio does not wait.
 
     The engine ends a sentence only at 。！？, so a line written with commas
@@ -53,7 +56,7 @@ def split_for_latency(text: str, max_chars: int) -> list:
     Never splits mid-clause: a cut inside a word changes how it is read, and
     a clause with no punctuation is returned whole however long it is.
     """
-    if max_chars <= 0 or len(text) <= max_chars:
+    if min_chars <= 0 or len(text) <= min_chars:
         return [text]
 
     # Cut at every clause mark first, keeping the mark with the clause it
@@ -79,7 +82,7 @@ def split_for_latency(text: str, max_chars: int) -> list:
     pieces = [clauses[0]]
     current = ""
     for clause in clauses[1:]:
-        if current and len(current) + len(clause) > max_chars:
+        if current and len(current) + len(clause) > chars_per_piece:
             pieces.append(current)
             current = clause
         else:
@@ -261,7 +264,9 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
             return CALLBACK_STOP if self._is_cancelled else CALLBACK_CONTINUE
 
         pieces = split_for_latency(
-            clean_text, self.config.max_chars_before_split
+            clean_text,
+            self.config.min_chars_to_split,
+            self.config.chars_per_piece,
         )
 
         def synthesise() -> None:

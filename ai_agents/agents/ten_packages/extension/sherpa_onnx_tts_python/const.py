@@ -29,12 +29,24 @@ CALLBACK_CONTINUE = 1
 FRAME_MS = 20
 
 # sherpa-onnx calls back once per sentence, and it ends a sentence only at
-# 。！？ and their western equivalents. A greeting written as one sentence
-# with commas is therefore one callback, and the first audio waits for the
-# whole thing: measured against the engine, 4.37 s as written against 0.47 s
-# when broken in two. Above this many characters the text is handed over a
-# clause at a time instead. Zero disables it.
-MAX_CHARS_BEFORE_SPLIT = 24
+# 。！？ and their western equivalents. A line written with commas is one
+# callback however long it is, and the first audio waits for its last word.
+#
+# Two separate numbers, because they pull opposite ways. Text at or below
+# MIN_CHARS_TO_SPLIT is left whole -- waiting for it costs less than the seam
+# a split leaves -- so a lower value splits more. CHARS_PER_PIECE packs the
+# clauses after the first, where the only job is keeping ahead of playback
+# and fewer calls do it better, so a higher value is better there. Running
+# both off one number meant raising the pack limit stopped the greeting
+# splitting at all: at 24 the deployed 20-character greeting was returned
+# whole and its first audio took 3.60 s.
+#
+# Measured against the engine on that greeting: 8 gives first audio at
+# 0.62 s, 12 at 0.47 s, 16 at 0.38 s. Eight is the value here because it is
+# also low enough to split a 12-character answer (1.74 s to 0.98 s), which
+# the higher ones leave whole.
+MIN_CHARS_TO_SPLIT = 8
+CHARS_PER_PIECE = 24
 
 # Where a clause may end. The sentence marks are here too, so a long run of
 # sentences is also broken up rather than handed over whole.
