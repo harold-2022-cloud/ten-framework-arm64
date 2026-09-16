@@ -20,7 +20,12 @@
 set -euo pipefail
 
 EXAMPLE="${1:-voice-assistant}"
-AI_AGENTS="$HOME/ten-framework/ai_agents"
+# From the script's own location, not $HOME. A checkout is not always at
+# $HOME/ten-framework, and hardcoding it made this build the Go app and
+# install the Python packages into a different checkout than the one the
+# caller was in -- silently, because both existed and both looked installed.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+AI_AGENTS="$REPO/ai_agents"
 TENAPP="$AI_AGENTS/agents/examples/$EXAMPLE/tenapp"
 PLAYGROUND="$AI_AGENTS/playground"
 
