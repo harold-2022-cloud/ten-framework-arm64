@@ -18,6 +18,7 @@ from .agent.events import (
     ToolRegisterEvent,
     UserJoinedEvent,
     UserLeftEvent,
+    TTSSpeakingEvent,
 )
 from .helper import _send_cmd, _send_data, parse_sentences
 from .interrupt_gate import InterruptGate
@@ -81,6 +82,11 @@ class MainControlExtension(AsyncExtension):
     @agent_event_handler(ToolRegisterEvent)
     async def _on_tool_register(self, event: ToolRegisterEvent):
         await self.agent.register_llm_tool(event.tool, event.source)
+
+    @agent_event_handler(TTSSpeakingEvent)
+    async def _on_tts_speaking(self, event: TTSSpeakingEvent):
+        # The gate needs to know who is talking before it judges a transcript.
+        self._interrupt_gate.set_speaking(event.speaking)
 
     @agent_event_handler(ASRResultEvent)
     async def _on_asr_result(self, event: ASRResultEvent):

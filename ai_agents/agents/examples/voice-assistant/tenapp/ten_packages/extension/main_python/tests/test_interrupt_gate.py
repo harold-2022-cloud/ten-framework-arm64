@@ -78,3 +78,76 @@ def test_the_sequence_recorded_on_the_board():
     gate = InterruptGate()
     fired = sum(gate.should_interrupt(t, final=f) for t, f in recorded)
     assert fired == 8, "every repeat of an unchanged partial must be dropped"
+
+
+# --- While the assistant is speaking ---------------------------------------
+
+
+def test_a_growing_partial_interrupts_on_every_character():
+    """The hole the repeat check never covered.
+
+    Replayed from task_run.log 00:13:41-00:14:09: the user, having waited
+    fifteen seconds, asked again, and each character of the growing transcript
+    cut off the answer that had just started.
+    """
+    gate = InterruptGate()
+    assert gate.should_interrupt(" 如果", final=False) is True
+    assert gate.should_interrupt(" 如果要", final=False) is True
+    assert gate.should_interrupt(" 如果用于", final=False) is True
+
+
+def test_a_partial_does_not_interrupt_while_the_assistant_speaks():
+    gate = InterruptGate()
+    gate.set_speaking(True)
+    assert gate.should_interrupt(" 如果", final=False) is False
+    assert gate.should_interrupt(" 如果要", final=False) is False
+    assert gate.should_interrupt(" 如果用于", final=False) is False
+
+
+def test_a_final_still_interrupts_while_the_assistant_speaks():
+    """A completed sentence is the user actually saying something."""
+    gate = InterruptGate()
+    gate.set_speaking(True)
+    assert gate.should_interrupt("停一下", final=True) is True
+
+
+def test_partials_interrupt_again_once_the_assistant_stops():
+    gate = InterruptGate()
+    gate.set_speaking(True)
+    assert gate.should_interrupt("你好嗎", final=False) is False
+    gate.set_speaking(False)
+    assert gate.should_interrupt("你好嗎在嗎", final=False) is True
+
+
+def test_the_old_behaviour_is_available():
+    """Barge-in on a partial is what a fast pipeline wants; this one is not."""
+    gate = InterruptGate(interrupt_on_partial_while_speaking=True)
+    gate.set_speaking(True)
+    assert gate.should_interrupt(" 如果", final=False) is True
+
+
+def test_the_logged_sequence_no_longer_cuts_the_answer_off():
+    """The whole exchange from the log, with the assistant speaking."""
+    observed = [
+        (" 如果", False),
+        (" 如果要", False),
+        (" 如果用于", False),
+        (" 如果用于", False),
+        (" 如果用于", False),
+        (" 如果用于", False),
+        (" 如果用于", False),
+        (" 如果用于", False),
+        (" 如果用于。", False),
+        (" 如果用于。", False),
+        (" 如果用于。", False),
+        (" 如果用于。", False),
+        (" 如果用于。", False),
+        (" 如果用于。", True),
+    ]
+    gate = InterruptGate()
+    gate.set_speaking(True)
+    fired = [t for t, f in observed if gate.should_interrupt(t, f)]
+
+    # Four interrupts before; now only the final one, which is the user
+    # genuinely having spoken.
+    assert fired == [" 如果用于。"]

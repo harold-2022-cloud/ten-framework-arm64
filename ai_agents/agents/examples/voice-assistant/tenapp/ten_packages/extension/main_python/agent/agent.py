@@ -149,7 +149,15 @@ class Agent:
                     )
                 )
             elif data.get_name() in ("tts_audio_start", "tts_audio_end"):
-                return
+                # Dispatched directly rather than queued: the ASR queue is
+                # drained in order, so a speaking event behind a backlog of
+                # transcripts would be read after the results it should have
+                # governed.
+                await self._emit_direct(
+                    TTSSpeakingEvent(
+                        speaking=data.get_name() == "tts_audio_start"
+                    )
+                )
             else:
                 self.ten_env.log_warn(f"Unhandled data: {data.get_name()}")
         except Exception as e:

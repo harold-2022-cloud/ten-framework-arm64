@@ -52,6 +52,18 @@ class ASRResultEvent(AgentEventBase):
     metadata: Dict[str, Any]
 
 
+class TTSSpeakingEvent(AgentEventBase):
+    """The assistant started or stopped producing audio.
+
+    agent.py has always received tts_audio_start and tts_audio_end and
+    discarded them. Whether the assistant is speaking decides whether a
+    partial transcript is the user interrupting or the room hearing itself.
+    """
+
+    name: Literal["tts_speaking"] = "tts_speaking"
+    speaking: bool
+
+
 class LLMResponseEvent(AgentEventBase):
     """Event triggered when LLM returns a streaming response."""
 
@@ -70,4 +82,5 @@ AgentEvent = Union[
     ToolRegisterEvent,
     ASRResultEvent,
     LLMResponseEvent,
+    TTSSpeakingEvent,
 ]
