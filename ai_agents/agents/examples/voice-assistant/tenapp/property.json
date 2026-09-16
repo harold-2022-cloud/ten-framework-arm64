@@ -2214,21 +2214,16 @@
             {
               "type": "extension",
               "name": "stt",
-              "addon": "soniox_asr_python",
+              "addon": "sherpa_onnx_asr_python",
               "extension_group": "stt",
               "property": {
-                "params": {
-                  "api_key": "${env:SONIOX_ASR_API_KEY}",
-                  "url": "wss://stt-rt.soniox.com/transcribe-websocket",
-                  "model": "stt-rt-v3",
-                  "language_hints": [
-                    "en",
-                    "zh"
-                  ],
-                  "enable_language_identification": true,
-                  "sample_rate": 16000,
-                  "holding_mode": "sentence_terminator"
-                }
+                "model_dir": "${env:SHERPA_ONNX_ASR_MODEL_DIR|/home/lychee/zipformer_asr/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20}",
+                "num_threads": 1,
+                "enable_endpoint_detection": true,
+                "rule1_min_trailing_silence": 2.4,
+                "rule2_min_trailing_silence": 1.2,
+                "rule3_min_utterance_length": 20.0,
+                "language": "zh-CN"
               }
             },
             {
