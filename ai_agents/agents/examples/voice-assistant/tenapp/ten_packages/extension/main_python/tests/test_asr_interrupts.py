@@ -88,6 +88,7 @@ async def test_a_question_is_not_killed_by_the_tail_of_its_own_sentence():
 async def test_the_gate_reopens_when_the_answer_has_been_heard():
     ext = make_extension()
     await ext._on_asr_result(_Result("問題", final=True))
+    ext._interrupt_gate.answer_returned()  # what _on_llm_response does
     await ext._on_tts_speaking(_Speaking(True))
     await ext._on_tts_speaking(_Speaking(False))
     ext._interrupt.reset_mock()

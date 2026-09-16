@@ -4,6 +4,8 @@
 #
 """Decide which ASR results should stop the bot mid-sentence."""
 
+import time
+
 
 class InterruptGate:
     """Tracks what has already interrupted, so the same thing does not again.
@@ -13,12 +15,28 @@ class InterruptGate:
     transcript arrived".
     """
 
+    # An outstanding question that never comes back would hold the gate shut
+    # for the rest of the session. LLMExec swallows an exception from a turn
+    # without emitting a final (llm_exec.py:119 emits one only when the turn
+    # produced text), so nothing else would clear it. The board's own request
+    # timeout is 120 s; this is longer than any turn can legitimately take.
+    MAX_PENDING_SECONDS = 180.0
+
     def __init__(
-        self, interrupt_on_partial_while_speaking: bool = False
+        self,
+        interrupt_on_partial_while_speaking: bool = False,
+        clock=None,
     ) -> None:
         self._last_text: str = ""
         self._speaking: bool = False
-        self._thinking: bool = False
+        # How many questions have gone to the model and not come back. A
+        # count, not a flag: LLMExec queues questions and answers them one at
+        # a time, so the first answer arriving does not mean the assistant is
+        # free -- the next question is already being thought about, and a flag
+        # cleared there would reopen the gate underneath it.
+        self._pending: int = 0
+        self._pending_since: float = 0.0
+        self._clock = clock or time.monotonic
         # Partial results are unreliable exactly when the assistant is
         # talking: the microphone hears the speaker, and a user who thinks
         # they were not heard repeats themselves. Both arrive as partials and
@@ -37,20 +55,41 @@ class InterruptGate:
         """Called when the assistant starts and stops producing audio."""
         self._speaking = speaking
 
-    def set_thinking(self, thinking: bool) -> None:
-        """Called when a question goes to the model and when it comes back.
+    def question_sent(self) -> None:
+        """A question has gone to the model."""
+        if self._pending == 0:
+            self._pending_since = self._clock()
+        self._pending += 1
 
-        Kept apart from speaking because the two end on different signals and
-        overlap: the model finishes while the answer is still being spoken.
+    def answer_returned(self) -> None:
+        """The model finished a turn, whether it produced an answer or not."""
+        self._pending = max(0, self._pending - 1)
+
+    def questions_dropped(self) -> None:
+        """Everything queued was thrown away.
+
+        flush() empties LLMExec's input queue and cancels the turn in flight,
+        so after an interrupt nothing is outstanding. A turn cancelled before
+        it produced text emits no final either, so this is the only signal
+        that clears those.
         """
-        self._thinking = thinking
+        self._pending = 0
+
+    @property
+    def _thinking(self) -> bool:
+        if self._pending <= 0:
+            return False
+        if self._clock() - self._pending_since > self.MAX_PENDING_SECONDS:
+            # Whatever happened to it, it is not coming back.
+            self._pending = 0
+            return False
+        return True
 
     @property
     def _busy(self) -> bool:
-        # The assistant is occupied from the moment the question leaves until
-        # the answer has been heard. On this board the thinking half is the
-        # longer one -- 37 s against 14 s of speech, measured on 2026-09-16 --
-        # and it was the half left open.
+        # Occupied from the moment a question leaves until its answer has been
+        # heard. On this board the thinking half is the longer one -- 37 s
+        # against 14 s of speech, measured on 2026-09-16.
         return self._speaking or self._thinking
 
     def should_interrupt(self, text: str, final: bool) -> bool:

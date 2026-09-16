@@ -165,7 +165,7 @@ def test_a_partial_does_not_interrupt_while_the_assistant_thinks():
     five questions died this way; the third was the user asking 你还在吗？
     """
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     assert gate.should_interrupt(" 加法", final=False) is False
 
 
@@ -176,7 +176,7 @@ def test_a_final_while_thinking_is_queued_rather_than_cancelling():
     asked, none answered. There is nothing playing to cut in on while the
     model thinks, and the queue behind it holds the new question."""
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     assert gate.should_interrupt("算了不用了", final=False) is False
     assert gate.should_interrupt("算了不用了", final=True) is False
 
@@ -184,10 +184,10 @@ def test_a_final_while_thinking_is_queued_rather_than_cancelling():
 def test_thinking_and_speaking_clear_independently():
     """Thinking ends when the answer starts; speaking ends when it stops."""
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     gate.set_speaking(True)
 
-    gate.set_thinking(False)
+    gate.answer_returned()
     assert gate.should_interrupt("還在講", final=False) is False
 
     gate.set_speaking(False)
@@ -196,14 +196,14 @@ def test_thinking_and_speaking_clear_independently():
 
 def test_the_old_behaviour_covers_thinking_too():
     gate = InterruptGate(interrupt_on_partial_while_speaking=True)
-    gate.set_thinking(True)
+    gate.question_sent()
     assert gate.should_interrupt(" 加法", final=False) is True
 
 
 def test_the_logged_question_survives_its_own_tail():
     """The exact partials that killed Q2, with the assistant thinking."""
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     observed = [(" 家", False), (" 加法", False), (" 家法", False)]
     assert [t for t, f in observed if gate.should_interrupt(t, f)] == []
 
@@ -220,14 +220,14 @@ def test_a_final_while_thinking_does_not_cancel_the_turn():
     is what threw it away.
     """
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     assert gate.should_interrupt("你还在吗？", final=True) is False
 
 
 def test_a_final_while_speaking_still_interrupts():
     """Cutting in on an answer you can hear is barge-in, and should work."""
     gate = InterruptGate()
-    gate.set_thinking(False)
+    gate.answer_returned()
     gate.set_speaking(True)
     assert gate.should_interrupt("停，我問別的", final=True) is True
 
@@ -241,6 +241,78 @@ def test_a_final_while_both_thinking_and_speaking_interrupts():
     """The model is still writing while its first sentences play; the user
     can hear something, so cutting in is deliberate."""
     gate = InterruptGate()
-    gate.set_thinking(True)
+    gate.question_sent()
     gate.set_speaking(True)
     assert gate.should_interrupt("停", final=True) is True
+
+
+# --- Two questions in the queue --------------------------------------------
+
+
+def test_the_second_question_is_still_protected_after_the_first_answers():
+    """The hole a boolean left.
+
+    LLMExec answers one question at a time, so the first answer coming back
+    does not mean the assistant is free: the second is already at the model.
+    A flag cleared there reopened the gate underneath it.
+    """
+    gate = InterruptGate()
+    gate.question_sent()
+    gate.question_sent()
+
+    gate.answer_returned()
+    assert gate.should_interrupt("使用者還在講", final=False) is False
+
+    gate.answer_returned()
+    assert gate.should_interrupt("現在真的閒著了", final=False) is True
+
+
+def test_audio_ending_does_not_free_a_question_still_being_thought_about():
+    gate = InterruptGate()
+    gate.question_sent()
+    gate.set_speaking(True)
+    gate.question_sent()
+
+    gate.answer_returned()
+    gate.set_speaking(False)  # the first answer finished playing
+
+    assert gate.should_interrupt("第二題還在想", final=False) is False
+
+
+def test_an_interrupt_clears_everything_outstanding():
+    """flush() empties the queue and cancels the turn, and a turn cancelled
+    before it produced text emits no final -- so nothing else would clear."""
+    gate = InterruptGate()
+    gate.question_sent()
+    gate.question_sent()
+
+    gate.questions_dropped()
+    assert gate.should_interrupt("閘門要重新打開", final=False) is True
+
+
+def test_the_count_does_not_go_negative():
+    gate = InterruptGate()
+    gate.answer_returned()
+    gate.answer_returned()
+    gate.question_sent()
+    assert gate.should_interrupt("還在想", final=False) is False
+
+
+def test_a_question_that_never_returns_stops_holding_the_gate():
+    """LLMExec swallows an exception from a turn without emitting a final,
+    so an error would otherwise wedge the gate shut for the session."""
+    now = [1000.0]
+    gate = InterruptGate(clock=lambda: now[0])
+    gate.question_sent()
+    assert gate.should_interrupt("還在想", final=False) is False
+
+    now[0] += InterruptGate.MAX_PENDING_SECONDS + 1
+    assert gate.should_interrupt("早就該回來了", final=False) is True
+
+
+def test_the_timeout_does_not_fire_during_a_slow_turn():
+    now = [1000.0]
+    gate = InterruptGate(clock=lambda: now[0])
+    gate.question_sent()
+    now[0] += 40.0  # the slowest turn measured on this board was 43.5 s
+    assert gate.should_interrupt("還在想", final=False) is False

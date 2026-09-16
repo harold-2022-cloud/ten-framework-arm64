@@ -87,11 +87,6 @@ class MainControlExtension(AsyncExtension):
     async def _on_tts_speaking(self, event: TTSSpeakingEvent):
         # The gate needs to know who is talking before it judges a transcript.
         self._interrupt_gate.set_speaking(event.speaking)
-        if not event.speaking:
-            # A backstop for thinking: a turn that produces no speech at all
-            # -- an error, an empty answer -- would otherwise leave the gate
-            # closed for the rest of the session.
-            self._interrupt_gate.set_thinking(False)
 
     @agent_event_handler(ASRResultEvent)
     async def _on_asr_result(self, event: ASRResultEvent):
@@ -107,7 +102,7 @@ class MainControlExtension(AsyncExtension):
             # speaking. On this board the model thinks for tens of seconds,
             # and that window was open: the tail of the user's own sentence
             # cancelled two of five turns before either produced a character.
-            self._interrupt_gate.set_thinking(True)
+            self._interrupt_gate.question_sent()
             await self.agent.queue_llm_input(event.text)
         await self._send_transcript("user", event.text, event.final, stream_id)
 
@@ -121,9 +116,9 @@ class MainControlExtension(AsyncExtension):
                 await self._send_to_tts(s, False)
 
         if event.is_final and event.type == "message":
-            # The model has finished; whether the answer has been heard is
-            # the speaking flag's business.
-            self._interrupt_gate.set_thinking(False)
+            # One question answered. Others may still be queued behind it,
+            # which is why this decrements rather than clears.
+            self._interrupt_gate.answer_returned()
             remaining_text = self.sentence_fragment or ""
             self.sentence_fragment = ""
             await self._send_to_tts(remaining_text, True)
@@ -226,6 +221,9 @@ class MainControlExtension(AsyncExtension):
         Interrupts ongoing LLM and TTS generation. Typically called when user speech is detected.
         """
         self.sentence_fragment = ""
+        # flush_llm empties the queue and cancels the turn in flight, so
+        # nothing is outstanding afterwards.
+        self._interrupt_gate.questions_dropped()
         await self.agent.flush_llm()
         await _send_data(
             self.ten_env, "tts_flush", "tts", {"flush_id": str(uuid.uuid4())}
