@@ -60,6 +60,7 @@ class TTSSpeakingEvent(AgentEventBase):
     partial transcript is the user interrupting or the room hearing itself.
     """
 
+    type: Literal["data"] = "data"
     name: Literal["tts_speaking"] = "tts_speaking"
     speaking: bool
 

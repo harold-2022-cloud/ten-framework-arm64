@@ -309,3 +309,9 @@ def test_the_timeout_does_not_fire_during_a_slow_turn():
     gate.question_sent()
     now[0] += 40.0  # the slowest turn measured on this board was 43.5 s
     assert gate.should_interrupt("還在想", final=False) is False
+
+
+def test_a_question_goes_stale_before_the_request_does():
+    """The extension gives up on the board at 120 s. A gate that waits longer
+    stays shut after the turn has already been abandoned."""
+    assert InterruptGate.MAX_PENDING_SECONDS < 120.0

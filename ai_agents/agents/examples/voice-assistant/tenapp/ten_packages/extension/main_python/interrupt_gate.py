@@ -18,9 +18,14 @@ class InterruptGate:
     # An outstanding question that never comes back would hold the gate shut
     # for the rest of the session. LLMExec swallows an exception from a turn
     # without emitting a final (llm_exec.py:119 emits one only when the turn
-    # produced text), so nothing else would clear it. The board's own request
-    # timeout is 120 s; this is longer than any turn can legitimately take.
-    MAX_PENDING_SECONDS = 180.0
+    # produced text), so nothing else would clear it.
+    #
+    # It has to be shorter than the request's own timeout, not longer: the
+    # extension gives up on the board at 120 s (ambarella.py total_timeout_s),
+    # so a question still outstanding after that is not coming back. Set
+    # above it, as it was, the gate stayed shut for another minute after the
+    # turn had already been abandoned.
+    MAX_PENDING_SECONDS = 90.0
 
     def __init__(
         self,
@@ -36,6 +41,11 @@ class InterruptGate:
         # cleared there would reopen the gate underneath it.
         self._pending: int = 0
         self._pending_since: float = 0.0
+        # The question the model is working on. Soniox can finalise the same
+        # words twice: on 2026-09-16 it closed 讲一个笑话。 and opened a new
+        # segment with the deferred remainder in the same millisecond, and
+        # that remainder finalised 2.0 s later carrying the same words.
+        self._asked: str = ""
         self._clock = clock or time.monotonic
         self._reason: str = ""
         # Partial results are unreliable exactly when the assistant is
@@ -56,15 +66,31 @@ class InterruptGate:
         """Called when the assistant starts and stops producing audio."""
         self._speaking = speaking
 
-    def question_sent(self) -> None:
+    def question_sent(self, text: str = "") -> None:
         """A question has gone to the model."""
         if self._pending == 0:
             self._pending_since = self._clock()
         self._pending += 1
+        self._asked = text.strip()
+
+    def repeats_the_question_in_flight(self, text: str) -> bool:
+        """Is this the same question the model is already working on?
+
+        Not a new question and not barge-in: one spoken sentence that ASR
+        finalised in two pieces. Acting on it cancels the answer being
+        written and asks for it again, which the board refuses because it is
+        still generating the first.
+        """
+        return bool(
+            self._pending and self._asked and text.strip() == self._asked
+        )
 
     def answer_returned(self) -> None:
         """The model finished a turn, whether it produced an answer or not."""
         self._pending = max(0, self._pending - 1)
+        if self._pending == 0:
+            # Asked again after the answer, the same words are a real repeat.
+            self._asked = ""
 
     def questions_dropped(self) -> None:
         """Everything queued was thrown away.
@@ -75,6 +101,7 @@ class InterruptGate:
         that clears those.
         """
         self._pending = 0
+        self._asked = ""
 
     @property
     def _thinking(self) -> bool:

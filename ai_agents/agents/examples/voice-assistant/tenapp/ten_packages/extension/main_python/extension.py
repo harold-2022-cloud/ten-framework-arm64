@@ -94,6 +94,19 @@ class MainControlExtension(AsyncExtension):
         stream_id = int(self.session_id)
         if not event.text:
             return
+        if self._interrupt_gate.repeats_the_question_in_flight(event.text):
+            # One sentence, finalised twice. Acting on it cancels the answer
+            # being written and asks the board for it again while it is still
+            # generating, which it refuses by closing the connection.
+            self.ten_env.log_info(
+                f"[gate] drop: same question already in flight "
+                f"[{self._interrupt_gate.explain()}] text={event.text!r}"
+            )
+            await self._send_transcript(
+                "user", event.text, event.final, stream_id
+            )
+            return
+
         allow = self._interrupt_gate.should_interrupt(event.text, event.final)
         # Every suppressed transcript used to be invisible, so a session that
         # went quiet gave no way to tell a gate decision from a lost message.
@@ -111,7 +124,7 @@ class MainControlExtension(AsyncExtension):
             # speaking. On this board the model thinks for tens of seconds,
             # and that window was open: the tail of the user's own sentence
             # cancelled two of five turns before either produced a character.
-            self._interrupt_gate.question_sent()
+            self._interrupt_gate.question_sent(event.text)
             await self.agent.queue_llm_input(event.text)
         await self._send_transcript("user", event.text, event.final, stream_id)
 
