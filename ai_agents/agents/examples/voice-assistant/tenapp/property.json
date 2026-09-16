@@ -2227,7 +2227,7 @@
                   ],
                   "enable_language_identification": true,
                   "sample_rate": 16000,
-                  "holding_mode": "false"
+                  "holding_mode": "sentence_terminator"
                 }
               }
             },

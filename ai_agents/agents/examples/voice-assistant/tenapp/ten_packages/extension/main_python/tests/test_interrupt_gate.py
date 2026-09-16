@@ -169,16 +169,16 @@ def test_a_partial_does_not_interrupt_while_the_assistant_thinks():
     assert gate.should_interrupt(" 加法", final=False) is False
 
 
-def test_a_final_while_thinking_is_queued_rather_than_cancelling():
-    """Written the other way round this morning, before the session that
-    showed why. A final did cancel the turn in flight, and with a model that
-    takes tens of seconds every question cancelled the one before it: three
-    asked, none answered. There is nothing playing to cut in on while the
-    model thinks, and the queue behind it holds the new question."""
+def test_a_final_while_thinking_replaces_the_question():
+    """Queueing was tried and measured worse.
+
+    ASR split one sentence into 你在 and 说什么听不懂。; queued, the model spent
+    45 seconds on 你在 and everything after it waited behind. A completed
+    sentence is the newest thing the user said, and is what to answer."""
     gate = InterruptGate()
     gate.question_sent()
     assert gate.should_interrupt("算了不用了", final=False) is False
-    assert gate.should_interrupt("算了不用了", final=True) is False
+    assert gate.should_interrupt("算了不用了", final=True) is True
 
 
 def test_thinking_and_speaking_clear_independently():
@@ -211,17 +211,10 @@ def test_the_logged_question_survives_its_own_tail():
 # --- A new question must not starve the one before it ----------------------
 
 
-def test_a_final_while_thinking_does_not_cancel_the_turn():
-    """From task_run.log at 03:16-03:17: three questions, no answers.
-
-    Each final cancelled the turn before it, and the board takes fifteen to
-    forty seconds to answer, so a user speaking every twenty seconds starves
-    every turn. The queue behind the model holds the new question; cancelling
-    is what threw it away.
-    """
+def test_a_final_while_thinking_interrupts():
     gate = InterruptGate()
     gate.question_sent()
-    assert gate.should_interrupt("你还在吗？", final=True) is False
+    assert gate.should_interrupt("你还在吗？", final=True) is True
 
 
 def test_a_final_while_speaking_still_interrupts():

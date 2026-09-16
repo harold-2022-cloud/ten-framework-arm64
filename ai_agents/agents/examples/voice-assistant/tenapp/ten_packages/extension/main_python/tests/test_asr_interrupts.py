@@ -107,6 +107,6 @@ async def test_three_questions_in_a_row_all_reach_the_model():
         await ext._on_asr_result(_Result(text, final=True))
 
     assert ext.agent.queue_llm_input.await_count == 3
-    # The first was interrupted by nothing; the two after it arrived while
-    # the model was still thinking and must not have cancelled it.
-    assert ext._interrupt.await_count == 1
+    # Each completed sentence replaces the one before it: the newest thing
+    # the user said is what gets answered.
+    assert ext._interrupt.await_count == 3
