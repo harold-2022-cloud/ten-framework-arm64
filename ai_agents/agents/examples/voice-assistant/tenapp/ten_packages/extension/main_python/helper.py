@@ -15,19 +15,51 @@ def is_punctuation(char):
     return False
 
 
+def is_closing_punctuation(char):
+    return char in [
+        '"',
+        "'",
+        ")",
+        "]",
+        "}",
+        "”",
+        "’",
+        "）",
+        "】",
+        "」",
+        "』",
+        "》",
+    ]
+
+
+def is_complete_sentence(text):
+    stripped = text.rstrip()
+    while stripped and is_closing_punctuation(stripped[-1]):
+        stripped = stripped[:-1].rstrip()
+    return bool(stripped) and is_punctuation(stripped[-1])
+
+
+def append_sentence(sentences, sentence):
+    sentence = sentence.strip()
+    if any(c.isalnum() for c in sentence):
+        sentences.append(sentence)
+
+
 def parse_sentences(sentence_fragment, content):
     sentences = []
     current_sentence = sentence_fragment
     for char in content:
-        current_sentence += char
-        if is_punctuation(char):
-            # Check if the current sentence contains non-punctuation characters
-            stripped_sentence = current_sentence
-            if any(c.isalnum() for c in stripped_sentence):
-                sentences.append(stripped_sentence)
-            current_sentence = ""  # Reset for the next sentence
+        if (
+            current_sentence
+            and is_complete_sentence(current_sentence)
+            and not is_closing_punctuation(char)
+        ):
+            append_sentence(sentences, current_sentence)
+            current_sentence = ""
 
-    remain = current_sentence  # Any remaining characters form the incomplete sentence
+        current_sentence += char
+
+    remain = current_sentence
     return sentences, remain
 
 

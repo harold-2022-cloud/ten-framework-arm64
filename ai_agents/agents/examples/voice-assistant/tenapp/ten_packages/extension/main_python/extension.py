@@ -45,6 +45,11 @@ class MainControlExtension(AsyncExtension):
         self.turn_id: int = 0
         self.session_id: str = "0"
         self._interrupt_gate = InterruptGate()
+        self._asr_partial_commit_task = None
+        self._asr_partial_commit_text = ""
+        self._asr_partial_commit_generation = 0
+
+    ASR_PARTIAL_COMMIT_DELAY_SECONDS = 1.2
 
     def _current_metadata(self) -> dict:
         return {"session_id": self.session_id, "turn_id": self.turn_id}
@@ -119,14 +124,70 @@ class MainControlExtension(AsyncExtension):
         if allow:
             await self._interrupt()
         if event.final:
-            self.turn_id += 1
-            # The assistant is occupied from here, not from when it starts
-            # speaking. On this board the model thinks for tens of seconds,
-            # and that window was open: the tail of the user's own sentence
-            # cancelled two of five turns before either produced a character.
-            self._interrupt_gate.question_sent(event.text)
-            await self.agent.queue_llm_input(event.text)
+            self._cancel_asr_partial_commit()
+            await self._queue_user_text_to_llm(event.text, stream_id)
+        else:
+            self._schedule_asr_partial_commit(event.text, stream_id)
         await self._send_transcript("user", event.text, event.final, stream_id)
+
+    async def _queue_user_text_to_llm(self, text: str, stream_id: int):
+        text = text.strip()
+        if not text:
+            return
+
+        self.turn_id += 1
+        # The assistant is occupied from here, not from when it starts
+        # speaking. On this board the model thinks for tens of seconds,
+        # and that window was open: the tail of the user's own sentence
+        # cancelled two of five turns before either produced a character.
+        self._interrupt_gate.question_sent(text)
+        await self.agent.queue_llm_input(text)
+
+    def _cancel_asr_partial_commit(self):
+        self._asr_partial_commit_generation += 1
+        task = self._asr_partial_commit_task
+        self._asr_partial_commit_task = None
+        self._asr_partial_commit_text = ""
+        if task and not task.done():
+            task.cancel()
+
+    def _schedule_asr_partial_commit(self, text: str, stream_id: int):
+        text = text.strip()
+        if not self._interrupt_gate.can_commit_stable_partial(text):
+            return
+        if text == self._asr_partial_commit_text:
+            return
+
+        self._asr_partial_commit_generation += 1
+        generation = self._asr_partial_commit_generation
+        self._asr_partial_commit_text = text
+        task = self._asr_partial_commit_task
+        if task and not task.done():
+            task.cancel()
+        self._asr_partial_commit_task = asyncio.create_task(
+            self._commit_asr_partial_after_delay(text, stream_id, generation)
+        )
+
+    async def _commit_asr_partial_after_delay(
+        self, text: str, stream_id: int, generation: int
+    ):
+        try:
+            await asyncio.sleep(self.ASR_PARTIAL_COMMIT_DELAY_SECONDS)
+            if (
+                generation != self._asr_partial_commit_generation
+                or text != self._asr_partial_commit_text
+            ):
+                return
+            self.ten_env.log_info(
+                "[asr] commit stable partial as final: "
+                f"text={text!r}, delay={self.ASR_PARTIAL_COMMIT_DELAY_SECONDS}s"
+            )
+            self._asr_partial_commit_task = None
+            self._asr_partial_commit_text = ""
+            await self._queue_user_text_to_llm(text, stream_id)
+            await self._send_transcript("user", text, True, stream_id)
+        except asyncio.CancelledError:
+            pass
 
     @agent_event_handler(LLMResponseEvent)
     async def _on_llm_response(self, event: LLMResponseEvent):
@@ -141,7 +202,7 @@ class MainControlExtension(AsyncExtension):
             # One question answered. Others may still be queued behind it,
             # which is why this decrements rather than clears.
             self._interrupt_gate.answer_returned()
-            remaining_text = self.sentence_fragment or ""
+            remaining_text = self.sentence_fragment.strip()
             self.sentence_fragment = ""
             await self._send_to_tts(remaining_text, True)
 
@@ -159,6 +220,7 @@ class MainControlExtension(AsyncExtension):
     async def on_stop(self, ten_env: AsyncTenEnv):
         ten_env.log_info("[MainControlExtension] on_stop")
         self.stopped = True
+        self._cancel_asr_partial_commit()
         await self.agent.stop()
 
     async def on_cmd(self, ten_env: AsyncTenEnv, cmd: Cmd):

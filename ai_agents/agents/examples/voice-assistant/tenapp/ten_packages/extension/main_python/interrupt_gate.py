@@ -131,6 +131,10 @@ class InterruptGate:
         """Why the last decision went the way it did."""
         return self._reason
 
+    def can_commit_stable_partial(self, text: str) -> bool:
+        """Whether a repeated partial may stand in for a missing ASR final."""
+        return not self._busy and len(text.strip()) > self.MIN_CHARS
+
     def should_interrupt(self, text: str, final: bool) -> bool:
         if final:
             # The turn is over, so the next one may open with the same words

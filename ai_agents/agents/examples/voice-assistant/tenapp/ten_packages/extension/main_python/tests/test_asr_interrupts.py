@@ -4,6 +4,7 @@
 #
 """_on_asr_result has to consult the gate, not re-derive the rule itself."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -235,3 +236,45 @@ async def test_the_whole_logged_failure_replayed():
 
     assert ext._interrupt.await_count == 0, "the answer was cancelled"
     assert ext.agent.queue_llm_input.await_count == 1, "asked twice"
+
+
+@pytest.mark.asyncio
+async def test_a_stable_partial_reaches_the_model_when_asr_never_finalizes():
+    """Replayed from task_run2.log 14:26:32-14:26:39.
+
+    Soniox kept sending the complete user text as final=False, so the old
+    control path waited forever and the LLM never saw "讲一个笑话".
+    """
+    ext = make_extension()
+    ext.ASR_PARTIAL_COMMIT_DELAY_SECONDS = 0.01
+
+    for text in (
+        "讲",
+        "讲一个",
+        "讲一个笑",
+        "讲一个笑话",
+        "讲一个笑话",
+    ):
+        await ext._on_asr_result(_Result(text, final=False))
+
+    await asyncio.sleep(0.02)
+
+    ext.agent.queue_llm_input.assert_awaited_once_with("讲一个笑话")
+    assert ext._send_transcript.call_args_list[-1].args == (
+        "user",
+        "讲一个笑话",
+        True,
+        123,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_asr_final_cancels_the_stable_partial_fallback():
+    ext = make_extension()
+    ext.ASR_PARTIAL_COMMIT_DELAY_SECONDS = 0.05
+
+    await ext._on_asr_result(_Result("讲一个笑话", final=False))
+    await ext._on_asr_result(_Result("讲一个笑话。", final=True))
+    await asyncio.sleep(0.06)
+
+    ext.agent.queue_llm_input.assert_awaited_once_with("讲一个笑话。")
