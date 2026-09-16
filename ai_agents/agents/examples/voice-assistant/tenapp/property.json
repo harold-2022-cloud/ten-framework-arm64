@@ -2265,7 +2265,7 @@
               "addon": "main_python",
               "extension_group": "control",
               "property": {
-                "greeting": "你好，有什么可以帮你的吗？"
+                "greeting": "你好，我是在安霸开发板上运行的语音助理。"
               }
             },
             {
@@ -2462,7 +2462,7 @@
               "addon": "main_python",
               "extension_group": "control",
               "property": {
-                "greeting": "你好，有什么可以帮你的吗？"
+                "greeting": "你好，我是在安霸开发板上运行的语音助理。"
               }
             },
             {
