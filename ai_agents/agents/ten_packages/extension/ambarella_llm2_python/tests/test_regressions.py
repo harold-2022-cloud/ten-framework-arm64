@@ -266,8 +266,13 @@ def test_escapes_split_character_by_character():
 
 
 def test_a_stream_without_the_tag_is_all_answer():
-    # Withholding it would lose the reply outright.
-    assert split(list("Just an answer")) == ("", "Just an answer")
+    # It goes out as reasoning first, because until the tag arrives that is
+    # what it looks like, and is repeated as answer at the end so the reply is
+    # spoken. The two land in different transcript channels, so the reader
+    # sees a thought and then a reply, not the same line twice.
+    reasoning, answer = split(list("Just an answer"))
+    assert answer == "Just an answer"
+    assert reasoning == "Just an answer"
 
 
 def test_a_bare_angle_bracket_is_not_swallowed():
@@ -288,7 +293,10 @@ def test_the_tag_split_across_two_feeds():
 def test_a_partial_tag_at_end_of_stream_is_emitted_not_lost():
     sp = _ReasoningSplitter()
     out = sp.feed("abc</thi") + sp.flush()
-    assert "".join(t for _, t in out) == "abc</thi"
+    # Nothing is dropped: the truncated tag is text like any other, and with
+    # no complete tag in the stream the whole thing is also spoken.
+    assert "".join(t for k, t in out if k == "reasoning") == "abc</thi"
+    assert "".join(t for k, t in out if k == "answer") == "abc</thi"
 
 
 # ---------------------------------------------------------------------------
@@ -361,8 +369,10 @@ async def test_a_stream_with_no_tag_is_spoken_not_swallowed():
     client = make_client()
     out = await collect(client, list("Just an answer") + ["<DONE>"])
     messages = [r for r in out if isinstance(r, LLMResponseMessageDelta)]
+    # What matters is that it is spoken: main_control only speaks message
+    # events. It is also shown as reasoning on the way past, which is the
+    # price of showing the thinking as it happens.
     assert "".join(m.delta for m in messages) == "Just an answer"
-    assert not [r for r in out if isinstance(r, LLMResponseReasoningDelta)]
 
 
 @pytest.mark.asyncio
@@ -503,3 +513,83 @@ async def test_a_properly_framed_sse_body_is_unaffected():
     out = [text async for text in client._iter_deltas(_fake_response(framed))]
 
     assert "".join(out) == "hello world"
+
+
+# --- Reasoning is shown as it arrives, not held to the end ---------------
+
+
+def _splitter():
+    from ambarella_llm2_python.ambarella import _ReasoningSplitter
+
+    return _ReasoningSplitter()
+
+
+def test_reasoning_is_emitted_as_it_arrives():
+    """The board's own reference adapter does this.
+
+    openai_llm2_python/think_parser.py emits reasoning_delta before the
+    closing tag arrives. Holding it meant the transcript showed nothing for
+    the whole thinking phase -- 45 seconds on this board -- and a user who
+    sees nothing assumes they were not heard and speaks again, which cancels
+    the turn.
+    """
+    s = _splitter()
+    out = s.feed("我先想一下")
+
+    assert out == [("reasoning", "我先想一下")]
+
+
+def test_reasoning_arrives_in_pieces_as_the_stream_does():
+    s = _splitter()
+    first = s.feed("讓我")
+    second = s.feed("想想")
+
+    assert first == [("reasoning", "讓我")]
+    assert second == [("reasoning", "想想")]
+
+
+def test_the_answer_still_follows_the_closing_tag():
+    s = _splitter()
+    pairs = s.feed("想完了</think>答案在這")
+
+    assert pairs == [("reasoning", "想完了"), ("answer", "答案在這")]
+
+
+def test_a_stream_with_no_closing_tag_is_still_spoken():
+    """Nothing marked it as reasoning, so it was the answer all along.
+
+    Emitting it as reasoning on the way past would leave the answer empty and
+    the assistant silent, which is worse than showing the text twice.
+    """
+    s = _splitter()
+    shown = s.feed("這其實是答案")
+    assert shown == [("reasoning", "這其實是答案")]
+
+    assert s.flush() == [("answer", "這其實是答案")]
+
+
+def test_flush_after_a_closing_tag_does_not_repeat_the_answer():
+    s = _splitter()
+    s.feed("想法</think>答案")
+
+    assert s.flush() == []
+
+
+def test_a_token_split_across_events_is_still_recognised():
+    """The board sends one character per SSE event, so every token arrives
+    in pieces."""
+    s = _splitter()
+    out = []
+    for char in "想</think>答":
+        out += s.feed(char)
+
+    assert out == [("reasoning", "想"), ("answer", "答")]
+
+
+def test_escapes_inside_reasoning_are_decoded():
+    s = _splitter()
+    assert s.feed("一<SP>二") == [
+        ("reasoning", "一"),
+        ("reasoning", " "),
+        ("reasoning", "二"),
+    ]

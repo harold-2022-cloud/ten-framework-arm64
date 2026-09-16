@@ -101,16 +101,27 @@ class _ReasoningSplitter:
     still become a token is held back until it either completes or is ruled
     out, which costs at most len("</think>") - 1 characters of lag.
 
-    Reasoning is withheld rather than emitted as it arrives, because until the
-    tag appears there is no way to know the text is reasoning at all. A stream
-    that ends without one is emitted as answer in full: classifying it as
-    reasoning would drop the reply, since main_control only speaks answers.
-    Reasoning is for display, so releasing it in one piece costs nothing.
+    Reasoning goes out as it arrives, the way openai_llm2_python's own
+    ThinkParser does. Holding it until the tag showed nothing at all for the
+    whole thinking phase -- forty-five seconds on this board -- and a user
+    watching an empty transcript concludes they were not heard and speaks
+    again, which cancels the turn.
+
+    Generation starts already inside the block: measured on an N1-655 on
+    2026-09-14, a reply is <reasoning>\n</think>\n\n<answer>, with the
+    closing tag and no opening one. So text before the tag is reasoning, and
+    there is no need to wait to find out.
+
+    A stream that ends without ever sending the tag was the answer all along,
+    and it has already gone out as reasoning, which main_control renders but
+    never speaks. flush() repeats it as answer so the reply is heard. The
+    transcript shows it twice; silence would be worse.
     """
 
     def __init__(self) -> None:
         self._pending = ""  # may still grow into a token
-        self._held = ""  # decoded text whose kind is not yet decided
+        self._reasoning_so_far = ""  # sent as reasoning, kept for the retry
+        self._saw_close = False
         self._in_reasoning = True  # generation starts inside the block
 
     def feed(self, chunk: str) -> list[tuple[str, str]]:
@@ -139,9 +150,7 @@ class _ReasoningSplitter:
             self._pending = self._pending[len(token) :]
             if token == CLOSE_THINK_TAG:
                 self._in_reasoning = False
-                if self._held:
-                    out.append(("reasoning", self._held))
-                    self._held = ""
+                self._saw_close = True
             elif token in ESCAPES:
                 out += self._take(ESCAPES[token])
             # a terminator token yields nothing
@@ -150,26 +159,28 @@ class _ReasoningSplitter:
 
     def flush(self) -> list[tuple[str, str]]:
         """
-        Close the stream. Text still held when no tag ever arrived is the
-        answer, not reasoning.
+        Close the stream, and rescue a reply that was never marked.
+
+        Reaching the end without the tag means nothing was reasoning. What
+        went out under that name has to be repeated as answer, or the turn is
+        silent.
         """
-        tail, self._held, self._pending = (
-            self._held + self._pending,
-            "",
-            "",
-        )
-        return [(self._kind(), tail)] if tail else []
+        tail, self._pending = self._pending, ""
+        out: list[tuple[str, str]] = []
+        if tail:
+            out += self._take(tail)
+        if not self._saw_close:
+            whole = self._reasoning_so_far
+            self._reasoning_so_far = ""
+            if whole:
+                out.append(("answer", whole))
+        return out
 
     def _take(self, text: str) -> list[tuple[str, str]]:
         if self._in_reasoning:
-            self._held += text  # kind still undecided
-            return []
+            self._reasoning_so_far += text
+            return [("reasoning", text)]
         return [("answer", text)]
-
-    def _kind(self) -> str:
-        # Reaching the end still "in reasoning" means no tag was ever sent,
-        # so the text was the answer all along.
-        return "answer"
 
 
 def _resolve_session_id(configured: str) -> str:
