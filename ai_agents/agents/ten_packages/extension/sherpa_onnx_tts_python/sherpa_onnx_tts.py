@@ -249,7 +249,10 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
         frame_bytes = max(2, target_rate * 2 * FRAME_MS // 1000)
         failure: list = []
 
+        produced = {"samples": 0, "frames": 0}
+
         def on_chunk(samples: np.ndarray, _progress: float) -> int:
+            produced["samples"] += int(samples.size)
             # Runs on the worker thread. Conversion happens here rather than
             # on the event loop, which is the whole point of the thread.
             pcm = resample_pcm16(
@@ -268,17 +271,32 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
             self.config.min_chars_to_split,
             self.config.chars_per_piece,
         )
+        # What the engine is actually asked to say. Without this the only
+        # record is the text the base class received, which says nothing
+        # about what sanitising and splitting did to it, and nothing at all
+        # about what came back.
+        self.ten_env.log_info(
+            f"[tts] request {request_id}: {len(clean_text)} chars -> "
+            f"{len(pieces)} piece(s) {pieces}",
+            category=LOG_CATEGORY_KEY_POINT,
+        )
 
         def synthesise() -> None:
             try:
                 for piece in pieces:
                     if self._is_cancelled:
                         break
+                    before = produced["samples"]
                     engine.generate(
                         piece,
                         sid=self.config.speaker_id,
                         speed=self.config.speed,
                         callback=on_chunk,
+                    )
+                    made = produced["samples"] - before
+                    self.ten_env.log_info(
+                        f"[tts] piece {piece!r} -> "
+                        f"{made / source_rate:.2f}s of audio"
                     )
             except Exception as err:  # pylint: disable=broad-except
                 failure.append(err)
@@ -305,6 +323,7 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
                     break
                 pending.extend(pcm)
                 while len(pending) >= frame_bytes and not self._is_cancelled:
+                    produced["frames"] += 1
                     yield bytes(
                         pending[:frame_bytes]
                     ), TTS2HttpResponseEventType.RESPONSE
@@ -330,6 +349,17 @@ class SherpaOnnxTTSClient(AsyncTTS2HttpClient):
             ), TTS2HttpResponseEventType.ERROR
             yield None, TTS2HttpResponseEventType.END
             return
+
+        # The pair that settles "was it spoken at all": how much the engine
+        # made, and how much left here. They differ when the rate conversion
+        # or the framing drops something.
+        self.ten_env.log_info(
+            f"[tts] request {request_id} {'cancelled' if self._is_cancelled else 'done'}: "
+            f"{produced['samples'] / source_rate:.2f}s made at {source_rate} Hz, "
+            f"{produced['frames']} frames sent at {target_rate} Hz "
+            f"({produced['frames'] * FRAME_MS / 1000:.2f}s)",
+            category=LOG_CATEGORY_KEY_POINT,
+        )
 
         if self._is_cancelled:
             yield None, TTS2HttpResponseEventType.FLUSH

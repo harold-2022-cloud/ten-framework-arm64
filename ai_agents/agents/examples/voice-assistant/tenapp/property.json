@@ -2255,7 +2255,7 @@
                 "num_threads": 1,
                 "speed": 1.0,
                 "speaker_id": 0,
-                "dump": false,
+                "dump": true,
                 "dump_path": "/tmp"
               }
             },
@@ -2452,7 +2452,7 @@
                 "num_threads": 1,
                 "speed": 1.0,
                 "speaker_id": 0,
-                "dump": false,
+                "dump": true,
                 "dump_path": "/tmp"
               }
             },

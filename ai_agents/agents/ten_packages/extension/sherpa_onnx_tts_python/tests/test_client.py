@@ -441,3 +441,26 @@ async def test_splitting_is_off_when_the_limit_is_zero():
     await drain(client, text=text)
 
     assert engine.texts == [text]
+
+
+@pytest.mark.asyncio
+async def test_the_pieces_and_the_audio_are_logged():
+    """Without this the log records the text the base class received and
+    nothing about what sanitising, splitting or the engine did to it."""
+    engine = FakeEngine(sample_rate=16000, num_chunks=2, samples_per_chunk=320)
+    ten_env = FakeTenEnv()
+    client = SherpaOnnxTTSClient(
+        config=SherpaOnnxTTSConfig(
+            voice_dir="/unused", output_sample_rate=16000, min_chars_to_split=4
+        ),
+        ten_env=ten_env,
+        load_engine=lambda _c: engine,
+    )
+    async for _ in client.get("你好，今天天气不错。", "req-7"):
+        pass
+
+    joined = "\n".join(ten_env.lines)
+    assert "req-7" in joined
+    assert "piece(s)" in joined, "the split is not recorded"
+    assert "frames sent" in joined, "the audio produced is not recorded"
+    assert "done" in joined
