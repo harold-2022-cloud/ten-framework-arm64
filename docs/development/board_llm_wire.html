@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>N1-655 LLM Wire Reference</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground: #f6f8f8;
+    --surface: #ffffff;
+    --sunk: #eef2f2;
+    --ink: #15191b;
+    --ink-soft: #57646a;
+    --ink-faint: #8a979d;
+    --rule: #dde4e5;
+    --signal: #0b7885;
+    --signal-soft: #e2f1f2;
+    --alarm: #ac3520;
+    --alarm-soft: #fbeae6;
+    --shadow: 0 1px 2px rgba(18, 34, 38, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1214;
+      --surface: #161a1d;
+      --sunk: #1c2225;
+      --ink: #e7ecee;
+      --ink-soft: #9aa5ab;
+      --ink-faint: #6b777d;
+      --rule: #293135;
+      --signal: #45b9c6;
+      --signal-soft: #102f33;
+      --alarm: #e5806b;
+      --alarm-soft: #2c1a16;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1214;
+    --surface: #161a1d;
+    --sunk: #1c2225;
+    --ink: #e7ecee;
+    --ink-soft: #9aa5ab;
+    --ink-faint: #6b777d;
+    --rule: #293135;
+    --signal: #45b9c6;
+    --signal-soft: #102f33;
+    --alarm: #e5806b;
+    --alarm-soft: #2c1a16;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .endpoint-bar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--rule);
+    padding: 10px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+  }
+  .endpoint-bar .method {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: .08em;
+    color: var(--surface);
+    background: var(--signal);
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+  .endpoint-bar .url {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .endpoint-bar .who {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin-left: auto;
+  }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 40px 72px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 38px);
+    line-height: 1.15;
+    letter-spacing: -.02em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 17px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 8px;
+  }
+  .provenance {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin: 22px 0 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+  }
+
+  h2 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin: 56px 0 4px;
+  }
+  h2 + .lede {
+    color: var(--ink-soft);
+    max-width: 64ch;
+    margin: 0 0 20px;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 30px 0 8px;
+  }
+  p { max-width: 64ch; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .88em;
+    background: var(--sunk);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .scroll { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 520px;
+    font-size: 14px;
+  }
+  th {
+    text-align: left;
+    font-size: 11.5px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 0 14px 7px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  td.k {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  td.v {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--signal);
+    white-space: nowrap;
+  }
+  .req {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--signal);
+    background: var(--signal-soft);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  pre {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    background: var(--sunk);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 0;
+    tab-size: 2;
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .h { color: var(--signal); font-weight: 500; }
+  pre .s { color: var(--alarm); }
+  .caption {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin: 8px 0 0;
+    max-width: 64ch;
+  }
+
+  .anatomy {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 18px;
+    font-size: 14px;
+    align-items: baseline;
+  }
+  .anatomy dt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--signal);
+    white-space: nowrap;
+  }
+  .anatomy dd { margin: 0; color: var(--ink-soft); }
+
+  .fails { margin-top: 20px; }
+  .fail {
+    display: grid;
+    grid-template-columns: 3px 1fr;
+    gap: 0 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .fail .stripe { background: var(--rule); border-radius: 2px; }
+  .fail.silent .stripe { background: var(--alarm); }
+  .fail .sym {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13.5px;
+    font-weight: 500;
+    margin: 0 0 4px;
+    word-break: break-word;
+  }
+  .fail p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--alarm);
+    background: var(--alarm-soft);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: 2px;
+  }
+
+  .note {
+    border-left: 2px solid var(--signal);
+    padding: 2px 0 2px 16px;
+    margin: 22px 0;
+    color: var(--ink-soft);
+    font-size: 14.5px;
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+  footer code { background: none; padding: 0; color: var(--ink-soft); }
+
+  @media (max-width: 560px) {
+    .anatomy { grid-template-columns: 1fr; gap: 0; }
+    .anatomy dd { margin: 0 0 12px; }
+    .endpoint-bar .who { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+
+<div class="endpoint-bar">
+  <span class="method">POST</span>
+  <span class="url">http://127.0.0.1:8080/</span>
+  <span class="who">test_llm &middot; Deepseek-R1-Distill-Qwen 7B &middot; 1 NVP</span>
+</div>
+
+<div class="wrap">
+
+  <h1>The board's LLM speaks HTTP, but only just</h1>
+  <p class="standfirst">
+    Ambarella's <code>llm_demo</code> serves one endpoint on an N1-655. Four headers,
+    a plain-text body, and a response that streams one character per event. What
+    follows was read off the wire, not out of a header file.
+  </p>
+  <p class="provenance">
+    measured 2026-09-14 &rarr; 2026-09-17 &nbsp;&middot;&nbsp; n1-655_deepseek_r1_distill_qwen_7B_1NVP
+    &nbsp;&middot;&nbsp; launcher: run_llm_demo.sh --model_type 9 --max_user 1
+  </p>
+
+  <h2>Request</h2>
+  <p class="lede">
+    The body is the prompt itself &mdash; UTF-8 text, no JSON envelope, no role
+    markers. The board keeps the conversation history on its side, keyed by
+    <code>Session-Id</code>, so only the newest turn is sent.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Header</th><th>Value</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="k">Session-Id <span class="req">required</span></td>
+          <td class="v">815217</td>
+          <td>A non-zero decimal integer. Parsed numerically, so a hex id either
+              leads with a letter and parses to zero, or leads with a digit and is
+              truncated at the first letter. Both fail silently in their own way.</td>
+        </tr>
+        <tr>
+          <td class="k">Model-Type</td>
+          <td class="v">9</td>
+          <td>Matches the <code>--model_type</code> the daemon was started with.</td>
+        </tr>
+        <tr>
+          <td class="k">Stream-Off</td>
+          <td class="v">0</td>
+          <td><code>0</code> streams the reply as it generates. <code>1</code> returns
+              the whole thing at once &mdash; still labelled <code>text/event-stream</code>,
+              but with no <code>data:</code> framing in the body.</td>
+        </tr>
+        <tr>
+          <td class="k">Reset-En</td>
+          <td class="v">1</td>
+          <td><code>1</code> clears the board-side history for this session before
+              answering. <code>0</code> keeps it, and the board re-processes the whole
+              history each turn.</td>
+        </tr>
+        <tr>
+          <td class="k">Content-Type</td>
+          <td class="v">text/plain; charset=utf-8</td>
+          <td>The body is the prompt. Not required by the daemon, but it is what the
+              guide sends and what any proxy in the path will want.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>Nothing here touches generation.</strong> There is no header for a length
+    limit, a stop condition, a temperature, or the reasoning phase. Four headers is the
+    whole surface.
+  </div>
+
+  <h2>curl</h2>
+  <p class="lede">
+    A first turn, streaming, with the history cleared. <code>-N</code> matters: without
+    it curl buffers and the stream arrives as one block.
+  </p>
+
+  <pre><span class="c"># streaming, fresh conversation</span>
+curl -N -X POST http://127.0.0.1:8080/ \
+  -H <span class="h">'Session-Id: 815217'</span> \
+  -H <span class="h">'Model-Type: 9'</span> \
+  -H <span class="h">'Stream-Off: 0'</span> \
+  -H <span class="h">'Reset-En: 1'</span> \
+  -H <span class="h">'Content-Type: text/plain; charset=utf-8'</span> \
+  --data <span class="s">'讲一个笑话。'</span></pre>
+
+  <h3>The turn after it</h3>
+  <p>Same <code>Session-Id</code>, <code>Reset-En: 0</code>. The board still has the
+     previous exchange and will read it again before answering.</p>
+
+  <pre>curl -N -X POST http://127.0.0.1:8080/ \
+  -H <span class="h">'Session-Id: 815217'</span> \
+  -H <span class="h">'Model-Type: 9'</span> \
+  -H <span class="h">'Stream-Off: 0'</span> \
+  -H <span class="h">'Reset-En: 0'</span> \
+  --data <span class="s">'再讲一个。'</span></pre>
+
+  <h3>Whole reply at once</h3>
+
+  <pre>curl -X POST http://127.0.0.1:8080/ \
+  -H <span class="h">'Session-Id: 815217'</span> \
+  -H <span class="h">'Model-Type: 9'</span> \
+  -H <span class="h">'Stream-Off: 1'</span> \
+  -H <span class="h">'Reset-En: 1'</span> \
+  --data <span class="s">'Hello'</span>
+
+<span class="c"># HTTP/1.1 200 OK
+# Content-Type: text/event-stream;charset=UTF-8
+# Cache-Control: no-cache
+# Connection: keep-alive
+# Content-Length: 280
+#
+# Alright, the user said "Hello." That's a friendly greeting. I sh…</span></pre>
+  <p class="caption">
+    Note the body: no <code>data:</code> prefix, despite the content type. And the reply
+    opens with reasoning, because that is what the model generates first.
+  </p>
+
+  <h3>When curl gives up</h3>
+  <p>
+    The board's error pages are not well-formed HTTP, and curl will not hand over a
+    response it refuses to parse &mdash; it reports <code>(8) Header without colon</code>
+    and stops. Speak the protocol yourself to see the bytes.
+  </p>
+
+  <pre>python3 - &lt;&lt;<span class="s">'PY'</span>
+import socket
+body = <span class="s">"讲一个笑话。"</span>.encode()
+req = (b<span class="s">"POST / HTTP/1.1\r\n"</span>
+       b<span class="s">"Host: 127.0.0.1:8080\r\n"</span>
+       b<span class="s">"Session-Id: 815217\r\nModel-Type: 9\r\n"</span>
+       b<span class="s">"Stream-Off: 0\r\nReset-En: 1\r\n"</span>
+       + f<span class="s">"Content-Length: {len(body)}\r\n"</span>.encode()
+       + b<span class="s">"Connection: close\r\n\r\n"</span> + body)
+c = socket.create_connection((<span class="s">"127.0.0.1"</span>, 8080), timeout=180)
+c.sendall(req)
+raw = b<span class="s">""</span>
+<span class="h">while</span> (chunk := c.recv(8192)):
+    raw += chunk
+print(raw[:400])
+PY</pre>
+
+  <h2>Response</h2>
+  <p class="lede">
+    With <code>Stream-Off: 0</code> the body is Server-Sent Events, one
+    <strong>character</strong> per event. Whitespace is escaped, because a trailing space
+    cannot survive SSE's field parsing.
+  </p>
+
+  <pre>data: 在
+data: 一
+data: 个
+data: <span class="h">&lt;SP&gt;</span>
+data: 小
+data: 村
+...
+data: <span class="h">&lt;DONE&gt;</span></pre>
+
+  <dl class="anatomy" style="margin-top:22px">
+    <dt>&lt;SP&gt;</dt><dd>one space</dd>
+    <dt>&lt;NL&gt;</dt><dd>one newline</dd>
+    <dt>&lt;DONE&gt;</dt><dd>end of stream. <code>[DONE]</code> also appears; accept both.</dd>
+    <dt>&lt;/think&gt;</dt><dd>end of the reasoning phase. Everything before it is the
+        model thinking; everything after is the answer.</dd>
+  </dl>
+
+  <div class="note">
+    <strong>There is no opening <code>&lt;/think&gt;</code>'s partner.</strong> The
+    template in <code>prompt_config.json</code> ends the assistant marker with an
+    unclosed <code>&lt;think&gt;</code>, so the opening tag is in the prompt and only the
+    closing one is generated. A parser written for this model family will look for both
+    and find one.
+  </div>
+
+  <p>
+    Because each event carries a single character, every one of these tokens can be split
+    across events, and a token split across two TCP chunks is the same problem one level
+    down. Decode the byte stream incrementally and hold back anything that might still
+    become a token &mdash; at most <code>len("&lt;/think&gt;") - 1</code> characters of lag.
+  </p>
+
+  <h2>One conversation at a time</h2>
+  <p class="lede">
+    The daemon runs with <code>--max_user 1</code>, and a session stays occupied for
+    <strong>180 seconds after the reply completes</strong>.
+  </p>
+
+  <pre><span class="c">/tmp/log.txt</span>
+[INFO] 10:26:59  From user: fd: 10, ip: 127.0.0.1, net_type: 9, content: 讲一个笑话。
+<span class="s">[ERR]  current user num (2) &gt; max_user_num (1), please wait 180s to see if
+       there are any timeout session.</span>
+<span class="s">[ERR]  handle_request_from_post fail</span>
+[INFO] 10:29:00  Dev session free: Dev VA: 0xaaaab8fa01b8, fd_dev: 7, sid: 2</pre>
+
+  <p class="caption">
+    A client that sends each request under a fresh <code>Session-Id</code> therefore gets
+    one request every three minutes. Reuse one id and separate the turns with
+    <code>Reset-En: 1</code> instead.
+  </p>
+
+  <h2>When it goes wrong</h2>
+  <p class="lede">
+    Three of these fail without an HTTP error to catch. The stripe marks those.
+  </p>
+
+  <div class="fails">
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">Connection closes, no response at all<span class="tag">silent</span></p>
+        <p>
+          <code>Session-Id</code> did not parse as a non-zero integer. The daemon logs
+          <code>session_id=0 should not be 0</code> and hangs up; curl reports
+          <code>(52) Empty reply from server</code>.
+        </p>
+      </div>
+    </div>
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">Parse Error: Invalid header token<span class="tag">silent</span></p>
+        <p>
+          Something else is on 8080 &mdash; or rather, you have reached the LLM when you
+          meant to reach something else. Its 404 page's second header line is the bare
+          word <code>LLM</code>, with no colon, which no HTTP parser will accept.
+        </p>
+      </div>
+    </div>
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">A reply that is all reasoning and no answer<span class="tag">silent</span></p>
+        <p>
+          The stream ended without ever sending <code>&lt;/think&gt;</code>. Anything
+          holding text back until the tag arrives will hold all of it, and a client that
+          renders reasoning separately shows the user nothing worth reading.
+        </p>
+      </div>
+    </div>
+    <div class="fail">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">current user num (2) &gt; max_user_num (1)</p>
+        <p>
+          Another session is still held. Wait for the 180-second timeout, or reuse the
+          session id you already have.
+        </p>
+      </div>
+    </div>
+    <div class="fail">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">Nothing on 8080 for the first 80 seconds after boot</p>
+        <p>
+          The model is loading. It is ready when <code>/tmp/log.txt</code> contains a
+          <code>Device ENABLE</code> line.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <h2>Generation</h2>
+  <p class="lede">
+    8&ndash;11 tokens per second is what Ambarella expects from this model on an N1-655,
+    and 8.4&ndash;11.9 characters per second is what was measured. The rate does not
+    depend on whether the characters are reasoning or answer.
+  </p>
+  <p>
+    Which makes the reasoning the whole of the wait: 44 to 523 characters of it before the
+    first character of an answer, depending on the question. Closing the think block in
+    <code>prompt_config.json</code> removes it &mdash; Ambarella's own instruction &mdash;
+    and the first answer character then arrives in 0.2&nbsp;s instead of 17.
+  </p>
+
+  <footer>
+    Read off one board between 2026-09-14 and 2026-09-17. Tooling that reproduces all of
+    it lives in <code>tools/ambarella/</code>: <code>check_llm_board.sh</code> compares the
+    board against the kit's guide, <code>probe_llm_wire.py</code> prints the raw bytes,
+    <code>probe_llm_thinking.py</code> times the reasoning, and
+    <code>set_llm_thinking.sh</code> applies the bypass.
+  </footer>
+
+</div>
+
+</body>
+</html>
