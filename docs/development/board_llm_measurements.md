@@ -190,9 +190,10 @@ measured here.
 4. **Should there ever be two `test_llm_client` processes?** If not, what
    leaves one behind, and how should it be cleared safely?
 
-5. **Is the missing opening `<think>` intentional?** Every reply carries a
-   closing `</think>` with no opening tag, which every off-the-shelf parser for
-   this model family gets wrong.
+**Answered while applying the bypass:** the missing opening `<think>` is the
+template. `Symbol1` on this board is `"<｜Assistant｜><think>\n"`, so the
+opening tag is in the prompt and only the closing one is generated. Any parser
+for this model family has to be told that.
 
 ## How to reproduce
 

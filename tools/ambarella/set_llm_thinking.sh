@@ -16,8 +16,15 @@
 # 44-523 characters of reasoning. Measured on this board, that reasoning was
 # the whole of a 17-36 second wait -- see docs/development/board_llm_measurements.md.
 #
-#   "Symbol1": "<｜Assistant｜>"                    thinking on  (or absent)
+#   "Symbol1": "<｜Assistant｜><think>\n"           thinking on   (this board)
 #   "Symbol1": "<｜Assistant｜><think>\n\n</think>"  thinking bypassed
+#
+# The opening <think> is already in the template. That is why replies carry a
+# closing </think> with no opening tag: the opening one was in the prompt, not
+# in what the model generated. --off keeps whatever precedes it and rewrites
+# from <think> onwards, so it cannot leave two opening tags, and --on restores
+# the backup rather than reconstructing -- the value before the change is not
+# derivable from the value after it.
 #
 # The daemon reads this at load, so it has to be restarted afterwards. This
 # script does not restart it: the launcher takes 80 seconds to come back and
@@ -150,6 +157,24 @@ if [[ "$MODE" == "on" && "$VERDICT" != "OFF" ]]; then
   ok "already on; nothing to do"
   exit 0
 fi
+if [[ "$MODE" == "on" ]]; then
+  # Restoring means putting back exactly what was there. This board's template
+  # carried an opening <think> before the change, and stripping the suffix
+  # would not bring it back, so the backup is the only honest source.
+  BACKUP=$(ls -1t "$CONFIG".bak.* 2>/dev/null | head -1)
+  [[ -n "$BACKUP" ]] || die "no $CONFIG.bak.* to restore from.
+       --on puts back the file --off saved, and there is none."
+  cp -L "$BACKUP" "$CONFIG" || die "could not restore $BACKUP"
+  ok "restored from $BACKUP"
+  CONFIG="$CONFIG" python3 -c "
+import json, os
+d = json.load(open(os.environ['CONFIG'], encoding='utf-8'))
+sym = d.get('PromptRender', {}).get('Elements', {}).get('Symbol1')
+print('        Symbol1 is now ' + json.dumps(sym, ensure_ascii=False))"
+  sec "Restart to pick it up"
+  info "the daemon reads this at load, so nothing changes until it restarts"
+  exit 0
+fi
 if [[ "$MODE" == "off" && "$VERDICT" == "OFF" ]]; then
   ok "already bypassed; nothing to do"
   exit 0
@@ -161,11 +186,10 @@ if [[ -e "$CONFIG" ]]; then
   ok "backup: $BACKUP"
 fi
 
-MODE="$MODE" CONFIG="$CONFIG" ASSISTANT="$ASSISTANT" NO_THINK="$NO_THINK" python3 - <<'PY' || die "the file was not written"
+CONFIG="$CONFIG" ASSISTANT="$ASSISTANT" NO_THINK="$NO_THINK" python3 - <<'PY' || die "the file was not written"
 import json, os
 
 path = os.environ["CONFIG"]
-mode = os.environ["MODE"]
 assistant = os.environ["ASSISTANT"]
 no_think = os.environ["NO_THINK"].encode().decode("unicode_escape")
 
@@ -200,13 +224,12 @@ else:
 elements = doc.setdefault("PromptRender", {}).setdefault("Elements", {})
 current = elements.get("Symbol1", assistant)
 
-if mode == "off":
-    base = current[: -len("<think>\n\n</think>")] if current.endswith("</think>") else current
-    elements["Symbol1"] = base + no_think
-else:
-    # Strip exactly what was appended, leaving whatever else was there.
-    marker = current.rfind("<think>")
-    elements["Symbol1"] = current[:marker] if marker >= 0 else current
+# Rebuilt from the first <think>, not appended to. This board's template
+# already ends with "<think>\n", and appending would leave two opening tags.
+# Rebuilding is idempotent, so running --off twice is harmless.
+opening = current.find("<think>")
+prefix = current[:opening] if opening >= 0 else current
+elements["Symbol1"] = prefix + no_think
 
 # Written through the symlink on purpose: that is the file the daemon reads.
 with open(path, "w", encoding="utf-8") as fh:
