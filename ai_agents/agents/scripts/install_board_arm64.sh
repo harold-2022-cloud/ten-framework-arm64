@@ -12,6 +12,8 @@
 #
 #   --example NAME   which example to install   (default: voice-assistant)
 #   --python X.Y     the interpreter the TEN runtime loads   (default: 3.12)
+#   --server-port N  the Go API server's port, which cannot be 8080 here
+#                    because the vendor's LLM holds it   (default: 8081)
 #   --force          redo steps already done
 #
 # This sequences the scripts that do the work rather than repeating them, so
@@ -39,6 +41,7 @@ set -uo pipefail
 
 EXAMPLE_NAME="voice-assistant"
 PY_VERSION="3.12"
+SERVER_PORT="8081"
 DRY_RUN=0
 FORCE=0
 DO_RUN=0
@@ -47,10 +50,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --example) EXAMPLE_NAME="$2"; shift 2 ;;
     --python)  PY_VERSION="$2"; shift 2 ;;
+    --server-port) SERVER_PORT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --force)   FORCE=1; shift ;;
     --run)     DO_RUN=1; shift ;;
-    -h|--help) sed -n '6,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '6,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -125,6 +129,42 @@ fi
 
 command -v tman >/dev/null 2>&1 || warn "tman is not on PATH; stage 2 will fail"
 command -v task >/dev/null 2>&1 || warn "task is not on PATH; only stage 5 needs it"
+
+# ------------------------------------------------------------------ 0b
+say "0b. Configuration"
+
+# .env is git-ignored, so a clone has none and every port falls back to its
+# default -- including the Go API server's 8080, which on this board is held
+# by the vendor's LLM daemon. The playground then proxies /api/agents/* into
+# the LLM and reports `Parse Error: Invalid header token`, because what comes
+# back is an LLM error page whose second header line is the bare word LLM.
+ENV_FILE="$REPO_ROOT/ai_agents/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  current=$(grep -E '^SERVER_PORT=' "$ENV_FILE" | head -1 | cut -d= -f2)
+  ok ".env exists, left alone (SERVER_PORT=${current:-unset})"
+  if [[ "${current:-8080}" == "8080" ]]; then
+    warn "SERVER_PORT is 8080, which the board's LLM daemon holds."
+    warn "The Go server will not get it. Move it, or pass --server-port."
+  fi
+elif [[ $DRY_RUN -eq 1 ]]; then
+  step "would create .env from .env.example with SERVER_PORT=$SERVER_PORT"
+else
+  [[ -f "$REPO_ROOT/ai_agents/.env.example" ]] ||
+    die "no .env.example to copy"
+  cp "$REPO_ROOT/ai_agents/.env.example" "$ENV_FILE"
+  sed -i "s|^SERVER_PORT=.*|SERVER_PORT=$SERVER_PORT|" "$ENV_FILE"
+  sed -i "s|^AGENT_SERVER_URL=.*|AGENT_SERVER_URL=http://localhost:$SERVER_PORT|" \
+    "$ENV_FILE"
+  ok "created .env with SERVER_PORT=$SERVER_PORT"
+  warn "no API keys are in it. The sherpa graphs need none -- speech is local"
+  warn "and the LLM is the board's -- but any cloud vendor will need its key."
+fi
+
+# Say who holds 8080 rather than leave it to be discovered at runtime.
+if command -v ss >/dev/null 2>&1; then
+  holder=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:8080$/ {print $NF}' | head -1)
+  [[ -n "$holder" ]] && step "8080 is held by $holder"
+fi
 
 # ------------------------------------------------------------------ 1
 say "1. Speech models on the CPU"

@@ -191,6 +191,14 @@ The LLM is not installed by it. That is the vendor's daemon on
 `127.0.0.1:8080`; `tools/ambarella/check_llm_board.sh` compares what the board
 has against what the kit's guide says it should.
 
+It writes `ai_agents/.env` if there is none, moving `SERVER_PORT` to 8081.
+`.env` is git-ignored, so a clone has none and every port falls back to its
+default -- including the Go API server's 8080, which the LLM daemon already
+holds. The playground then proxies `/api/agents/*` into the LLM and reports
+`Parse Error: Invalid header token`, because what comes back is an LLM error
+page whose second header line is the bare word `LLM`. An existing `.env` is
+left alone and only warned about.
+
 For the TTS extension alone, without the ASR side:
 
 ```bash
