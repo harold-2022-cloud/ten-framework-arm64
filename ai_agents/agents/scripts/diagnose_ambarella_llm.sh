@@ -16,7 +16,10 @@ set -uo pipefail
 LOG="/tmp/ambarella_llm_diag_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee "$LOG") 2>&1
 
-REPO="${REPO:-$HOME/ten-framework}"
+# Derived from the script's own location, not $HOME: a checkout is not always
+# at $HOME/ten-framework, and hardcoding it made a sibling script install into
+# a different checkout than the caller was in -- silently, because both existed.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 URL="${AMBARELLA_LLM_BASE_URL:-http://127.0.0.1:8080}"
 MODEL_TYPE="${MODEL_TYPE:-9}"
 TIMEOUT="${TIMEOUT:-90}"

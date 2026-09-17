@@ -22,7 +22,10 @@ set -uo pipefail
 SDK_TGZ="${1:-}"
 EXAMPLE="${2:-websocket-example}"
 
-REPO="$HOME/ten-framework"
+# Derived from the script's own location, not $HOME: a checkout is not always
+# at $HOME/ten-framework, and hardcoding it made a sibling script install into
+# a different checkout than the caller was in -- silently, because both existed.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 WRAPPER="$REPO/agora/agora_rtc-0.23.9-t1@dcbacc801f3"
 OUT_DIR="$REPO/agora_rtc_sdk_arm64_out"
 SCRIPTS="$REPO/ai_agents/agents/scripts"

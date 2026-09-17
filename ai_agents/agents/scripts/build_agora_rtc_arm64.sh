@@ -31,10 +31,14 @@ echo "==> [1/6] Toolchain"
 # libraries. See its BUILD.gn.
 sudo dnf -y install openssl-devel zlib-devel gcc gcc-c++ make cmake git
 
+# Named from this script's location so the instructions point at the checkout
+# the operator is actually in, which is not always $HOME/ten-framework.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+
 command -v tgn >/dev/null 2>&1 || die "tgn not on PATH.
-  cd ~/ten-framework
+  cd $REPO
   git submodule update --init --recursive --depth 1 core/ten_gn
-  export PATH=\$HOME/ten-framework/core/ten_gn:\$PATH"
+  export PATH=$REPO/core/ten_gn:\$PATH"
 
 command -v tman >/dev/null 2>&1 || die "tman not on PATH"
 

@@ -25,7 +25,11 @@ set -euo pipefail
 BUILT="${1:-}"
 SDK_TPKG="${2:-}"
 EXAMPLE="${3:-voice-assistant}"
-TENAPP="$HOME/ten-framework/ai_agents/agents/examples/$EXAMPLE/tenapp"
+# Derived from the script's own location, not $HOME: a checkout is not always
+# at $HOME/ten-framework, and hardcoding it made a sibling script install into
+# a different checkout than the caller was in -- silently, because both existed.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+TENAPP="$REPO/ai_agents/agents/examples/$EXAMPLE/tenapp"
 
 die() { echo "FATAL: $*" >&2; exit 1; }
 ok()  { echo "    OK  $*"; }

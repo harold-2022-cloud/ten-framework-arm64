@@ -1,9 +1,53 @@
 #!/bin/bash
-
 set -e
-
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-export PYTHONPATH=.ten/app:.ten/app/ten_packages/system/ten_runtime_python/lib:.ten/app/ten_packages/system/ten_runtime_python/interface:.ten/app/ten_packages/system/ten_ai_base/interface:$PYTHONPATH
+# task test-extension installs the runtime into .ten/app first. When it has
+# not, fall back to the shared system packages so the tests still run -- on the
+# board there is no .ten/app, and a hardcoded path made every import fail.
+if [[ -d .ten/app ]]; then
+  BASE=".ten/app/ten_packages/system"
+  export PYTHONPATH=".ten/app:$PYTHONPATH"
+else
+  BASE="${TEN_SYSTEM_DIR:-../../system}"
+fi
+export PYTHONPATH="..:$BASE/ten_runtime_python/lib:$BASE/ten_runtime_python/interface:$BASE/ten_ai_base/interface:$PYTHONPATH"
 
-pytest -s tests/ "$@"
+# Run under the interpreter the TEN runtime embeds, not whichever python
+# happens to be on PATH. On the arm64 board those differ -- the runtime loads
+# libpython3.12 while the shell's python3 is 3.13 -- and a suite that passes
+# under one proves nothing about the other. This extension talks to the board's
+# LLM, so the board is the only place its tests mean anything.
+PY=""
+if [[ -n "${TEN_PYTHON_LIB_PATH:-}" ]]; then
+  version=$(basename "$TEN_PYTHON_LIB_PATH" | grep -oE '3\.[0-9]+' || true)
+  if [[ -n "$version" ]] && command -v "python$version" >/dev/null 2>&1; then
+    PY="python$version"
+  fi
+fi
+if [[ -z "$PY" ]]; then
+  PY="${PYTHON:-python3}"
+  if [[ -n "${TEN_PYTHON_LIB_PATH:-}" ]]; then
+    echo "WARNING: TEN_PYTHON_LIB_PATH names ${TEN_PYTHON_LIB_PATH##*/} but no" >&2
+    echo "         matching interpreter is on PATH; falling back to $PY." >&2
+    echo "         A pass here does not speak for the runtime." >&2
+  fi
+fi
+
+echo "running tests under $("$PY" -c 'import sys; print(sys.executable, sys.version.split()[0])')"
+# pytest-asyncio as well as pytest: without it every async test is skipped with
+# a warning and the run still reports "N passed", which reads as success and
+# verified nothing.
+if ! "$PY" -c 'import pytest_asyncio' >/dev/null 2>&1; then
+  echo "FATAL: $PY has pytest but not pytest-asyncio." >&2
+  echo "       Async tests would be skipped and the run would still report" >&2
+  echo "       success. Install it for this interpreter:" >&2
+  echo "         tools/ambarella/setup_tts_runtime_deps.sh" >&2
+  exit 1
+fi
+if ! "$PY" -c 'import pytest' >/dev/null 2>&1; then
+  echo "FATAL: $PY has no pytest." >&2
+  exit 1
+fi
+
+exec "$PY" -m pytest -s tests/ "$@"

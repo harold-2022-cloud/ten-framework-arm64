@@ -13,7 +13,10 @@
 
 set -euo pipefail
 
-REPO="${REPO:-$HOME/ten-framework}"
+# Derived from the script's own location, not $HOME: a checkout is not always
+# at $HOME/ten-framework, and hardcoding it made a sibling script install into
+# a different checkout than the caller was in -- silently, because both existed.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 WRAPPER="${WRAPPER:-$REPO/agora/agora_rtc-0.23.9-t1@dcbacc801f3}"
 BUILT="$WRAPPER/out/linux/arm64/ten_packages/extension/agora_rtc"
 SDK_TPKG="${SDK_TPKG:-$REPO/agora_rtc_sdk_arm64_out/agora_rtc_sdk-4.4.32-141-linux-arm64.tpkg}"
