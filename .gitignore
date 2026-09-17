@@ -161,3 +161,10 @@ ai_agents/*.pem
 # Doxygen export of vendor material marked confidential and proprietary --
 # obtained from Ambarella, not redistributable through this repository.
 /ambarella_ai_developer_kit_doc/
+
+# Customer project material. Architecture documents and figures produced for a
+# named customer engagement -- confidential, and this repository is a fork
+# pushed to a hosted remote. Kept out of git entirely rather than relied on to
+# be noticed at review time.
+docs/development/*convoai_oracle*
+docs/development/1.PNG
