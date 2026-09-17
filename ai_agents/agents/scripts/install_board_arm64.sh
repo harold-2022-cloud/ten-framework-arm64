@@ -295,6 +295,10 @@ else
 
     $TOOLS/check_asr_log.sh
 
+  Which graph needs which credential, and what each failure means:
+
+    docs/development/board_quickstart.md
+
 NEXT
 fi
 

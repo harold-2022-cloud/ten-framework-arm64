@@ -157,6 +157,10 @@ which the raw `.onnx` + `.onnx.json` pair does not carry.
 
 ## Installing it on the board
 
+[`board_quickstart.md`](board_quickstart.md) is the short version: install, the
+one credential to fill in, which graph to pick, and what each failure means.
+The rest of this section is the same ground in more detail.
+
 One script, from a fresh checkout to a verified install:
 
 ```bash
