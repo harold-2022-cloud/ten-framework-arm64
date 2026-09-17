@@ -150,7 +150,8 @@ cd ai_agents/agents/examples/voice-assistant
 task run 2>&1 | tee /tmp/task_run.log
 ```
 
-Open the playground on port 3000 and pick a graph.
+Open the playground on port 3000 and pick a graph. Driving it without the
+playground is [`agent_api.md`](agent_api.md).
 
 ## Which graph
 

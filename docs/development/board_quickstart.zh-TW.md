@@ -135,7 +135,8 @@ cd ai_agents/agents/examples/voice-assistant
 task run 2>&1 | tee /tmp/task_run.log
 ```
 
-打開 3000 port 的 playground，選一個 graph。
+打開 3000 port 的 playground，選一個 graph。不透過 playground 直接呼叫的話，
+見 [`agent_api.zh-TW.md`](agent_api.zh-TW.md)。
 
 ## 選哪個 graph
 
