@@ -107,10 +107,13 @@ class _ReasoningSplitter:
     watching an empty transcript concludes they were not heard and speaks
     again, which cancels the turn.
 
-    Generation starts already inside the block: measured on an N1-655 on
-    2026-09-14, a reply is <reasoning>\n</think>\n\n<answer>, with the
-    closing tag and no opening one. So text before the tag is reasoning, and
-    there is no need to wait to find out.
+    Whether generation starts inside the block is the caller's to say, because
+    it is a property of the model's prompt template rather than of the stream.
+    Measured on an N1-655 on 2026-09-14, a reply is
+    <reasoning>\n</think>\n\n<answer>, with the closing tag and no opening
+    one, because Symbol1 in prompt_config.json ends with an unclosed <think>.
+    Close it there -- Ambarella's own bypass -- and the first character is
+    already the answer, with no tag to wait for.
 
     A stream that ends without ever sending the tag was the answer all along,
     and it has already gone out as reasoning, which main_control renders but
@@ -118,11 +121,13 @@ class _ReasoningSplitter:
     transcript shows it twice; silence would be worse.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, starts_in_reasoning: bool = True) -> None:
         self._pending = ""  # may still grow into a token
         self._reasoning_so_far = ""  # sent as reasoning, kept for the retry
         self._saw_close = False
-        self._in_reasoning = True  # generation starts inside the block
+        # Whether the template left a think block open. With Ambarella's
+        # bypass it does not, and the first character is already the answer.
+        self._in_reasoning = starts_in_reasoning
 
     def feed(self, chunk: str) -> list[tuple[str, str]]:
         self._pending += chunk
@@ -242,6 +247,22 @@ class AmbarellaLLM2Config(BaseModel):
     # Off by default: this buys latency with the conversation itself. The
     # assistant stops being able to answer "and what about tomorrow?".
     reset_every_turn: bool = False
+    # Whether generation begins inside an unclosed think block.
+    #
+    # True is how this board shipped: prompt_config.json ends Symbol1 with
+    # "<｜Assistant｜><think>\n", so the opening tag is in the prompt and the
+    # model's first characters are reasoning. That is why a reply carries a
+    # closing </think> with no opening one.
+    #
+    # Ambarella's bypass closes the block in the template instead, and then
+    # no </think> ever arrives. Left at True the splitter treats the whole
+    # reply as reasoning, which main_control renders but never speaks, and
+    # flush() repeats it as the answer only once the stream ends -- measured
+    # on 2026-09-17, 70 characters arrived in one piece at 7.5 s instead of a
+    # first sentence reaching TTS at about one second.
+    #
+    # Set false alongside tools/ambarella/set_llm_thinking.sh --off.
+    starts_in_reasoning: bool = True
     # Networking. The total timeout is generous: a 7B model at W4A16 on
     # CVflow has no published token rate, and the first load after boot can
     # take up to 80 s.
@@ -545,7 +566,9 @@ class AmbarellaChatClient:
                         # the board's monologue is read aloud before the
                         # answer -- 235 characters of it, measured on an
                         # N1-655 on 2026-09-14.
-                        splitter = _ReasoningSplitter()
+                        splitter = _ReasoningSplitter(
+                            starts_in_reasoning=self.config.starts_in_reasoning
+                        )
                         reasoning = ""
                         reasoning_done = False
 

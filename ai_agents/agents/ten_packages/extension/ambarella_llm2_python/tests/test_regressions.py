@@ -622,3 +622,47 @@ async def test_reasoning_is_done_when_the_stream_ends_without_the_tag():
 
     dones = [r for r in out if isinstance(r, LLMResponseReasoningDone)]
     assert len(dones) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_bypassed_think_block_speaks_as_it_arrives():
+    """Replayed from the board on 2026-09-17, after Ambarella's bypass.
+
+    Closing the think block in prompt_config.json means no </think> ever
+    comes. Left to assume generation starts inside the block, the splitter
+    called the whole reply reasoning -- which main_control renders and never
+    speaks -- and flush() repeated it as the answer only once the stream
+    ended: 70 characters in one piece at 7.5 s, where a first sentence should
+    have reached TTS at about one second.
+    """
+    client = make_client(starts_in_reasoning=False)
+    out = await collect(
+        client, list("在一个小村庄里，有一个木匠。") + ["<DONE>"]
+    )
+
+    messages = [r for r in out if isinstance(r, LLMResponseMessageDelta)]
+    assert "".join(m.delta for m in messages) == "在一个小村庄里，有一个木匠。"
+    # Spoken as it arrives, not gathered up and released at the end.
+    assert len(messages) > 1, "the whole reply arrived in one piece"
+    # And none of it was announced as thinking.
+    assert not [r for r in out if isinstance(r, LLMResponseReasoningDelta)]
+
+
+@pytest.mark.asyncio
+async def test_the_closing_tag_still_works_when_the_block_is_bypassed():
+    """The option says where generation starts, not that tags are ignored."""
+    client = make_client(starts_in_reasoning=False)
+    out = await collect(
+        client, list("plain") + list("</think>") + list("more") + ["<DONE>"]
+    )
+    messages = [r for r in out if isinstance(r, LLMResponseMessageDelta)]
+    assert "".join(m.delta for m in messages) == "plainmore"
+
+
+@pytest.mark.asyncio
+async def test_the_block_is_assumed_open_unless_told_otherwise():
+    """The board ships with an unclosed <think> in Symbol1; default to that."""
+    assert AmbarellaLLM2Config().starts_in_reasoning is True
+    client = make_client()
+    out = await collect(client, list("thinking") + ["<DONE>"])
+    assert [r for r in out if isinstance(r, LLMResponseReasoningDelta)]

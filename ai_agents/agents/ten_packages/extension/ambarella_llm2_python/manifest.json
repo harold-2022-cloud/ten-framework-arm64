@@ -56,6 +56,9 @@
         "reset_after_abort": {
           "type": "bool"
         },
+        "starts_in_reasoning": {
+          "type": "bool"
+        },
         "reset_every_turn": {
           "type": "bool"
         },

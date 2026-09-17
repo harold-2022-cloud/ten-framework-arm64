@@ -276,6 +276,15 @@ cat <<NEXT
   answering faster, and the probe prints the first words so the two can be
   told apart.
 
-  To undo:  tools/ambarella/set_llm_thinking.sh --on
+  The graph has to be told as well. ambarella_llm2_python assumes
+  generation starts inside an unclosed think block, which is how this board
+  ships; with the block closed no </think> ever arrives and it would hold the
+  whole reply back to the end. Set on the llm node:
+
+    "starts_in_reasoning": false
+
+  Already set in the three graphs that use the board's LLM.
+
+  To undo:  tools/ambarella/set_llm_thinking.sh --on   (and set it back to true)
 
 NEXT

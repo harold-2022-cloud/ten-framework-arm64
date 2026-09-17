@@ -2038,7 +2038,8 @@
                 "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
                 "model_type": 9,
                 "prompt": "You are a helpful assistant running on an Ambarella N1-655 board. Keep answers short and spoken.",
-                "response_format": "sse"
+                "response_format": "sse",
+                "starts_in_reasoning": false
               }
             },
             {
@@ -2241,7 +2242,8 @@
                 "model_type": 9,
                 "prompt": "用中文简短口语回答，不要条列或符号。",
                 "response_format": "sse",
-                "reset_every_turn": false
+                "reset_every_turn": false,
+                "starts_in_reasoning": false
               }
             },
             {
@@ -2438,7 +2440,8 @@
                 "model_type": 9,
                 "prompt": "用中文简短口语回答，不要条列或符号。",
                 "response_format": "sse",
-                "reset_every_turn": false
+                "reset_every_turn": false,
+                "starts_in_reasoning": false
               }
             },
             {
