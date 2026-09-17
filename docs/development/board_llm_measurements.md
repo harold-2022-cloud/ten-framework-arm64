@@ -174,6 +174,31 @@ result.
 **8–11 token/s is expected** for this model on an N1-655, which is what was
 measured here.
 
+### Verified on the board, 2026-09-17
+
+Six requests after the change, with the board otherwise idle. Every one
+carried no reasoning at all, and the answers are answers rather than refusals:
+
+| Query | Reasoning | First answer character | Answer chars | Total |
+| --- | ---: | ---: | ---: | ---: |
+| 你是谁？ | 0 | 0.0 s | 67 | 5.8 s |
+| 讲一个笑话。 | 0 | 0.0 s | 139 | 14.5 s |
+| 六岁小孩怎么学加法？ | 0 | 0.0 s | 442 | 40.0 s |
+
+Repeating the three gave 5.8, 14.4 and 40.2 seconds with identical lengths, so
+it reproduces. The rate is 9.6–11.6 characters/second, unchanged: the hardware
+is no faster, the reasoning is simply gone.
+
+Against the same question before the change, 讲一个笑话 went from a first
+answer character at 17.0 s to one at 0.0 s. The answer is also longer — 139
+characters against 16 — because the joke used to be written inside the
+reasoning and the answer was only its punchline.
+
+In the voice pipeline that is 1.28 s for the ASR final, about 0.8 s to generate
+a first sentence, and 0.4–0.7 s of TTS: **roughly two and a half seconds from
+the user finishing to the assistant speaking**, against eighteen to thirty-eight
+before.
+
 ## Questions still open
 
 1. **Why does the rate fall to 5.0 characters/second while the host CPU is
