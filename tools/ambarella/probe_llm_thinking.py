@@ -180,6 +180,11 @@ def main():
     )
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument(
+        "--session-id",
+        default="815217",
+        help="reused for every request, the way the extension does",
+    )
+    parser.add_argument(
         "--only",
         action="append",
         help="run just this variant, repeatable",
@@ -198,6 +203,7 @@ def main():
         sys.exit(f"no such variant. known: {', '.join(VARIANTS)}")
 
     print(f"target      {args.url}  model_type={args.model_type}")
+    print(f"session     {args.session_id}, reused (the board serves one user)")
     print(f"settle      {args.settle:.0f}s between requests")
     print(f"questions   {len(QUESTIONS)}  variants {len(variants)}  "
           f"repeat {args.repeat}")
@@ -206,7 +212,13 @@ def main():
           f"{len(QUESTIONS) * len(variants) * args.repeat * (args.settle + 45) / 60:.0f}"
           f" minutes")
 
-    session = 1
+    # One session id for the whole run, not one per request. The board keeps a
+    # session alive for 180 s after a reply and serves --max_user 1, so a fresh
+    # id per request means the second one is refused with
+    # "current user num (2) > max_user_num (1)" and the probe measures nothing.
+    # The extension reuses one id per conversation; this matches it. Reset-En is
+    # already 1 on every request, which is what keeps the turns independent.
+    session = args.session_id
     rows = []
     for round_no in range(args.repeat):
         for question in QUESTIONS:
@@ -217,7 +229,6 @@ def main():
             )
             for name, form in variants.items():
                 time.sleep(args.settle)
-                session += 1
                 query = form.format(q=question)
                 result = ask(
                     host, port, session, args.model_type, query, args.timeout

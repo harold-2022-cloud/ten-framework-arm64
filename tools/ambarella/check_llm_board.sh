@@ -80,18 +80,30 @@ while IFS= read -r pid; do
   found "   $argv"
   case "$argv" in
     test_llm_client*)
-      CLIENT=1
+      # Counted, not flagged. Three processes used to report MATCHES because
+      # this was a 0/1 and any number of clients set it to 1, while the guide
+      # says exactly one -- and a leftover client is a real thing to know
+      # about on a board that serves --max_user 1.
+      CLIENT=$((CLIENT + 1))
       CLIENT_MODEL=$(echo "$argv" | sed -n 's/.*-m \([^ ]*\).*/\1/p')
       ;;
-    test_llm\ *|test_llm) DAEMON=1 ;;
+    test_llm\ *|test_llm) DAEMON=$((DAEMON + 1)) ;;
   esac
 done < <(llm_pids)
 
 if [[ $DAEMON -eq 1 && $CLIENT -eq 1 ]]; then
   same
 else
-  [[ $DAEMON -eq 1 ]] || diff_ "test_llm (the daemon) is not running"
-  [[ $CLIENT -eq 1 ]] || diff_ "test_llm_client (loads the model) is not running"
+  [[ $DAEMON -ge 1 ]] || diff_ "test_llm (the daemon) is not running"
+  [[ $CLIENT -ge 1 ]] || diff_ "test_llm_client (loads the model) is not running"
+  [[ $DAEMON -le 1 ]] || diff_ "$DAEMON copies of test_llm; the guide shows one"
+  if [[ $CLIENT -gt 1 ]]; then
+    diff_ "$CLIENT copies of test_llm_client; the guide shows one"
+    note "a leftover client is worth clearing before measuring anything:"
+    note "the board serves --max_user 1 and holds a session for 180 s after"
+    note "a reply, so a second occupant turns every request into"
+    note "'current user num (2) > max_user_num (1)'"
+  fi
 fi
 
 # The guide's own ps output shows both started by the launcher, so their cwd
