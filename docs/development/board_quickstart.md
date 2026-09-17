@@ -15,16 +15,38 @@ itself is in [`arm64_build.md`](arm64_build.md).
 ## Before you start
 
 The board needs the vendor's LLM demo already running. It is not part of this
-repo and this repo cannot install it:
+repo and this repo cannot install it. Start it the way the developer kit's
+guide says:
+
+```bash
+cd /usr/share/ambarella/llm_demo/
+./run_llm_demo.sh --run_mode start --model_type 9 \
+    --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+```
+
+**Run it from that directory.** Both processes inherit the launcher's working
+directory, and that is what puts the log at `/tmp/log.txt`. Started from
+somewhere else, the log lands there instead and every tool that reads it —
+including `check_llm_board.sh` — finds nothing.
+
+The first load after a boot takes up to about 80 seconds. It is ready when
+`/tmp/log.txt` contains a `Device ENABLE` line. A healthy board then shows
+exactly two processes, `test_llm` and `test_llm_client`; more than that means
+an earlier run is still holding a session.
+
+`--max_user 1` is one conversation at a time. A second request while one is
+still generating is refused, and `/tmp/log.txt` says so:
+`current user num (2) > max_user_num (1), please wait 180s`.
+
+Then check all of it:
 
 ```bash
 tools/ambarella/check_llm_board.sh
 ```
 
-That compares the board against the developer kit's own guide — the launcher,
-the two processes, the model files, the log, the ports — and reports
-differences rather than fixing them. Every line should say `MATCHES` before you
-go further.
+That compares the board against the guide — the launcher, the two processes,
+the model files, the log, the ports — and reports differences rather than
+fixing them. Every line should say `MATCHES` before you go further.
 
 ## Install
 

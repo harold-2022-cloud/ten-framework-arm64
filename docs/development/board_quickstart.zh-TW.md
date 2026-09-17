@@ -10,14 +10,35 @@ graph 完全不需要任何雲端語音服務。
 
 ## 開始之前
 
-板子上要先有原廠的 LLM demo 在跑。那不是這個 repo 的一部分，這個 repo 也裝不了它：
+板子上要先有原廠的 LLM demo 在跑。那不是這個 repo 的一部分，這個 repo 也裝不了它。
+照開發套件手冊的方式啟動：
+
+```bash
+cd /usr/share/ambarella/llm_demo/
+./run_llm_demo.sh --run_mode start --model_type 9 \
+    --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+```
+
+**一定要從那個目錄執行。** 兩個程序都會繼承啟動器的工作目錄，那正是讓日誌落在
+`/tmp/log.txt` 的原因。從別的地方啟動，日誌就會跑到那個地方去，所有讀它的工具
+——包括 `check_llm_board.sh`——都會找不到。
+
+開機後第一次載入模型最久約 80 秒。`/tmp/log.txt` 出現 `Device ENABLE` 那一行才算
+就緒。這時健康的板子**正好兩個程序**：`test_llm` 和 `test_llm_client`；多於兩個
+代表前一次的執行還佔著 session。
+
+`--max_user 1` 是一次只能一段對話。上一段還在生成時送第二個請求會被拒絕，
+`/tmp/log.txt` 會寫出來：
+`current user num (2) > max_user_num (1), please wait 180s`。
+
+然後把上面每一項都檢查一遍：
 
 ```bash
 tools/ambarella/check_llm_board.sh
 ```
 
-它拿板子的實際狀態去比對開發套件手冊——啟動器、兩個程序、模型檔、日誌、port——
-只回報差異，不做任何修改。**每一行都要是 `MATCHES`** 才往下走。
+它拿板子的實際狀態去比對手冊——啟動器、兩個程序、模型檔、日誌、port——只回報
+差異，不做任何修改。**每一行都要是 `MATCHES`** 才往下走。
 
 ## 安裝
 
