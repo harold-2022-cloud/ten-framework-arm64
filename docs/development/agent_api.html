@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Driving the Agent from Your Own Code</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<style>
+  :root {
+    --ground: #f6f8f8;
+    --surface: #ffffff;
+    --sunk: #eef2f2;
+    --ink: #15191b;
+    --ink-soft: #57646a;
+    --ink-faint: #8a979d;
+    --rule: #dde4e5;
+    --signal: #0b7885;
+    --signal-soft: #e2f1f2;
+    --alarm: #ac3520;
+    --alarm-soft: #fbeae6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1214; --surface: #161a1d; --sunk: #1c2225;
+      --ink: #e7ecee; --ink-soft: #9aa5ab; --ink-faint: #6b777d;
+      --rule: #293135; --signal: #45b9c6; --signal-soft: #102f33;
+      --alarm: #e5806b; --alarm-soft: #2c1a16;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1214; --surface: #161a1d; --sunk: #1c2225;
+    --ink: #e7ecee; --ink-soft: #9aa5ab; --ink-faint: #6b777d;
+    --rule: #293135; --signal: #45b9c6; --signal-soft: #102f33;
+    --alarm: #e5806b; --alarm-soft: #2c1a16;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans CJK TC",
+                 "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", "DejaVu Sans Mono",
+                 "Noto Sans Mono CJK TC", monospace;
+  }
+
+  .endpoint-bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10;
+    background: var(--surface); border-bottom: 1px solid var(--rule);
+    padding: 10px 16px; display: flex; flex-wrap: wrap;
+    align-items: baseline; gap: 6px 14px;
+  }
+  .endpoint-bar .method {
+    font-family: ui-monospace, monospace; font-weight: 600; font-size: 12px;
+    letter-spacing: .08em; color: var(--surface); background: var(--signal);
+    padding: 2px 7px; border-radius: 3px;
+  }
+  .endpoint-bar .url { font-family: ui-monospace, monospace; font-size: 14px; font-weight: 500; }
+  .endpoint-bar .who { font-size: 12.5px; color: var(--ink-faint); margin-left: auto; }
+
+  .wrap { max-width: 860px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 38px); line-height: 1.15; letter-spacing: -.02em;
+    font-weight: 700; margin: 0 0 14px; text-wrap: balance;
+  }
+  .standfirst { font-size: 17px; color: var(--ink-soft); max-width: 62ch; margin: 0; }
+  .provenance {
+    font-family: ui-monospace, monospace; font-size: 12px; color: var(--ink-faint);
+    margin: 22px 0 0; padding-top: 14px; border-top: 1px solid var(--rule);
+  }
+
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--signal); margin: 56px 0 4px;
+  }
+  h2 + .lede { color: var(--ink-soft); max-width: 64ch; margin: 0 0 20px; }
+  h3 { font-size: 16px; font-weight: 600; margin: 30px 0 8px; }
+  p { max-width: 64ch; }
+  code { font-size: .88em; background: var(--sunk); padding: 1px 5px; border-radius: 3px; }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+  th {
+    text-align: left; font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; padding: 0 14px 7px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  td { padding: 11px 14px 11px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:last-child, th:last-child { padding-right: 0; }
+  td.k { font-family: ui-monospace, monospace; font-weight: 500; white-space: nowrap; }
+  td.v { font-family: ui-monospace, monospace; color: var(--signal); }
+  td.num {
+    font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums;
+    color: var(--signal); white-space: nowrap;
+  }
+  .req {
+    display: inline-block; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    font-weight: 600; color: var(--signal); background: var(--signal-soft);
+    padding: 1px 6px; border-radius: 3px;
+  }
+
+  pre {
+    font-size: 13px; line-height: 1.65; background: var(--sunk);
+    border: 1px solid var(--rule); border-radius: 5px; padding: 16px;
+    overflow-x: auto; margin: 0; tab-size: 2;
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .h { color: var(--signal); font-weight: 500; }
+  pre .s { color: var(--alarm); }
+  .caption { font-size: 12.5px; color: var(--ink-faint); margin: 8px 0 0; max-width: 64ch; }
+
+  /* The call order is information: you cannot start before you have a token,
+     or ping something that was never started. */
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 0 18px; margin-top: 34px; }
+  .step .n {
+    font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums;
+    font-size: 13px; font-weight: 600; color: var(--signal);
+    border-top: 2px solid var(--signal); padding-top: 6px;
+  }
+  .step h3 { margin: 0 0 6px; }
+  .step > div > p:first-of-type { margin-top: 0; }
+
+  .fails { margin-top: 20px; }
+  .fail {
+    display: grid; grid-template-columns: 3px 1fr; gap: 0 16px;
+    padding: 16px 0; border-bottom: 1px solid var(--rule);
+  }
+  .fail .stripe { background: var(--rule); border-radius: 2px; }
+  .fail.silent .stripe { background: var(--alarm); }
+  .fail .sym {
+    font-family: ui-monospace, monospace; font-size: 13.5px; font-weight: 500;
+    margin: 0 0 4px; word-break: break-word;
+  }
+  .fail p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .tag {
+    display: inline-block; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    font-weight: 600; color: var(--alarm); background: var(--alarm-soft);
+    padding: 1px 6px; border-radius: 3px; margin-left: 8px; vertical-align: 2px;
+  }
+
+  .note {
+    border-left: 2px solid var(--signal); padding: 2px 0 2px 16px; margin: 22px 0;
+    color: var(--ink-soft); font-size: 14.5px;
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  footer code { background: none; padding: 0; color: var(--ink-soft); }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 1fr; gap: 0; }
+    .step .n { border-top: none; padding-top: 0; margin-bottom: 2px; }
+    .endpoint-bar .who { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="endpoint-bar">
+  <span class="method">HTTP</span>
+  <span class="url">http://127.0.0.1:8081</span>
+  <span class="who">ten_agent api server &middot; one worker per channel</span>
+</div>
+
+<div class="wrap">
+
+  <h1>Driving the agent from your own code</h1>
+  <p class="standfirst">
+    The playground is one client of this API, not a privileged one. Five calls start a
+    conversation on a named graph, keep it alive, and stop it &mdash; everything the
+    browser does, and nothing it can do that curl cannot.
+  </p>
+  <p class="provenance">
+    read from ai_agents/server/internal &nbsp;&middot;&nbsp; 2026-09-17
+    &nbsp;&middot;&nbsp; port from SERVER_PORT, 8081 on the board
+  </p>
+
+  <h2>Before anything else</h2>
+  <p class="lede">
+    Every response has the same three fields, and the HTTP status is not one of them.
+  </p>
+
+  <pre>{ <span class="h">"code"</span>: <span class="s">"0"</span>, <span class="h">"msg"</span>: <span class="s">"success"</span>, <span class="h">"data"</span>: null }</pre>
+
+  <div class="note">
+    <strong><code>code</code> is a string, and <code>"0"</code> is the only success.</strong>
+    A call that failed still returns HTTP&nbsp;200 in most paths, so branching on the status
+    code will tell you everything worked when it did not.
+  </div>
+
+  <p>
+    Port 8081 rather than the default 8080: on this board the vendor's LLM daemon holds
+    8080, and <code>SERVER_PORT</code> in <code>ai_agents/.env</code> moves this server out
+    of its way. Elsewhere it is 8080.
+  </p>
+
+  <h2>A whole conversation</h2>
+  <p class="lede">
+    Paste this. It picks a channel, gets a token, starts the board's local-speech graph,
+    holds it open for a minute and stops it.
+  </p>
+
+  <pre><span class="c">#!/usr/bin/env bash</span>
+API=http://127.0.0.1:8081
+CH=demo-$RANDOM
+GRAPH=<span class="s">voice_assistant_sherpa_full</span>
+
+TOKEN=$(curl -s -X POST $API/token/generate \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">"{\"request_id\":\"1\",\"channel_name\":\"$CH\",\"uid\":12345}"</span> \
+  | python3 -c <span class="s">'import json,sys; print(json.load(sys.stdin)["data"]["token"])'</span>)
+
+curl -s -X POST $API/start \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">"{\"request_id\":\"2\",
+       \"channel_name\":\"$CH\",
+       \"graph_name\":\"$GRAPH\",
+       \"user_uid\":12345,
+       \"bot_uid\":54321,
+       \"token\":\"$TOKEN\",
+       \"timeout\":60}"</span>
+
+<span class="c"># the worker is reaped if nothing pings it before its timeout</span>
+<span class="h">for</span> i in $(seq 6); <span class="h">do</span>
+  sleep 10
+  curl -s -X POST $API/ping -H <span class="h">'Content-Type: application/json'</span> \
+    -d <span class="s">"{\"request_id\":\"3\",\"channel_name\":\"$CH\"}"</span>
+<span class="h">done</span>
+
+curl -s -X POST $API/stop -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">"{\"request_id\":\"4\",\"channel_name\":\"$CH\"}"</span></pre>
+
+  <p class="caption">
+    The audio itself never touches this API. It goes over Agora RTC, on the channel and
+    uids named here &mdash; which is what the token is for.
+  </p>
+
+  <h2>The five calls</h2>
+
+  <div class="step">
+    <div class="n">01</div>
+    <div>
+      <h3>Find out which graphs exist</h3>
+      <p>
+        Read from the tenapp's <code>property.json</code> at request time, so a graph added
+        to that file needs the server restarted before it appears here.
+      </p>
+      <pre>curl -s http://127.0.0.1:8081/graphs | python3 -m json.tool</pre>
+      <pre><span class="c">{ "code": "0", "msg": "success", "data": [</span>
+    { <span class="h">"name"</span>: <span class="s">"voice_assistant_sherpa_full"</span>, <span class="h">"auto_start"</span>: false },
+    { <span class="h">"name"</span>: <span class="s">"voice_assistant_sherpa_tts"</span>,  <span class="h">"auto_start"</span>: false },
+    { <span class="h">"name"</span>: <span class="s">"voice_assistant_soniox_ambarella_llm"</span>, <span class="h">"auto_start"</span>: false },
+    <span class="c">... ten more</span>
+<span class="c">] }</span></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="n">02</div>
+    <div>
+      <h3>Get a token for the channel</h3>
+      <p>
+        One channel, one uid. The uid here is the <em>human's</em>, the one your client will
+        join RTC with.
+      </p>
+      <pre>curl -s -X POST http://127.0.0.1:8081/token/generate \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"request_id":"1","channel_name":"demo","uid":12345}'</span></pre>
+      <pre><span class="c">{ "code": "0", "msg": "success", "data": {</span>
+    <span class="h">"appId"</span>: <span class="s">"a1b2…"</span>, <span class="h">"token"</span>: <span class="s">"a1b2…"</span>,
+    <span class="h">"channel_name"</span>: <span class="s">"demo"</span>, <span class="h">"uid"</span>: 12345
+<span class="c">} }</span></pre>
+      <p class="caption">
+        With <code>AGORA_APP_CERTIFICATE</code> empty, <code>token</code> comes back as the
+        app id itself. That is correct for an app-id-only Agora project, not a failure.
+      </p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="n">03</div>
+    <div>
+      <h3>Start a worker on that channel</h3>
+      <p>
+        <code>graph_name</code> is where you choose the agent. The channel name is the
+        worker's identity for the rest of its life &mdash; starting twice on one channel
+        returns <code>10003</code> rather than a second worker.
+      </p>
+      <pre>curl -s -X POST http://127.0.0.1:8081/start \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">'{
+        "request_id": "2",
+        "channel_name": "demo",
+        "graph_name": "voice_assistant_sherpa_full",
+        "user_uid": 12345,
+        "bot_uid": 54321,
+        "token": "&lt;from step 02&gt;",
+        "timeout": 60
+      }'</span></pre>
+
+      <div class="scroll" style="margin-top:20px">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="k">channel_name <span class="req">required</span></td><td class="v">string</td>
+                <td>The worker's identity. Blank gives <code>10004</code>, a duplicate gives <code>10003</code>.</td></tr>
+            <tr><td class="k">graph_name</td><td class="v">string</td>
+                <td>A name from <code>/graphs</code>. Not validated here &mdash; a name that
+                    does not exist fails when the worker starts, as <code>10101</code>.</td></tr>
+            <tr><td class="k">user_uid</td><td class="v">uint32</td><td>The human's RTC uid.</td></tr>
+            <tr><td class="k">bot_uid</td><td class="v">uint32</td><td>The agent's RTC uid.</td></tr>
+            <tr><td class="k">token</td><td class="v">string</td><td>From <code>/token/generate</code>.</td></tr>
+            <tr><td class="k">timeout</td><td class="v">int</td>
+                <td>Seconds without a ping before the worker is stopped. Falls back to
+                    <code>WORKER_QUIT_TIMEOUT_SECONDS</code>.</td></tr>
+            <tr><td class="k">properties</td><td class="v">object</td><td>Per-node overrides &mdash; below.</td></tr>
+            <tr><td class="k">request_id</td><td class="v">string</td><td>Yours. Echoed into the server log.</td></tr>
+            <tr><td class="k">tenapp_dir</td><td class="v">string</td>
+                <td><strong>Ignored.</strong> The server always uses the directory it was
+                    launched with, deliberately.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="n">04</div>
+    <div>
+      <h3>Keep it alive</h3>
+      <p>
+        Every ping stamps the worker. One whose last stamp is older than its timeout is
+        stopped by the server, so a client that disappears leaves no process behind.
+        <code>10002</code> means it is already gone.
+      </p>
+      <pre>curl -s -X POST http://127.0.0.1:8081/ping \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"request_id":"3","channel_name":"demo"}'</span></pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="n">05</div>
+    <div>
+      <h3>Stop it</h3>
+      <pre>curl -s -X POST http://127.0.0.1:8081/stop \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"request_id":"4","channel_name":"demo"}'</span></pre>
+      <p class="caption">
+        <code>curl -s http://127.0.0.1:8081/list</code> shows what is running now, which is
+        the quickest way to find a worker someone forgot to stop.
+      </p>
+    </div>
+  </div>
+
+  <h2>Choosing the graph</h2>
+  <p class="lede">
+    Thirteen ship with the example. Three run against the board's own LLM; only one of
+    those needs no cloud credential at all.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>graph_name</th><th>ASR</th><th>TTS</th><th>LLM</th><th>Needs</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="k">voice_assistant_sherpa_full</td>
+          <td>sherpa-onnx, CPU</td><td>sherpa-onnx, CPU</td><td>the board</td>
+          <td><code>AGORA_APP_ID</code> only</td>
+        </tr>
+        <tr>
+          <td class="k">voice_assistant_sherpa_tts</td>
+          <td>soniox, cloud</td><td>sherpa-onnx, CPU</td><td>the board</td>
+          <td><code>SONIOX_ASR_API_KEY</code></td>
+        </tr>
+        <tr>
+          <td class="k">voice_assistant_soniox_ambarella_llm</td>
+          <td>soniox, cloud</td><td>elevenlabs, cloud</td><td>the board</td>
+          <td>both of their keys</td>
+        </tr>
+        <tr>
+          <td class="k">the other ten</td>
+          <td>cloud</td><td>cloud</td><td>OpenAI / Anthropic</td>
+          <td>their own keys; none uses the board</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>What /start writes into the graph</h2>
+  <p class="lede">
+    The graph in <code>property.json</code> is a template. Four fields of the request are
+    injected before the worker starts, so a new extension picks them up by declaring the
+    property &mdash; no server change.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Request field</th><th>Extension</th><th>Property it lands in</th></tr></thead>
+      <tbody>
+        <tr><td class="k">channel_name</td><td class="v">agora_rtc, agora_rtm</td><td class="k">channel</td></tr>
+        <tr><td class="k">user_uid</td><td class="v">agora_rtc</td><td class="k">remote_stream_id</td></tr>
+        <tr><td class="k">bot_uid</td><td class="v">agora_rtc</td><td class="k">stream_id</td></tr>
+        <tr><td class="k">bot_uid</td><td class="v">agora_rtm</td><td class="k">user_id &mdash; as a string</td></tr>
+        <tr><td class="k">token</td><td class="v">agora_rtc, agora_rtm</td><td class="k">token</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Changing a setting for one session</h2>
+  <p class="lede">
+    <code>properties</code> merges into the graph for this worker only. Nothing on disk is
+    touched, and the next session starts from the file again.
+  </p>
+
+  <pre>curl -s -X POST http://127.0.0.1:8081/start \
+  -H <span class="h">'Content-Type: application/json'</span> \
+  -d <span class="s">'{
+        "request_id": "2",
+        "channel_name": "demo",
+        "graph_name": "voice_assistant_sherpa_full",
+        "properties": {
+          "stt": { "rule2_min_trailing_silence": 0.8 },
+          "tts": { "speed": 1.1 },
+          "llm": { "prompt": "用中文简短口语回答。" }
+        }
+      }'</span></pre>
+
+  <p>
+    The keys are <strong>node names from the graph</strong>, not addon names. In
+    <code>voice_assistant_sherpa_full</code> they are
+    <code>agora_rtc</code>, <code>stt</code>, <code>llm</code>, <code>tts</code>,
+    <code>main_control</code>, <code>message_collector</code>,
+    <code>weatherapi_tool_python</code> and <code>streamid_adapter</code>.
+  </p>
+  <p>
+    A property whose value is an object &mdash; <code>params</code>, typically &mdash; is
+    merged key by key, so naming one leaves the rest alone. A property whose value is a
+    scalar is replaced outright.
+  </p>
+
+  <div class="note">
+    <strong>This is how to try a setting without editing a file.</strong> A different
+    endpoint rule, a faster voice, another system prompt: start a session with it, listen,
+    stop. No restart, nothing to undo.
+  </div>
+
+  <h2>Codes</h2>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>code</th><th>msg</th><th>What it usually means here</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0</td><td class="k">ok / success</td><td>&mdash;</td></tr>
+        <tr><td class="num">10000</td><td class="k">params invalid</td><td>The body did not parse as the request type.</td></tr>
+        <tr><td class="num">10001</td><td class="k">workers limit</td><td><code>WORKERS_MAX</code> reached.</td></tr>
+        <tr><td class="num">10002</td><td class="k">channel not existed</td><td>Pinging or stopping a worker that is already gone.</td></tr>
+        <tr><td class="num">10003</td><td class="k">channel existed</td><td>Starting a second worker on one channel.</td></tr>
+        <tr><td class="num">10004</td><td class="k">channel empty</td><td><code>channel_name</code> missing or blank.</td></tr>
+        <tr><td class="num">10005</td><td class="k">generate token failed</td><td>A certificate is set but the token could not be built.</td></tr>
+        <tr><td class="num">10006</td><td class="k">save file failed</td><td>Document upload only.</td></tr>
+        <tr><td class="num">10007</td><td class="k">parse json failed</td><td><code>property.json</code> is not valid JSON.</td></tr>
+        <tr><td class="num">10100</td><td class="k">process property json failed</td><td>The graph could not be rendered with your fields.</td></tr>
+        <tr><td class="num">10101</td><td class="k">start worker failed</td><td>Often a <code>graph_name</code> that is not in the file.</td></tr>
+        <tr><td class="num">10102</td><td class="k">stop worker failed</td><td>The process would not die.</td></tr>
+        <tr><td class="num">10103</td><td class="k">http status not 200</td><td>Talking to the worker's own port.</td></tr>
+        <tr><td class="num">10104</td><td class="k">update worker failed</td><td>&mdash;</td></tr>
+        <tr><td class="num">10105</td><td class="k">read directory failed</td><td>&mdash;</td></tr>
+        <tr><td class="num">10106</td><td class="k">read file failed</td><td>No <code>property.json</code> where the server was pointed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>When it goes wrong</h2>
+
+  <div class="fails">
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">ECONNREFUSED on 8081<span class="tag">silent</span></p>
+        <p>
+          Either <code>server/bin/api</code> was never built &mdash; it is git-ignored, so a
+          fresh clone has none &mdash; or <code>AGORA_APP_ID</code> is not exactly 32
+          characters and the server called <code>os.Exit(1)</code> at startup. The reason is
+          in <code>/tmp/task_run.log</code>, not in the response, because there is no
+          response.
+        </p>
+      </div>
+    </div>
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">Parse Error: Invalid header token<span class="tag">silent</span></p>
+        <p>
+          You reached the board's LLM daemon on 8080 instead of this server. Its 404 page has
+          a header line with no colon, which no HTTP client will accept. Check
+          <code>SERVER_PORT</code>.
+        </p>
+      </div>
+    </div>
+    <div class="fail silent">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">HTTP 200 with a non-zero code<span class="tag">silent</span></p>
+        <p>
+          The call failed. Read <code>code</code>; the status said nothing about it.
+        </p>
+      </div>
+    </div>
+    <div class="fail">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">A new graph does not appear in /graphs</p>
+        <p>
+          The list is read from <code>property.json</code> per request, but the playground
+          caches it &mdash; and adding a graph is not hot-reloadable anyway. Restart the
+          server and the frontend. Editing values inside an existing graph does take effect
+          on the next session.
+        </p>
+      </div>
+    </div>
+    <div class="fail">
+      <div class="stripe"></div>
+      <div>
+        <p class="sym">The agent joins but never answers</p>
+        <p>
+          On this board the LLM serves <code>--max_user 1</code> and holds a session for 180
+          seconds after each reply. A second worker started while the first is still up will
+          be refused down there, with nothing wrong at this level.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Routes, request fields, injected properties and codes read from
+    <code>ai_agents/server/internal/</code> on 2026-09-17, not from memory. The board's own
+    LLM interface on 8080 is a different API &mdash; see
+    <code>docs/development/board_llm_wire.html</code>. Getting from a clone to a running
+    board is <code>docs/development/board_quickstart.md</code>.
+  </footer>
+
+</div>
+</body>
+</html>
