@@ -4,6 +4,9 @@ From a clone to a conversation. Speech runs on the board's CPU and the LLM is
 the vendor's daemon, so nothing in the default graph talks to a cloud speech
 provider.
 
+A Traditional Chinese edition of this page is at
+[`board_quickstart.zh-TW.md`](board_quickstart.zh-TW.md).
+
 Longer background — why speech was moved off the Vector Processor, what was
 measured, and how the extensions work — is in
 [`cpu_speech_on_ambarella.md`](cpu_speech_on_ambarella.md). The arm64 build
