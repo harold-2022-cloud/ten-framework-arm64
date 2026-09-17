@@ -82,7 +82,7 @@ if [[ "$status" -eq 0 ]]; then
   echo "PASSED"
 else
   echo "FAILED -- a checkout without the fixes, or a failure that came back."
-  echo "         git pull arm64 feat/arm64-native-build, restart task run,"
+  echo "         git pull --ff-only arm64 feat/arm64-native-build, restart task run,"
   echo "         and note that a log from before the restart still has the old"
   echo "         lines in it."
 fi

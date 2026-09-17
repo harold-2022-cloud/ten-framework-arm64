@@ -72,7 +72,7 @@ do
     echo "  present: $subject"
   else
     fail "this checkout is behind; missing commit: $subject
-       git -C $REPO_ROOT pull arm64 feat/arm64-native-build"
+       git -C $REPO_ROOT pull --ff-only arm64 feat/arm64-native-build"
   fi
 done
 
