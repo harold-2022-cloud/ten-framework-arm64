@@ -168,3 +168,9 @@ ai_agents/*.pem
 # be noticed at review time.
 docs/development/*convoai_oracle*
 docs/development/1.PNG
+
+# Design notes and implementation plans written while building the ambarella
+# and sherpa-onnx extensions. Working material, not documentation: what they
+# describe is in docs/development/ and in the code. Untracked from
+# 2026-09-17; earlier commits still carry them.
+docs/superpowers/
