@@ -2,12 +2,17 @@
 #
 # Finish an example's install after install_agora_rtc_arm64.sh.
 #
-# That script places ten_packages/ but stops there. `task install` does three
+# That script places ten_packages/ but stops there. `task install` does four
 # more things, and tman run start fails at once without them:
 #
 #   build the Go app          -> tenapp/bin/main, which scripts/start.sh execs
 #   install Python deps       -> every extension's requirements.txt
 #   install the frontend      -> the shared playground, not a per-example one
+#   build the API server      -> server/bin/api, which task run-api-server execs
+#
+# The API server is the one that is easy to miss: nothing fails while
+# installing, and the omission shows up only as the playground reporting
+# ECONNREFUSED against a port nothing is listening on.
 #
 # The two halves of scripts/install_python_deps.sh need different privileges,
 # so they are run separately here rather than through that script: the Go build
@@ -36,7 +41,7 @@ ok()  { echo "    OK  $*"; }
 [[ -f "$TENAPP/manifest.json" ]] || die "no manifest.json in $TENAPP"
 
 # ---------------------------------------------------------------- 1
-echo "==> [1/5] Checking prerequisites"
+echo "==> [1/6] Checking prerequisites"
 command -v go  >/dev/null || die "go not on PATH"
 command -v uv  >/dev/null || die "uv not on PATH"
 command -v bun >/dev/null || die "bun not on PATH"
@@ -56,7 +61,7 @@ BUILD_TOOL="$TENAPP/ten_packages/system/ten_runtime_go/tools/build/main.go"
 ok "go build tool present"
 
 # ---------------------------------------------------------------- 2
-echo "==> [2/5] Building the Go app"
+echo "==> [2/6] Building the Go app"
 # Same command as build_go_app() in scripts/install_python_deps.sh. Run as the
 # invoking user so bin/main and the Go cache are not left owned by root.
 cd "$TENAPP"
@@ -67,7 +72,7 @@ file -b "$TENAPP/bin/main" | grep -q 'ARM aarch64' || die "bin/main is not aarch
 ok "bin/main ($(file -b "$TENAPP/bin/main" | grep -oE 'ARM aarch64'))"
 
 # ---------------------------------------------------------------- 3
-echo "==> [3/5] Installing Python dependencies"
+echo "==> [3/6] Installing Python dependencies"
 # `uv pip install --system` targets /usr/local/lib*/python3.12/site-packages,
 # which needs root. Only this step is elevated. UV_PYTHON is passed explicitly
 # because sudo does not carry it.
@@ -87,7 +92,7 @@ sudo env "PATH=$PATH" "UV_PYTHON=$PY_BIN" bash -c '
 ok "dependencies installed into $PY_BIN"
 
 # ---------------------------------------------------------------- 4
-echo "==> [4/5] Installing the frontend"
+echo "==> [4/6] Installing the frontend"
 # This example runs the shared playground, not a per-example frontend. Without
 # node_modules, `bun run dev` falls back to PATH and finds nmh's /usr/bin/next,
 # which reports "Doesn't look like nmh is installed" and exits 1.
@@ -99,7 +104,16 @@ bun install
 ok "playground/node_modules/.bin/next present"
 
 # ---------------------------------------------------------------- 5
-echo "==> [5/5] Verifying"
+echo "==> [5/6] Building the API server"
+# task install's fourth step, and the only binary the playground talks to.
+# Without it `task run` starts the frontend against a port nothing holds.
+SERVER_DIR="$AI_AGENTS/server"
+[[ -d "$SERVER_DIR" ]] || die "no server directory at $SERVER_DIR"
+(cd "$SERVER_DIR" && go mod tidy && go mod download && go build -o bin/api main.go)
+[[ -x "$SERVER_DIR/bin/api" ]] || die "server/bin/api missing after the build"
+ok "server/bin/api: $(file -b "$SERVER_DIR/bin/api" 2>/dev/null | cut -d, -f1-2 || echo built)"
+
+echo "==> [6/6] Verifying"
 cd "$TENAPP"
 
 # Reproduce what scripts/start.sh sets, then check the app resolves everything.
