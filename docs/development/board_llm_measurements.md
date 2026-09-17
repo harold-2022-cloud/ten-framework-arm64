@@ -153,32 +153,44 @@ The response body is `text/event-stream`, one character per `data:` event, with
 whitespace escaped as `<SP>` and `<NL>`. The reasoning is terminated by
 `</think>` but is **not preceded by an opening `<think>`**.
 
-## Questions for Ambarella
+## Answered by Ambarella, 2026-09-17
 
-1. **Can the reasoning phase be disabled?** It is 44–523 characters before
-   every answer and there is no header for it. Is there a `model_type`, a
-   launcher flag, a build option, or a non-reasoning model of comparable size
-   for this part?
+**The reasoning phase can be bypassed**, in the model's own prompt template
+rather than per request. In `prompt_config.json` beside the weights, the
+assistant marker ends with an already-closed think block:
 
-2. **Is 8.4–11.9 characters/second the expected rate** for the 1NVP build of
-   this model on an N1-655? Is there a multi-NVP or differently quantised
-   variant, and what rate would it give?
+```json
+"Symbol1": "<｜Assistant｜><think>\n\n</think>"
+```
 
-3. **Why does the rate fall to 5.0 characters/second while the host CPU is
+The daemon reads it at load, so it takes a restart. `tools/ambarella/set_llm_thinking.sh`
+makes the change, backs up first, and restores with `--on`.
+
+This is the same idea as the fourth prompt form above, done at the layer where
+it is unambiguous: the template is applied server-side before generation, so
+nothing about it can be echoed back into the response and mistaken for a
+result.
+
+**8–11 token/s is expected** for this model on an N1-655, which is what was
+measured here.
+
+## Questions still open
+
+1. **Why does the rate fall to 5.0 characters/second while the host CPU is
    busy**, if inference runs on the VP? What host-side work is on the critical
    path — tokenisation, the HTTP/SSE layer, feeding the VP?
 
-4. **Can the 180-second session hold be shortened**, or a session released
+2. **Can the 180-second session hold be shortened**, or a session released
    explicitly when a reply completes? At `--max_user 1` this is what stops a
    second client connecting.
 
-5. **Is `--max_user` greater than 1 supported**, and what does each additional
+3. **Is `--max_user` greater than 1 supported**, and what does each additional
    user cost in memory and in rate?
 
-6. **Should there ever be two `test_llm_client` processes?** If not, what
+4. **Should there ever be two `test_llm_client` processes?** If not, what
    leaves one behind, and how should it be cleared safely?
 
-7. **Is the missing opening `<think>` intentional?** Every reply carries a
+5. **Is the missing opening `<think>` intentional?** Every reply carries a
    closing `</think>` with no opening tag, which every off-the-shelf parser for
    this model family gets wrong.
 
