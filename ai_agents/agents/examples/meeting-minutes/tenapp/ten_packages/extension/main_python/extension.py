@@ -69,6 +69,10 @@ class MeetingControlExtension(AsyncExtension):
             self.meeting_started_at = time.time()
         self._last_speech_at = time.time()
         self._segment_pending = True
+        # A meeting can resume after the long threshold already assembled
+        # it once; talking again means a later lull must be able to
+        # assemble it again, not be silently absorbed forever.
+        self._assembled = False
 
     def speech_stopped(self) -> None:
         """A silence begins here. The ticker decides what it means."""
@@ -93,6 +97,11 @@ class MeetingControlExtension(AsyncExtension):
             ):
                 self._segment_pending = False
                 await self._close_segment()
+            # Re-derived, not reused: the await above can take long enough
+            # for speech_started() to move _last_speech_at, and a quiet_for
+            # computed before that await would assemble on silence that has
+            # already ended.
+            quiet_for = time.time() - self._last_speech_at
             if (
                 not self._assembled
                 and quiet_for >= self.config.meeting_silence_s
@@ -168,7 +177,9 @@ class MeetingControlExtension(AsyncExtension):
             segment_id = payload["segment_id"]
             started_at = self._pending.pop(segment_id, 0.0)
             if payload.get("error"):
-                self.record.mark_failed(segment_id, payload["error"])
+                self.record.mark_failed(
+                    segment_id, payload["error"], started_at
+                )
                 return
             self.record.add_segment(
                 segment_id, started_at, payload["utterances"]

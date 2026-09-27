@@ -42,10 +42,13 @@ class MeetingRecord:
         if segment_id in self._segments:
             self._segments[segment_id].summary = text
 
-    def mark_failed(self, segment_id: str, error: str) -> None:
+    def mark_failed(
+        self, segment_id: str, error: str, started_at: float = 0.0
+    ) -> None:
         entry = self._segments.setdefault(
-            segment_id, SegmentRecord(segment_id, 0.0)
+            segment_id, SegmentRecord(segment_id, started_at)
         )
+        entry.started_at = started_at
         entry.error = error
 
     def ordered(self) -> List[SegmentRecord]:

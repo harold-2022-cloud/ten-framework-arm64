@@ -42,7 +42,11 @@ def test_a_failed_segment_does_not_take_the_others_with_it():
             {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "一。"}
         ],
     )
-    record.mark_failed("seg-2", "diarization ran out of memory")
+    record.mark_failed(
+        "seg-2",
+        "diarization ran out of memory",
+        started_at=STARTED_AT + 300,
+    )
     record.add_segment(
         "seg-3",
         started_at=STARTED_AT + 600,
@@ -54,6 +58,11 @@ def test_a_failed_segment_does_not_take_the_others_with_it():
     lines = record.as_prompt_lines(started_at=STARTED_AT)
     assert "一。" in lines and "三。" in lines
     assert "seg-2 段未能處理" in lines
+    assert (
+        lines.index("一。")
+        < lines.index("seg-2 段未能處理")
+        < lines.index("三。")
+    ), "a failed segment keeps its place in time, not at the front"
     assert not record.is_empty
 
 
@@ -162,3 +171,20 @@ async def test_the_upload_dying_mid_sentence_still_produces_a_record():
 
     assert ext._close_segment.await_count == 1
     assert ext._assemble.await_count == 1, "a disconnect left no record"
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_that_resumes_can_be_assembled_again():
+    """The long threshold marks the end of a lull, not the meeting: if
+    talking resumes, a later lull must produce another record rather than
+    being absorbed silently for ever."""
+    ext = make_extension(segment_silence_s=0.05, meeting_silence_s=0.15)
+    ext.speech_started()
+    ext.speech_stopped()
+    await asyncio.sleep(0.30)  # first long silence: assembles once
+    ext.speech_started()
+    ext.speech_stopped()
+    await asyncio.sleep(0.30)  # second long silence: assembles again
+    await stop(ext)
+
+    assert ext._assemble.await_count == 2
