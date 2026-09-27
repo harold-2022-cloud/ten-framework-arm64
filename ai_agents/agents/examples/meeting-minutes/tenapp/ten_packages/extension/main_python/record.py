@@ -54,22 +54,43 @@ class MeetingRecord:
     def ordered(self) -> List[SegmentRecord]:
         return sorted(self._segments.values(), key=lambda s: s.started_at)
 
-    def as_prompt_lines(self, started_at: float) -> str:
+    @staticmethod
+    def _segment_lines(segment: SegmentRecord, started_at: float) -> List[str]:
         """Both clocks on every line: the wall clock for a person, the offset
-        for finding the moment in the recording."""
+        for finding the moment in the recording.
+
+        ``started_at`` is the meeting's start, not the segment's. A
+        segment's own ``start_s`` values are offsets into its own file, so
+        a line rendered from them alone restarts at 00:00 on every topic
+        and points at nothing anybody can find.
+        """
+        if segment.error:
+            return [f"（第 {segment.segment_id} 段未能處理：{segment.error}）"]
+        out: List[str] = []
+        for utterance in segment.utterances:
+            absolute = segment.started_at + utterance["start_s"]
+            offset = absolute - started_at
+            clock = time.strftime("%H:%M", time.localtime(absolute))
+            out.append(
+                f"[{clock} / {int(offset // 60):02d}:{int(offset % 60):02d}] "
+                f"說話人{utterance['speaker']}: {utterance['text']}"
+            )
+        return out
+
+    def lines_for(self, segment_id: str, started_at: float) -> str:
+        """One topic's lines, on the same two clocks the transcript uses.
+
+        The per-topic summary is the only input the meeting-level turn ever
+        gets, so a topic asked about on its own local clock can only answer
+        on that clock, and every topic's 待辦 then begins again from zero.
+        """
+        segment = self._segments.get(segment_id)
+        if segment is None:
+            return ""
+        return "\n".join(self._segment_lines(segment, started_at))
+
+    def as_prompt_lines(self, started_at: float) -> str:
         out: List[str] = []
         for segment in self.ordered():
-            if segment.error:
-                out.append(
-                    f"（第 {segment.segment_id} 段未能處理：{segment.error}）"
-                )
-                continue
-            for utterance in segment.utterances:
-                absolute = segment.started_at + utterance["start_s"]
-                offset = absolute - started_at
-                clock = time.strftime("%H:%M", time.localtime(absolute))
-                out.append(
-                    f"[{clock} / {int(offset // 60):02d}:{int(offset % 60):02d}] "
-                    f"說話人{utterance['speaker']}: {utterance['text']}"
-                )
+            out.extend(self._segment_lines(segment, started_at))
         return "\n".join(out)

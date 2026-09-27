@@ -5,6 +5,7 @@
 """The record is the product. Everything else exists to fill it in."""
 
 import json
+import time
 
 import pytest
 
@@ -271,6 +272,46 @@ async def test_each_segment_is_summarised_as_it_lands():
     sent = ext.agent.queue_llm_input.await_args.args[0]
     assert "下週出。" in sent
     assert ext.config.segment_prompt.strip()[:6] in sent
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_a_topic_is_asked_about_on_the_meetings_clock_not_its_own():
+    """The spec's 必須做到 asks for 待辦事項 and 「它在會議中被提出的時間」,
+    and its 產出的形狀 shows both clocks. A segment's own start_s is an
+    offset into that segment's own file, so a prompt built from it restarts
+    at 00:00 on every topic -- and those per-topic summaries are the only
+    input the meeting-level turn ever sees, so the model has no way to
+    recover the real time. An utterance 23:15 into the meeting must not be
+    presented to the model as [01:15]."""
+    ext = make_extension()
+    ext.agent = AsyncMock()
+    # This topic opened 22 minutes into the meeting; the utterance is 75 s
+    # into the topic, so 23:15 into the meeting.
+    ext.record.add_segment(
+        "seg-2",
+        started_at=STARTED_AT + 22 * 60,
+        utterances=[
+            {
+                "start_s": 75.0,
+                "end_s": 80.0,
+                "speaker": 1,
+                "text": "下週二前給出測試結果。",
+            }
+        ],
+    )
+    task = asyncio.create_task(ext._summarise_segment("seg-2"))
+    await asyncio.sleep(0.01)
+    ext.on_llm_text("重點。")
+    await task
+
+    sent = ext.agent.queue_llm_input.await_args.args[0]
+    assert "/ 23:15]" in sent, f"the meeting's own clock is missing: {sent!r}"
+    assert "[01:15]" not in sent, "the segment file's clock reached the model"
+    # Derived rather than written out: the suite runs in whatever timezone
+    # the container has, and the board's is not this machine's.
+    wall = time.strftime("%H:%M", time.localtime(STARTED_AT + 23 * 60 + 15))
+    assert f"[{wall} /" in sent, "the wall clock a person reads is missing"
     await stop(ext)
 
 

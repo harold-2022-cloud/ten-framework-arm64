@@ -286,11 +286,16 @@ class MeetingControlExtension(AsyncExtension):
             return
 
         def build_prompt() -> str:
-            lines = "\n".join(
-                f"[{int(u['start_s'] // 60):02d}:{int(u['start_s'] % 60):02d}] "
-                f"說話人{u['speaker']}: {u['text']}"
-                for u in entry.utterances
-            )
+            # The meeting's clock, not the segment file's. These summaries
+            # are the only input the meeting-level turn ever sees, so a
+            # topic asked about on its own local clock can only answer on
+            # that clock: every topic's 待辦 would begin again from 00:00,
+            # two different action items from two different topics would
+            # both read [01:15], and neither would point at anything a
+            # person can find in the meeting or seek to in the recording.
+            lines = self.record.lines_for(segment_id, self.meeting_started_at)
+            if not lines:
+                return ""
             return self.config.segment_prompt + lines
 
         answer = await self._ask_llm(segment_id, build_prompt)
