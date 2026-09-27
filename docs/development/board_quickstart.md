@@ -215,7 +215,7 @@ send when the meeting ends — just stop sending frames.
 | SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
 
 ```bash
-tools/ambarella/install_meeting_models.sh --help
+tools/ambarella/install_meeting_models.sh
 ```
 
 fetches all three — the diarization pair by calling `probe_diarization.py

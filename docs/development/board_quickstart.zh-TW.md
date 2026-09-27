@@ -196,7 +196,7 @@ base64 編碼，包成 JSON：
 | SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
 
 ```bash
-tools/ambarella/install_meeting_models.sh --help
+tools/ambarella/install_meeting_models.sh
 ```
 
 會把三個都抓下來——diarization 那兩個是呼叫 `probe_diarization.py --fetch`，

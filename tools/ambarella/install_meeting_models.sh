@@ -99,7 +99,27 @@ AVAIL_MB=$(df -Pm "$HOME" | awk 'NR==2 {print $4}')
 [[ "$AVAIL_MB" -gt 2048 ]] || die "need ~2 GB free in $HOME, have ${AVAIL_MB} MB"
 ok "${AVAIL_MB} MB free in $HOME"
 
-if curl -fsS --max-time 10 -o /dev/null "https://github.com"; then
+# Only a download needs a route out. A board given its models by hand --
+# the case probe_diarization.py's own --fetch comment exists for -- must
+# still be able to run this to verify them, or the die message below sends
+# the user round a loop it cannot leave: it asks them to place the files and
+# re-run, and the re-run would fail at this same check.
+NEED_NET=0
+if [[ "$FORCE" -eq 1 ]]; then NEED_NET=1; fi
+if [[ ! -f "$DIAR_ROOT/sherpa-onnx-pyannote-segmentation-3-0/model.onnx" ]]; then
+  NEED_NET=1
+fi
+if [[ ! -f "$DIAR_ROOT/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx" ]]; then
+  NEED_NET=1
+fi
+if [[ -z "$(find "$ASR_DL_ROOT" -maxdepth 2 -name 'model*.onnx' 2>/dev/null \
+  | head -1)" ]]; then
+  NEED_NET=1
+fi
+
+if [[ "$NEED_NET" -eq 0 ]]; then
+  ok "all three already in place; nothing to download"
+elif curl -fsS --max-time 10 -o /dev/null "https://github.com"; then
   ok "github.com reachable"
 else
   die "cannot reach github.com -- download the archives elsewhere and place
@@ -195,7 +215,7 @@ echo "  ai_agents/.env:"
 echo
 printf '    DIARIZATION_SEG_MODEL=%s\n' "$SEG_DIR/model.onnx"
 printf '    DIARIZATION_EMB_MODEL=%s\n' "$EMB_FILE"
-printf '    SENSEVOICE_MODEL_DIR=%s\n' "$(readlink -f "$SENSEVOICE_MODEL_DIR")"
+printf '    SENSEVOICE_MODEL_DIR=%s\n' "$SENSEVOICE_MODEL_DIR"
 echo
 echo "  Next: docs/development/board_quickstart.md, the meeting-minutes"
 echo "  section -- or its Traditional Chinese twin, board_quickstart.zh-TW.md."
