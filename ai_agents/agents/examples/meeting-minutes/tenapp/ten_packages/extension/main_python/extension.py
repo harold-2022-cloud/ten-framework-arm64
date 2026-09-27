@@ -15,7 +15,7 @@ import json
 import os
 import time
 import uuid
-from typing import Optional
+from typing import Callable, Optional
 
 from ten_runtime import (
     AsyncExtension,
@@ -150,8 +150,18 @@ class MeetingControlExtension(AsyncExtension):
     async def _close_segment(self) -> None:
         await self.ten_env.send_cmd(Cmd.create(CMD_CLOSE_SEGMENT))
 
-    async def _ask_llm(self, key: str, prompt: str) -> str:
+    async def _ask_llm(self, key: str, build_prompt: Callable[[], str]) -> str:
         """One LLM turn, asked and waited for.
+
+        ``build_prompt`` is called only once this turn actually holds
+        ``_summary_lock`` -- not before. A prompt built by the caller ahead
+        of the lock would still see the state of things at call time; if
+        this turn had to wait behind another one, whatever that other turn
+        changed (typically: a segment's own summary landing in the record)
+        would already be true by the time this turn is finally asked, but
+        the *string* would not reflect it. Composing it here is what makes
+        the two agree. An empty result means there is nothing worth asking
+        yet, and this returns "" without ever touching the slot.
 
         Queuing a prompt never blocks -- ``AsyncQueue.put`` always returns --
         so setting ``_awaiting_summary`` at queue time and moving on let a
@@ -168,6 +178,9 @@ class MeetingControlExtension(AsyncExtension):
         transcript).
         """
         async with self._summary_lock:
+            prompt = build_prompt()
+            if not prompt:
+                return ""
             self._awaiting_summary = key
             self._summary_done = asyncio.Event()
             try:
@@ -205,14 +218,16 @@ class MeetingControlExtension(AsyncExtension):
         )
         if entry is None or not entry.utterances:
             return
-        lines = "\n".join(
-            f"[{int(u['start_s'] // 60):02d}:{int(u['start_s'] % 60):02d}] "
-            f"說話人{u['speaker']}: {u['text']}"
-            for u in entry.utterances
-        )
-        answer = await self._ask_llm(
-            segment_id, self.config.segment_prompt + lines
-        )
+
+        def build_prompt() -> str:
+            lines = "\n".join(
+                f"[{int(u['start_s'] // 60):02d}:{int(u['start_s'] % 60):02d}] "
+                f"說話人{u['speaker']}: {u['text']}"
+                for u in entry.utterances
+            )
+            return self.config.segment_prompt + lines
+
+        answer = await self._ask_llm(segment_id, build_prompt)
         if answer:
             self.record.add_summary(segment_id, answer)
 
@@ -263,16 +278,31 @@ class MeetingControlExtension(AsyncExtension):
         if self.record.is_empty:
             self.ten_env.log_info("nothing was said; no record to assemble")
             return
-        segments = self.record.ordered()
+
+        def build_meeting_prompt() -> str:
+            # Read fresh, inside _ask_llm's critical section: if a
+            # segment's own turn is still outstanding when the
+            # meeting-ending silence fires, this call waits behind it on
+            # the same lock, and by the time it runs that segment's
+            # summary is already in the record. Reading self.record here
+            # rather than closing over a string built before the wait is
+            # what makes the two agree -- otherwise the meeting's
+            # conclusions could silently omit exactly the segment that
+            # contained them.
+            summaries = "\n\n".join(
+                s.summary for s in self.record.ordered() if s.summary
+            )
+            return self.config.meeting_prompt + summaries if summaries else ""
+
         # The input is the per-segment summaries, not the full transcript,
         # so this turn stays short; the transcript itself always goes out
-        # regardless of whether this turn succeeds.
-        summaries = "\n\n".join(s.summary for s in segments if s.summary)
-        meeting_summary = ""
-        if summaries:
-            meeting_summary = await self._ask_llm(
-                MEETING_SUMMARY_KEY, self.config.meeting_prompt + summaries
-            )
+        # regardless of whether this turn succeeds -- or of whether there
+        # was anything to ask about at all, which build_meeting_prompt
+        # alone decides, for the same freshness reason.
+        meeting_summary = await self._ask_llm(
+            MEETING_SUMMARY_KEY, build_meeting_prompt
+        )
+        segments = self.record.ordered()
         record_payload = {
             "started_at": self.meeting_started_at,
             "transcript": self.record.as_prompt_lines(self.meeting_started_at),

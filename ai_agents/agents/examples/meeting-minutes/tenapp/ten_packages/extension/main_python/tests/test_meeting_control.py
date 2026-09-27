@@ -103,7 +103,7 @@ from unittest.mock import AsyncMock, MagicMock
 from ten_runtime import StatusCode
 
 from main_python.config import MeetingControlConfig
-from main_python.extension import MeetingControlExtension
+from main_python.extension import MEETING_SUMMARY_KEY, MeetingControlExtension
 
 
 def make_extension(**overrides):
@@ -362,6 +362,64 @@ async def test_the_meeting_summary_is_asked_from_the_segment_summaries():
     )
     assert payload["meeting_summary"] == "結論：一。待辦：無。"
     assert "transcript" in payload and payload["transcript"]
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_the_meeting_prompt_reflects_a_segment_still_finishing_when_assembly_starts():
+    """If the meeting-ending silence fires while a segment's own turn is
+    still outstanding, assembly's turn waits behind it on the same lock --
+    and by the time it actually runs, that segment's summary is already in
+    the record. The prompt has to be built then, not before, or the
+    meeting's conclusions could silently omit exactly the segment that
+    contained them."""
+    ext = make_extension()
+    ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+    ext.agent = AsyncMock()
+    ext.ten_env.send_data = AsyncMock()
+    ext.record.add_segment(
+        "seg-a",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "A。"}
+        ],
+    )
+
+    # seg-a's own turn is still outstanding -- holding _summary_lock --
+    # when the meeting-ending silence fires.
+    task_a = asyncio.create_task(ext._summarise_segment("seg-a"))
+    await asyncio.sleep(0.01)
+    assert ext._awaiting_summary == "seg-a"
+
+    task_assemble = asyncio.create_task(ext._assemble())
+    await asyncio.sleep(0.01)
+    assert not task_assemble.done(), "assembly must wait for seg-a's turn"
+    assert (
+        ext._awaiting_summary == "seg-a"
+    ), "assembly must not have jumped the queue"
+
+    ext.on_llm_text("SEG A SUMMARY")
+    await task_a
+    entry_a = next(s for s in ext.record.ordered() if s.segment_id == "seg-a")
+    assert entry_a.summary == "SEG A SUMMARY"
+
+    await asyncio.sleep(0.01)
+    assert ext._awaiting_summary == MEETING_SUMMARY_KEY
+    ext.on_llm_text("MEETING CONCLUSION")
+    await task_assemble
+
+    # The second queue_llm_input call is the meeting turn's; its prompt
+    # must contain the segment summary that only landed while it waited.
+    meeting_prompt = ext.agent.queue_llm_input.await_args_list[-1].args[0]
+    assert (
+        "SEG A SUMMARY" in meeting_prompt
+    ), "the meeting prompt must reflect the segment that just finished"
+
+    ext.ten_env.send_data.assert_awaited_once()
+    payload = json.loads(
+        ext.ten_env.send_data.await_args.args[0].get_property_to_json(None)[0]
+    )
+    assert payload["meeting_summary"] == "MEETING CONCLUSION"
     await stop(ext)
 
 
