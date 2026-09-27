@@ -70,6 +70,8 @@ class MeetingControlExtension(AsyncExtension):
         # meeting_record nowhere to route to, so a file next to that audio
         # is the record's only real destination.
         self._last_segment_dir: Optional[str] = None
+        # Computed once, so every write of one meeting lands on one file.
+        self._record_file: Optional[str] = None
         # The board serves one LLM user at a time, so at most one turn -- a
         # segment's summary or the whole meeting's -- is ever in flight.
         # This lock serialises set-slot -> queue -> wait-for-answer ->
@@ -340,11 +342,19 @@ class MeetingControlExtension(AsyncExtension):
         """
         if not self._last_segment_dir:
             return None
-        started = self.meeting_started_at or time.time()
-        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(started))
-        return os.path.join(
-            self._last_segment_dir, f"meeting_record_{stamp}.json"
-        )
+        if self._record_file is None:
+            # Latched, not recomputed. The fallback below is unreachable on
+            # every path that exists today -- speech_started() sets
+            # meeting_started_at before anything can persist -- but a bare
+            # `or time.time()` evaluated per call would hand each write its
+            # own filename, which is the very thing one file per meeting
+            # exists to prevent.
+            started = self.meeting_started_at or time.time()
+            stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(started))
+            self._record_file = os.path.join(
+                self._last_segment_dir, f"meeting_record_{stamp}.json"
+            )
+        return self._record_file
 
     def _write_record_to_disk(self, record_payload: dict) -> None:
         """The graph gives ``meeting_record`` nowhere to route to -- no node
@@ -428,7 +438,18 @@ class MeetingControlExtension(AsyncExtension):
         a long meeting does not degrade anything: it terminates the process
         and the meeting's record with it.
         """
-        self._write_record_to_disk(self._record_payload())
+        try:
+            payload = self._record_payload()
+        except Exception as exc:  # pylint: disable=broad-except
+            # Building the payload reads the shape of every message this
+            # extension has been handed. _write_record_to_disk guards the
+            # write; nothing guarded the construction, and the runtime
+            # calls os._exit(1) on an uncaught exception in a callback.
+            # Losing one intermediate save beats killing the meeting on
+            # the path whose whole purpose is not losing the meeting.
+            self.ten_env.log_error(f"could not build the record: {exc}")
+            return
+        self._write_record_to_disk(payload)
 
     async def _assemble(self) -> None:
         # Not `is_empty`: a meeting in which every segment failed has

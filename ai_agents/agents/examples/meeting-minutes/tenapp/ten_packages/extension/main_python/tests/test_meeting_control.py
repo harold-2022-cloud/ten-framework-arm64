@@ -1239,3 +1239,39 @@ async def test_an_abandoned_turns_partial_is_not_filed_as_a_later_turns_answer()
         ext._stopped = True
         if ext._ticker:
             ext._ticker.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_record_that_cannot_be_built_does_not_kill_the_meeting(
+    tmp_path,
+):
+    """The runtime calls os._exit(1) on an uncaught exception in a callback,
+    so an unguarded construction on the save path would end the meeting it
+    exists to preserve -- and this path now runs on every topic, not once at
+    the end."""
+    ext = make_extension()
+    ext._last_segment_dir = str(tmp_path)
+    ext._record_payload = MagicMock(side_effect=KeyError("duration_s"))
+
+    ext._persist_record()  # must not raise
+
+    assert ext.ten_env.log_error.called
+    assert not list(tmp_path.glob("meeting_record_*.json"))
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_every_save_in_one_meeting_lands_on_one_file(tmp_path):
+    """One file per meeting is the point of naming it after the meeting's
+    start; a path recomputed per call would scatter a meeting across as many
+    files as it had topics."""
+    ext = make_extension()
+    ext._last_segment_dir = str(tmp_path)
+    ext.meeting_started_at = 0.0  # the fallback, not the real clock
+
+    first = ext._record_path()
+    time.sleep(1.1)  # long enough to change a %H%M%S stamp
+    second = ext._record_path()
+
+    assert first == second
+    await stop(ext)
