@@ -321,21 +321,39 @@ class MeetingControlExtension(AsyncExtension):
         if event.is_final and event.type == "message":
             self.on_llm_text(event.text)
 
+    def _record_path(self) -> Optional[str]:
+        """One file per meeting, named after the meeting it holds.
+
+        ``meeting_recorder`` deliberately keeps one directory per
+        deployment because the file names carry the time -- but only the
+        *audio*'s did. A fixed ``meeting_record.json`` meant the next
+        meeting destroyed the previous one's minutes, and so did a single
+        meeting that assembled twice (talking again after a long lull
+        re-arms assembly -- the deliberate 「最多是記錄早產出一次」
+        behaviour, which should cost nothing). Keyed on the meeting's own
+        start, so every write within one meeting lands on the same file.
+        """
+        if not self._last_segment_dir:
+            return None
+        started = self.meeting_started_at or time.time()
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(started))
+        return os.path.join(
+            self._last_segment_dir, f"meeting_record_{stamp}.json"
+        )
+
     def _write_record_to_disk(self, record_payload: dict) -> None:
         """The graph gives ``meeting_record`` nowhere to route to -- no node
         declares it as ``data_in`` -- so a file next to the audio it
         describes is the record's only real destination. The most recently
         seen ``segment_closed`` told us that directory.
         """
-        if not self._last_segment_dir:
+        record_path = self._record_path()
+        if not record_path:
             self.ten_env.log_error(
                 "no segment directory seen yet; meeting record not "
                 "written to disk"
             )
             return
-        record_path = os.path.join(
-            self._last_segment_dir, "meeting_record.json"
-        )
         try:
             with open(record_path, "w", encoding="utf-8") as f:
                 json.dump(record_payload, f, ensure_ascii=False, indent=2)

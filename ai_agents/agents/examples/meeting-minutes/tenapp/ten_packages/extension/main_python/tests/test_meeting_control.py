@@ -568,11 +568,49 @@ async def test_the_meeting_record_is_written_next_to_its_own_audio(tmp_path):
 
     await ext._assemble()
 
-    written = segment_dir / "meeting_record.json"
-    assert written.exists()
-    payload = json.loads(written.read_text(encoding="utf-8"))
+    written = list(segment_dir.glob("meeting_record_*.json"))
+    assert len(written) == 1, f"expected one record, got {written}"
+    payload = json.loads(written[0].read_text(encoding="utf-8"))
     assert payload["segments"][0]["summary"] == "重點一。"
     await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_the_next_meeting_does_not_destroy_the_last_ones_minutes(
+    tmp_path,
+):
+    """meeting_recorder keeps one directory per deployment on purpose --
+    the file names carry the time. Only the audio's did: a fixed
+    meeting_record.json meant the second meeting overwrote the first
+    meeting's minutes, in a directory built to hold both."""
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+
+    async def a_meeting(started_at, text):
+        ext = make_extension(summary_timeout_s=0.05)
+        ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+        ext.agent = AsyncMock()
+        ext.ten_env.send_data = AsyncMock()
+        ext._last_segment_dir = str(segment_dir)
+        ext.meeting_started_at = started_at
+        ext.record.add_segment(
+            "seg-1",
+            started_at=started_at,
+            utterances=[
+                {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": text}
+            ],
+        )
+        await ext._assemble()
+        await stop(ext)
+
+    await a_meeting(STARTED_AT, "第一場。")
+    await a_meeting(STARTED_AT + 3600, "第二場。")
+
+    written = sorted(segment_dir.glob("meeting_record_*.json"))
+    assert len(written) == 2, f"one meeting overwrote the other: {written}"
+    bodies = [f.read_text(encoding="utf-8") for f in written]
+    assert any("第一場。" in b for b in bodies)
+    assert any("第二場。" in b for b in bodies)
 
 
 class _FakeCmdResult:
