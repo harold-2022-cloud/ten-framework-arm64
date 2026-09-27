@@ -119,10 +119,18 @@ class LLMExec:
                 await self.current_task
             except asyncio.CancelledError:
                 self.ten_env.log_info("LLMExec processing cancelled.")
-                text = self.current_text
+                # A deliberate divergence from the reference implementation.
+                # There, re-emitting the partial as a *final* is how a
+                # barged-in answer still reaches the context. Here a turn is
+                # only ever cancelled because whoever asked it has already
+                # given up on it, and an answer carries nothing that says
+                # which turn it belongs to -- so a final manufactured out of
+                # an abandoned partial does not suppress a late answer, it
+                # invents one, and it is filed against whichever turn asks
+                # next. One topic's abandoned fragment then reads as the
+                # next topic's summary, and that topic's real answer is
+                # dropped. An abandoned turn produces no answer.
                 self.current_text = None
-                if self.on_response and text:
-                    await self.on_response(self.ten_env, "", text, True)
             except Exception:
                 self.ten_env.log_error(
                     f"Error processing input queue: {traceback.format_exc()}"

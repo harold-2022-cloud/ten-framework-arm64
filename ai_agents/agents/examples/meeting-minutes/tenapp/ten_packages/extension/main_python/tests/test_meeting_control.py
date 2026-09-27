@@ -564,6 +564,18 @@ def _message_done_json(content, response_id="r"):
     )
 
 
+def _message_delta_json(delta, content, response_id="r"):
+    return json.dumps(
+        {
+            "response_id": response_id,
+            "type": "message_content_delta",
+            "role": "assistant",
+            "delta": delta,
+            "content": content,
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_real_agent_delivers_a_real_llm_response_to_the_record():
     """The tests above mock ext.agent, so none of them exercise on_init's
@@ -765,6 +777,129 @@ async def test_a_late_answer_after_a_timeout_does_not_reach_a_later_turn():
         assert (
             entry_b.summary == "SUMMARY B"
         ), "a late answer must not overwrite a later turn's own"
+    finally:
+        await ext.on_stop(ten_env)
+        ext._stopped = True
+        if ext._ticker:
+            ext._ticker.cancel()
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_turns_partial_is_not_filed_as_a_later_turns_answer():
+    """The same race, in the shape a timeout on this board actually takes.
+
+    The board answers at 8-11 chars/s against a 120-180 s summary_timeout_s,
+    so "stalled after streaming some of the answer" is the *expected* shape
+    of a timeout, not an exotic one -- and it is the one case the fake in
+    the test above never produces, because it never emits a delta before it
+    stalls. With a delta in hand, LLMExec's cancellation path used to
+    re-emit the abandoned partial as a *final*, which reached the record
+    after flush_llm had already drained the queue, and was filed against
+    whichever turn asked next: topic B's summary came back as topic A's
+    abandoned fragment and B's real answer was dropped.
+    """
+    # pylint: disable=protected-access
+    a_may_respond = asyncio.Event()
+
+    class FakeTenEnv:
+        def __init__(self):
+            self.calls = 0
+
+        async def get_property_to_json(self, _path):
+            return (
+                MeetingControlConfig(summary_timeout_s=0.05).model_dump_json(),
+                None,
+            )
+
+        async def send_cmd(self, _cmd):
+            return None, None
+
+        async def send_cmd_ex(self, _cmd):
+            self.calls += 1
+            if self.calls == 1:
+                # Topic A: the board streams the opening of its answer and
+                # then stalls. That partial is what the cancellation path
+                # had to re-emit for this bug to exist at all.
+                yield _FakeCmdResult(
+                    _message_delta_json(
+                        "A 的重點是", "A 的重點是", response_id="r-a"
+                    ),
+                    final=False,
+                ), None
+                await a_may_respond.wait()
+                return
+            # Topic B: a normal, prompt answer.
+            payload = _message_done_json("SUMMARY B", response_id="r-b")
+            yield _FakeCmdResult(payload, final=False), None
+            yield _FakeCmdResult(payload, final=True), None
+
+        def log_info(self, _msg):
+            pass
+
+        def log_error(self, _msg):
+            pass
+
+        def log_debug(self, _msg):
+            pass
+
+        def log_warn(self, _msg):
+            pass
+
+    ten_env = FakeTenEnv()
+    ext = MeetingControlExtension("main_control")
+    await ext.on_init(ten_env)
+    filed = []
+    real_on_llm_text = ext.on_llm_text
+
+    def watch(text):
+        filed.append((text, ext._awaiting_summary))
+        real_on_llm_text(text)
+
+    ext.on_llm_text = watch
+    try:
+        ext.meeting_started_at = STARTED_AT
+        ext.record.add_segment(
+            "seg-a",
+            started_at=STARTED_AT,
+            utterances=[
+                {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "A。"}
+            ],
+        )
+        ext.record.add_segment(
+            "seg-b",
+            started_at=STARTED_AT + 60,
+            utterances=[
+                {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "B。"}
+            ],
+        )
+
+        await ext._summarise_segment("seg-a")  # one delta, then it stalls
+        await ext._summarise_segment("seg-b")  # a normal, prompt turn
+        await asyncio.sleep(0.05)
+
+        entry_a = next(
+            s for s in ext.record.ordered() if s.segment_id == "seg-a"
+        )
+        entry_b = next(
+            s for s in ext.record.ordered() if s.segment_id == "seg-b"
+        )
+        assert entry_a.summary == "", "A was abandoned; it has no answer"
+        assert entry_b.summary == "SUMMARY B", (
+            "topic B's heading carries "
+            f"{entry_b.summary!r}; answers seen: {filed}"
+        )
+        assert all(
+            text != "A 的重點是" for text, _ in filed
+        ), f"an abandoned turn's partial reached the record: {filed}"
+
+        # And it must not arrive later either, once the "board" belatedly
+        # unblocks: A's turn no longer exists to produce it.
+        a_may_respond.set()
+        await asyncio.sleep(0.05)
+        entry_b = next(
+            s for s in ext.record.ordered() if s.segment_id == "seg-b"
+        )
+        assert entry_b.summary == "SUMMARY B"
     finally:
         await ext.on_stop(ten_env)
         ext._stopped = True

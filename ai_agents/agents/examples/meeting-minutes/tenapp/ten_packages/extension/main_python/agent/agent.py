@@ -104,16 +104,26 @@ class Agent:
         """Queue a new message to the LLM context."""
         await self.llm_exec.queue_input(text)
 
-    async def flush_llm(self) -> None:
-        """Flush the LLM input queue and cancel whatever is in flight."""
-        await self.llm_exec.flush()
-
+    def _drain_llm_queue(self) -> None:
         while not self._llm_queue.empty():
             try:
                 self._llm_queue.get_nowait()
                 self._llm_queue.task_done()
             except asyncio.QueueEmpty:
                 break
+
+    async def flush_llm(self) -> None:
+        """Flush the LLM input queue and cancel whatever is in flight.
+
+        Everything still in this queue was produced by the turn being
+        abandoned, and nothing in an event says which turn produced it, so
+        the drain has to happen after the cancellations rather than before:
+        cancelling the in-flight dispatch yields the event loop, and an
+        event emitted while that cancellation is being delivered lands on
+        the queue behind any earlier drain -- where the next turn would
+        pick it up as its own answer.
+        """
+        await self.llm_exec.flush()
 
         if self._llm_active_task and not self._llm_active_task.done():
             self._llm_active_task.cancel()
@@ -122,6 +132,8 @@ class Agent:
             except asyncio.CancelledError:
                 pass
             self._llm_active_task = None
+
+        self._drain_llm_queue()
 
     async def stop(self) -> None:
         """Stop the agent processing and any ongoing tasks."""
