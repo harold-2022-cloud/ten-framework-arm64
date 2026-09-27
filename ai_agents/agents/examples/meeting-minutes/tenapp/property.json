@@ -55,7 +55,8 @@
                 "meeting_silence_s": 600.0,
                 "min_segment_s": 5.0,
                 "speakers": 3,
-                "summary_timeout_s": 180.0
+                "summary_timeout_s": 180.0,
+                "upload_gone_s": 3.0
               }
             }
           ],
@@ -69,7 +70,13 @@
             {
               "extension": "vad",
               "audio_frame": [
-                { "name": "pcm_frame", "dest": [{ "extension": "recorder" }] }
+                {
+                  "name": "pcm_frame",
+                  "dest": [
+                    { "extension": "recorder" },
+                    { "extension": "main_control" }
+                  ]
+                }
               ],
               "cmd": [
                 {

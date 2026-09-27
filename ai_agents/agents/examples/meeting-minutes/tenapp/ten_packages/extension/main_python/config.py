@@ -23,6 +23,18 @@ class MeetingControlConfig(BaseModel):
 
     speakers: int = -1
 
+    # Frames stop arriving when the upload goes away -- and nothing else
+    # says so: websocket_server only logs a client disconnect, so a drop
+    # mid-sentence produces no end_of_sentence ever. A gap this long in a
+    # stream the client sends continuously (it streams, it does not gate on
+    # voice) is a dead socket, not a pause: three seconds is tens to
+    # hundreds of missed frames, far past any scheduling hiccup or TCP
+    # retransmit on a LAN, while staying an order of magnitude under
+    # segment_silence_s so that declaring the upload gone can never
+    # pre-empt a real topic boundary. The whole cost of being wrong is
+    # three seconds on the clock that produces the record.
+    upload_gone_s: float = 3.0
+
     # How long one LLM turn -- a segment's summary or the whole meeting's --
     # may stay outstanding before it is given up on. Bounded so a hung board
     # loses one summary rather than stalling every topic after it; the

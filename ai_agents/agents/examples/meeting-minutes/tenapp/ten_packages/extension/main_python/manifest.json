@@ -25,10 +25,12 @@
         "min_segment_s": { "type": "float64" },
         "speakers": { "type": "int64" },
         "summary_timeout_s": { "type": "float64" },
+        "upload_gone_s": { "type": "float64" },
         "segment_prompt": { "type": "string" },
         "meeting_prompt": { "type": "string" }
       }
     },
+    "audio_frame_in": [{ "name": "pcm_frame" }],
     "cmd_in": [
       { "name": "start_of_sentence" },
       { "name": "end_of_sentence" }

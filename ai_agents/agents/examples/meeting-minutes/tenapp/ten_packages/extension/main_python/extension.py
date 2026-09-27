@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from ten_runtime import (
     AsyncExtension,
     AsyncTenEnv,
+    AudioFrame,
     Cmd,
     CmdResult,
     Data,
@@ -51,6 +52,14 @@ class MeetingControlExtension(AsyncExtension):
         self.record = MeetingRecord()
         self.meeting_started_at = 0.0
         self._last_speech_at = 0.0
+        # Somebody is talking right now: True between start_of_sentence and
+        # end_of_sentence. The VAD emits nothing in between, so without this
+        # the ticker reads "time since the last VAD event" as elapsed
+        # silence and cuts a long monologue in half.
+        self._speaking = False
+        # When a pcm_frame was last seen. The only evidence the upload is
+        # still there, and the only clock that keeps running after a drop.
+        self._last_frame_at = 0.0
         self._segment_pending = False
         self._assembled = False
         self._stopped = False
@@ -101,32 +110,88 @@ class MeetingControlExtension(AsyncExtension):
 
     def speech_started(self) -> None:
         """Somebody is talking. Nothing has gone quiet."""
+        now = time.time()
         if self.meeting_started_at == 0.0:
-            self.meeting_started_at = time.time()
-        self._last_speech_at = time.time()
+            self.meeting_started_at = now
+        self._speaking = True
+        self._last_speech_at = now
         self._segment_pending = True
         # A meeting can resume after the long threshold already assembled
         # it once; talking again means a later lull must be able to
         # assemble it again, not be silently absorbed forever.
         self._assembled = False
+        if self._last_frame_at == 0.0:
+            # The VAD only ever speaks because frames reached it. A graph
+            # that does not route pcm_frame here as well leaves this as the
+            # only evidence of an upload there will ever be, and without any
+            # such evidence a drop mid-sentence would wait for ever.
+            self._last_frame_at = now
 
     def speech_stopped(self) -> None:
         """A silence begins here. The ticker decides what it means."""
+        self._speaking = False
         self._last_speech_at = time.time()
+
+    def _quiet_for(self) -> Optional[float]:
+        """Elapsed silence, or ``None`` while somebody is still talking.
+
+        Two different questions, answered from two different clocks.
+
+        "Has this topic ended?" is about speech, and speech is over only
+        when the VAD says so. ``ten_vad_python`` is a state machine: it
+        emits ``start_of_sentence`` once on IDLE->SPEAKING,
+        ``end_of_sentence`` once on SPEAKING->IDLE, and nothing at all in
+        between. Time since the last VAD *event* is therefore not time
+        since speech stopped, and reading it as such cut any monologue
+        longer than ``segment_silence_s`` in half, mid-word, and stranded
+        the rest of it in a segment nothing ever closed.
+
+        "Is the upload still there?" cannot be asked of the VAD at all:
+        ``websocket_server`` only logs a client disconnect and emits
+        nothing into the graph, so a drop mid-sentence produces no
+        ``end_of_sentence`` ever, and a clock gated purely on VAD state
+        would hang there for good. The frames answer it instead -- they
+        stop arriving whether or not the VAD had its say. Past
+        ``upload_gone_s`` of no frames the speech is over whatever the VAD
+        last said, and it ended when the audio did.
+        """
+        if self._last_speech_at == 0.0:
+            return None
+        now = time.time()
+        if self._speaking:
+            if (
+                self._last_frame_at == 0.0
+                or now - self._last_frame_at < self.config.upload_gone_s
+            ):
+                return None
+            self._speaking = False
+            self._last_speech_at = self._last_frame_at
+        return now - self._last_speech_at
+
+    async def on_audio_frame(
+        self, _ten_env: AsyncTenEnv, _audio_frame: AudioFrame
+    ) -> None:
+        """A timestamp, and nothing else.
+
+        The recorder owns the audio. What main_control needs from the
+        stream is the one thing the VAD cannot tell it: whether the upload
+        is still there.
+        """
+        self._last_frame_at = time.time()
 
     async def _tick(self) -> None:
         """One ticker, not two timers armed when speech ends.
 
         A network drop mid-sentence produces no end_of_sentence at all, so
-        timers armed on that event would never be armed and the record would
-        never be assembled. Elapsed time since the last speech answers the
-        same questions and answers them after a disconnect too.
+        timers armed on that event would never be armed and the record
+        would never be assembled. Polling ``_quiet_for()`` answers the same
+        questions and answers them after a disconnect too.
         """
         while not self._stopped:
             await asyncio.sleep(self._tick_s)
-            if self._last_speech_at == 0.0:
+            quiet_for = self._quiet_for()
+            if quiet_for is None:
                 continue
-            quiet_for = time.time() - self._last_speech_at
             if (
                 self._segment_pending
                 and quiet_for >= self.config.segment_silence_s
@@ -134,10 +199,11 @@ class MeetingControlExtension(AsyncExtension):
                 self._segment_pending = False
                 await self._close_segment()
             # Re-derived, not reused: the await above can take long enough
-            # for speech_started() to move _last_speech_at, and a quiet_for
-            # computed before that await would assemble on silence that has
-            # already ended.
-            quiet_for = time.time() - self._last_speech_at
+            # for speech to resume, and a quiet_for computed before that
+            # await would assemble on silence that has already ended.
+            quiet_for = self._quiet_for()
+            if quiet_for is None:
+                continue
             if (
                 not self._assembled
                 and quiet_for >= self.config.meeting_silence_s

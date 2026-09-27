@@ -114,6 +114,7 @@ def make_extension(**overrides):
     ext._close_segment = AsyncMock()
     ext._assemble = AsyncMock()
     ext.config = MeetingControlConfig(**overrides)
+    ext.meeting_started_at = STARTED_AT
     ext._tick_s = 0.02  # the test's clock, not a meeting's
     ext._ticker = asyncio.create_task(ext._tick())
     return ext
@@ -122,6 +123,16 @@ def make_extension(**overrides):
 async def stop(ext):
     ext._stopped = True
     ext._ticker.cancel()
+
+
+async def stream_frames(ext, seconds, every=0.005):
+    """An upload that is still there. Frames arrive whatever the VAD is
+    saying -- the client streams, it does not gate on voice."""
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + seconds
+    while loop.time() < deadline:
+        await ext.on_audio_frame(None, None)
+        await asyncio.sleep(every)
 
 
 @pytest.mark.asyncio
@@ -164,12 +175,56 @@ async def test_speaking_again_puts_the_topic_off():
 
 
 @pytest.mark.asyncio
+async def test_a_monologue_longer_than_the_topic_silence_is_not_cut_in_half():
+    """ten_vad_python emits start_of_sentence once and end_of_sentence once,
+    and nothing at all in between. Reading time since the last VAD *event*
+    as elapsed silence closed the topic mid-word on any unbroken run longer
+    than segment_silence_s, cleared _segment_pending, and stranded the rest
+    of that speech in a segment nothing ever closed."""
+    ext = make_extension(
+        segment_silence_s=0.05, meeting_silence_s=0.15, upload_gone_s=0.10
+    )
+    ext.speech_started()  # and carries straight on talking
+    await stream_frames(ext, 0.30)
+    await stop(ext)
+
+    assert (
+        ext._close_segment.await_count == 0
+    ), "the topic was closed while the speaker was still talking"
+    assert (
+        ext._assemble.await_count == 0
+    ), "the record was assembled while the speaker was still talking"
+
+
+@pytest.mark.asyncio
+async def test_the_monologue_closes_once_the_speaker_finally_stops():
+    """The other half of the same behaviour: gating the clock on VAD state
+    must not stop the clock from ever running."""
+    ext = make_extension(
+        segment_silence_s=0.05, meeting_silence_s=10.0, upload_gone_s=0.10
+    )
+    ext.speech_started()
+    await stream_frames(ext, 0.20)
+    ext.speech_stopped()
+    await stream_frames(ext, 0.20)  # the upload is still there, just quiet
+    await stop(ext)
+
+    assert ext._close_segment.await_count == 1
+    assert ext._assemble.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_the_upload_dying_mid_sentence_still_produces_a_record():
-    """A network drop sends no end_of_sentence. Timers armed on that event
-    would never be armed, and the meeting would hang there for ever."""
-    ext = make_extension(segment_silence_s=0.05, meeting_silence_s=0.15)
-    ext.speech_started()  # and then the socket dies: no speech_stopped
-    await asyncio.sleep(0.30)
+    """A network drop sends no end_of_sentence -- websocket_server only logs
+    a client disconnect and emits nothing into the graph. A clock gated
+    purely on VAD state would wait there for ever. The frames are what
+    answers this instead: they stop arriving, said so or not."""
+    ext = make_extension(
+        segment_silence_s=0.05, meeting_silence_s=0.15, upload_gone_s=0.05
+    )
+    ext.speech_started()
+    await stream_frames(ext, 0.10)  # and then the socket dies, mid-sentence
+    await asyncio.sleep(0.40)
     await stop(ext)
 
     assert ext._close_segment.await_count == 1
