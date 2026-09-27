@@ -80,6 +80,10 @@ class MeetingControlExtension(AsyncExtension):
         self._awaiting_summary: Optional[str] = None
         self._summary_done: Optional[asyncio.Event] = None
         self._last_answer: str = ""
+        # Kept rather than passed, so that a write triggered by a segment
+        # landing after an early assembly does not blank out the
+        # conclusions that assembly already produced.
+        self._meeting_summary: str = ""
 
     async def on_init(self, ten_env: AsyncTenEnv) -> None:
         self.ten_env = ten_env
@@ -301,6 +305,7 @@ class MeetingControlExtension(AsyncExtension):
         answer = await self._ask_llm(segment_id, build_prompt)
         if answer:
             self.record.add_summary(segment_id, answer)
+            self._persist_record()
 
     def on_llm_text(self, text: str) -> None:
         """The board answers one turn at a time, so this answer belongs to
@@ -363,7 +368,7 @@ class MeetingControlExtension(AsyncExtension):
                 f"failed to write meeting record to {record_path}: {exc}"
             )
 
-    def _record_payload(self, meeting_summary: str = "") -> dict:
+    def _record_payload(self) -> dict:
         """The record as it stands, ready to be written or sent.
 
         ``header`` is the shape 產出的形狀 opens with -- the meeting's time
@@ -379,7 +384,7 @@ class MeetingControlExtension(AsyncExtension):
             "duration_s": max(0.0, ended_at - self.meeting_started_at),
             "speaker_count": self.record.speaker_count,
             "transcript": self.record.as_prompt_lines(self.meeting_started_at),
-            "meeting_summary": meeting_summary,
+            "meeting_summary": self._meeting_summary,
             "segments": [
                 {
                     "id": s.segment_id,
@@ -389,6 +394,23 @@ class MeetingControlExtension(AsyncExtension):
                 for s in self.record.ordered()
             ],
         }
+
+    def _persist_record(self) -> None:
+        """Everything processed so far, on disk, now.
+
+        The spec counts 「中途掛掉不會全失。已經處理完的段落留在磁碟上」 as
+        one of the four things cutting a meeting into topics buys. Until
+        assembly the only thing on disk was the undecoded ``.pcm``: the
+        diarization, the transcription and every per-topic summary -- all
+        of the expensive work -- lived in memory and died with the worker.
+
+        That is not a remote possibility. The runtime calls ``os._exit(1)``
+        on an uncaught exception in any extension callback, and
+        ``SegmentWriter.write`` is unguarded, so an ENOSPC on one frame of
+        a long meeting does not degrade anything: it terminates the process
+        and the meeting's record with it.
+        """
+        self._write_record_to_disk(self._record_payload())
 
     async def _assemble(self) -> None:
         if self.record.is_empty:
@@ -415,10 +437,10 @@ class MeetingControlExtension(AsyncExtension):
         # regardless of whether this turn succeeds -- or of whether there
         # was anything to ask about at all, which build_meeting_prompt
         # alone decides, for the same freshness reason.
-        meeting_summary = await self._ask_llm(
+        self._meeting_summary = await self._ask_llm(
             MEETING_SUMMARY_KEY, build_meeting_prompt
         )
-        record_payload = self._record_payload(meeting_summary)
+        record_payload = self._record_payload()
         data = Data.create(DATA_MEETING_RECORD)
         data.set_property_from_json(
             None, json.dumps(record_payload, ensure_ascii=False)
@@ -469,8 +491,13 @@ class MeetingControlExtension(AsyncExtension):
                 self.record.mark_failed(
                     segment_id, payload["error"], started_at
                 )
+                self._persist_record()
                 return
             self.record.add_segment(
                 segment_id, started_at, payload["utterances"]
             )
+            # On disk before the LLM is asked anything, not after: a turn
+            # that hangs for summary_timeout_s must not be what stands
+            # between this topic's transcript and the file.
+            self._persist_record()
             await self._summarise_segment(segment_id)

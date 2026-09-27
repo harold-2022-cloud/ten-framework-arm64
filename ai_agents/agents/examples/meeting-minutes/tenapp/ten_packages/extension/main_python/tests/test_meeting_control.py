@@ -134,7 +134,7 @@ def test_a_record_with_nothing_in_it_says_so():
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from ten_runtime import StatusCode
+from ten_runtime import Data, StatusCode
 
 from main_python.config import MeetingControlConfig
 from main_python.extension import MEETING_SUMMARY_KEY, MeetingControlExtension
@@ -636,6 +636,124 @@ async def test_the_meeting_record_is_written_next_to_its_own_audio(tmp_path):
     assert len(written) == 1, f"expected one record, got {written}"
     payload = json.loads(written[0].read_text(encoding="utf-8"))
     assert payload["segments"][0]["summary"] == "重點一。"
+    await stop(ext)
+
+
+async def deliver_transcribed(ext, segment_id, started_at, payload):
+    """One segment_transcribed, the way meeting_transcriber sends it."""
+    ext._pending[segment_id] = started_at
+    data = Data.create("segment_transcribed")
+    data.set_property_from_json(None, json.dumps(payload, ensure_ascii=False))
+    await ext.on_data(ext.ten_env, data)
+
+
+@pytest.mark.asyncio
+async def test_a_topics_work_is_on_disk_before_the_meeting_ends(tmp_path):
+    """The spec counts 「中途掛掉不會全失。已經處理完的段落留在磁碟上」 as one
+    of the four things segmenting buys. Until assembly the only thing on
+    disk was the undecoded .pcm -- the diarization, the transcription and
+    every per-topic summary lived in memory and died with the worker, and
+    the runtime calls os._exit(1) on an uncaught exception in any extension
+    callback, so losing the worker mid-meeting is not exotic."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext.agent = AsyncMock()
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+    ext._last_segment_dir = str(segment_dir)
+
+    await deliver_transcribed(
+        ext,
+        "seg-1",
+        STARTED_AT,
+        {
+            "segment_id": "seg-1",
+            "utterances": [
+                {
+                    "start_s": 5.0,
+                    "end_s": 9.0,
+                    "speaker": 1,
+                    "text": "下週二前給出測試結果。",
+                }
+            ],
+        },
+    )
+
+    written = list(segment_dir.glob("meeting_record_*.json"))
+    assert written, "a crash here would leave nothing but raw audio"
+    payload = json.loads(written[0].read_text(encoding="utf-8"))
+    assert "下週二前給出測試結果。" in payload["transcript"]
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_topic_is_noted_on_disk_as_it_fails(tmp_path):
+    """The failure note is part of the processed work, not a footnote
+    added at assembly."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext.agent = AsyncMock()
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+    ext._last_segment_dir = str(segment_dir)
+
+    await deliver_transcribed(
+        ext,
+        "seg-1",
+        STARTED_AT,
+        {"segment_id": "seg-1", "error": "diarization ran out of memory"},
+    )
+
+    written = list(segment_dir.glob("meeting_record_*.json"))
+    assert written, "the failure was only ever in memory"
+    payload = json.loads(written[0].read_text(encoding="utf-8"))
+    assert "seg-1 段未能處理" in payload["transcript"]
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_a_topic_landing_after_an_early_assembly_keeps_the_conclusions(
+    tmp_path,
+):
+    """Talking again after a long lull re-arms assembly -- the deliberate
+    「最多是記錄早產出一次」 behaviour. The mid-meeting write that follows
+    must not blank the conclusions the early assembly already produced."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+    ext.agent = AsyncMock()
+    ext.ten_env.send_data = AsyncMock()
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+    ext._last_segment_dir = str(segment_dir)
+    ext.record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "一。"}
+        ],
+    )
+    ext.record.add_summary("seg-1", "重點一。")
+
+    task = asyncio.create_task(ext._assemble())
+    await asyncio.sleep(0.01)
+    ext.on_llm_text("結論：早產的。")
+    await task
+
+    await deliver_transcribed(
+        ext,
+        "seg-2",
+        STARTED_AT + 900,
+        {
+            "segment_id": "seg-2",
+            "utterances": [
+                {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "二。"}
+            ],
+        },
+    )
+
+    written = list(segment_dir.glob("meeting_record_*.json"))
+    assert len(written) == 1, "one meeting, one file"
+    payload = json.loads(written[0].read_text(encoding="utf-8"))
+    assert payload["meeting_summary"] == "結論：早產的。"
+    assert "二。" in payload["transcript"]
     await stop(ext)
 
 
