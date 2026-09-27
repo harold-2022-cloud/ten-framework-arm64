@@ -54,6 +54,50 @@ class MeetingRecord:
     def ordered(self) -> List[SegmentRecord]:
         return sorted(self._segments.values(), key=lambda s: s.started_at)
 
+    @property
+    def ended_at(self) -> float:
+        """Wall-clock epoch of the last word said, or 0.0 if none was.
+
+        Taken from the utterances rather than from when assembly ran:
+        assembly happens meeting_silence_s -- ten minutes by default --
+        after the meeting actually ended, and a 會議時間 range stretched to
+        cover that silence would be wrong by exactly that much.
+        """
+        latest = 0.0
+        for segment in self._segments.values():
+            for utterance in segment.utterances:
+                latest = max(latest, segment.started_at + utterance["end_s"])
+        return latest
+
+    @property
+    def speaker_count(self) -> int:
+        """與會 N 人, counted from what the diarizer actually produced.
+
+        It is *told* how many speakers to expect, but what reached the
+        record is what the record can honestly claim -- a meeting where one
+        of the three never spoke had two people in it, as far as anything
+        here can know.
+        """
+        return len(
+            {
+                utterance["speaker"]
+                for segment in self._segments.values()
+                for utterance in segment.utterances
+            }
+        )
+
+    def header(self, started_at: float) -> str:
+        """The two lines 產出的形狀 opens with, before 結論 and 待辦."""
+        ended_at = self.ended_at or started_at
+        minutes = int(max(0.0, ended_at - started_at) // 60)
+        day = time.strftime("%Y-%m-%d", time.localtime(started_at))
+        opened = time.strftime("%H:%M", time.localtime(started_at))
+        closed = time.strftime("%H:%M", time.localtime(ended_at))
+        return (
+            f"會議時間 {day} {opened} – {closed}（{minutes} 分鐘）\n"
+            f"與會 {self.speaker_count} 人"
+        )
+
     @staticmethod
     def _segment_lines(segment: SegmentRecord, started_at: float) -> List[str]:
         """Both clocks on every line: the wall clock for a person, the offset

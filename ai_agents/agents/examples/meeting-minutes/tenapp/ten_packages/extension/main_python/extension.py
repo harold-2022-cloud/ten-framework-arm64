@@ -363,6 +363,33 @@ class MeetingControlExtension(AsyncExtension):
                 f"failed to write meeting record to {record_path}: {exc}"
             )
 
+    def _record_payload(self, meeting_summary: str = "") -> dict:
+        """The record as it stands, ready to be written or sent.
+
+        ``header`` is the shape 產出的形狀 opens with -- the meeting's time
+        as a range with a duration, and how many people were in it -- and
+        the three fields it is rendered from are carried alongside it so
+        anything reading this file does not have to parse a sentence.
+        """
+        ended_at = self.record.ended_at or self.meeting_started_at
+        return {
+            "header": self.record.header(self.meeting_started_at),
+            "started_at": self.meeting_started_at,
+            "ended_at": ended_at,
+            "duration_s": max(0.0, ended_at - self.meeting_started_at),
+            "speaker_count": self.record.speaker_count,
+            "transcript": self.record.as_prompt_lines(self.meeting_started_at),
+            "meeting_summary": meeting_summary,
+            "segments": [
+                {
+                    "id": s.segment_id,
+                    "summary": s.summary,
+                    "error": s.error,
+                }
+                for s in self.record.ordered()
+            ],
+        }
+
     async def _assemble(self) -> None:
         if self.record.is_empty:
             self.ten_env.log_info("nothing was said; no record to assemble")
@@ -391,20 +418,7 @@ class MeetingControlExtension(AsyncExtension):
         meeting_summary = await self._ask_llm(
             MEETING_SUMMARY_KEY, build_meeting_prompt
         )
-        segments = self.record.ordered()
-        record_payload = {
-            "started_at": self.meeting_started_at,
-            "transcript": self.record.as_prompt_lines(self.meeting_started_at),
-            "meeting_summary": meeting_summary,
-            "segments": [
-                {
-                    "id": s.segment_id,
-                    "summary": s.summary,
-                    "error": s.error,
-                }
-                for s in segments
-            ],
-        }
+        record_payload = self._record_payload(meeting_summary)
         data = Data.create(DATA_MEETING_RECORD)
         data.set_property_from_json(
             None, json.dumps(record_payload, ensure_ascii=False)

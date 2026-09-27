@@ -35,6 +35,39 @@ def test_the_record_carries_both_clocks():
     assert "/ 00:32]" in lines, "the offset from the meeting's own start"
 
 
+def test_the_record_opens_with_the_meetings_time_and_who_was_in_it():
+    """產出的形狀 opens with 「會議時間 14:05 – 14:23（18 分鐘）／ 與會 3 人」.
+    The end of the range comes from the last word said, not from when
+    assembly ran -- that is meeting_silence_s later, ten minutes by
+    default, and a range stretched over it is wrong by exactly that."""
+    record = MeetingRecord()
+    record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 0.0, "end_s": 20.0, "speaker": 0, "text": "開始。"},
+            {"start_s": 20.0, "end_s": 40.0, "speaker": 1, "text": "好。"},
+        ],
+    )
+    record.add_segment(
+        "seg-2",
+        started_at=STARTED_AT + 17 * 60,
+        utterances=[
+            {"start_s": 30.0, "end_s": 75.0, "speaker": 2, "text": "結論。"},
+        ],
+    )
+
+    assert record.speaker_count == 3
+    assert record.ended_at == STARTED_AT + 18 * 60 + 15
+
+    header = record.header(STARTED_AT)
+    opened = time.strftime("%H:%M", time.localtime(STARTED_AT))
+    closed = time.strftime("%H:%M", time.localtime(STARTED_AT + 18 * 60 + 15))
+    assert f"{opened} – {closed}" in header, f"no time range: {header!r}"
+    assert "（18 分鐘）" in header, f"no duration: {header!r}"
+    assert "與會 3 人" in header, f"no attendee count: {header!r}"
+
+
 def test_a_failed_segment_does_not_take_the_others_with_it():
     """The reason for cutting a meeting into topics at all."""
     record = MeetingRecord()
@@ -458,6 +491,37 @@ async def test_the_meeting_summary_is_asked_from_the_segment_summaries():
     )
     assert payload["meeting_summary"] == "結論：一。待辦：無。"
     assert "transcript" in payload and payload["transcript"]
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_the_emitted_record_carries_the_header_the_spec_opens_with():
+    """會議時間 as a range with a duration, and 與會 N 人 -- carried as
+    fields as well as rendered, so nothing downstream has to parse a
+    sentence to get them back."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+    ext.agent = AsyncMock()
+    ext.ten_env.send_data = AsyncMock()
+    ext.record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 0.0, "end_s": 10.0, "speaker": 0, "text": "一。"},
+            {"start_s": 10.0, "end_s": 20.0, "speaker": 1, "text": "二。"},
+        ],
+    )
+
+    await ext._assemble()
+
+    payload = json.loads(
+        ext.ten_env.send_data.await_args.args[0].get_property_to_json(None)[0]
+    )
+    assert payload["ended_at"] == STARTED_AT + 20
+    assert payload["duration_s"] == 20.0
+    assert payload["speaker_count"] == 2
+    assert "與會 2 人" in payload["header"]
+    assert "會議時間" in payload["header"]
     await stop(ext)
 
 
