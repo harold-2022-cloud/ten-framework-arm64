@@ -368,6 +368,23 @@ class MeetingControlExtension(AsyncExtension):
                 f"failed to write meeting record to {record_path}: {exc}"
             )
 
+    def _record_note(self) -> str:
+        """What to say when the record cannot speak for itself.
+
+        The spec's 出錯的時候 table says the transcript is 「永遠完整附上」
+        and that a failed segment leaves 「記錄裡註明第 N 段未能處理，原始
+        錄音檔留著」. When the failure is systematic -- a missing model
+        path, an OOM on this board -- every segment fails the same way, and
+        suppressing the record then hides the one case where that note is
+        worth the most.
+        """
+        if not self.record.is_empty:
+            return ""
+        return (
+            "所有段落都未能處理，沒有任何逐字稿。原始錄音檔留在 "
+            f"{self._last_segment_dir or '(未知)'}。"
+        )
+
     def _record_payload(self) -> dict:
         """The record as it stands, ready to be written or sent.
 
@@ -383,6 +400,7 @@ class MeetingControlExtension(AsyncExtension):
             "ended_at": ended_at,
             "duration_s": max(0.0, ended_at - self.meeting_started_at),
             "speaker_count": self.record.speaker_count,
+            "note": self._record_note(),
             "transcript": self.record.as_prompt_lines(self.meeting_started_at),
             "meeting_summary": self._meeting_summary,
             "segments": [
@@ -413,7 +431,14 @@ class MeetingControlExtension(AsyncExtension):
         self._write_record_to_disk(self._record_payload())
 
     async def _assemble(self) -> None:
-        if self.record.is_empty:
+        # Not `is_empty`: a meeting in which every segment failed has
+        # nothing said in it and everything to explain. Suppressing the
+        # record there left the user with no file and no reason -- exactly
+        # the case the spec's 「記錄裡註明第 N 段未能處理」 is for, and the
+        # one where a systematic failure (a missing model path, an OOM on
+        # this board) makes every segment fail the same way. Only a record
+        # that never heard of a segment at all has nothing to say.
+        if not self.record.ordered():
             self.ten_env.log_info("nothing was said; no record to assemble")
             return
 

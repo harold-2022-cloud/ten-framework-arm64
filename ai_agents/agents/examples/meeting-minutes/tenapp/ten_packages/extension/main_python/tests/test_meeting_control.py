@@ -611,6 +611,79 @@ async def test_a_failed_meeting_summary_turn_still_emits_the_transcript():
 
 
 @pytest.mark.asyncio
+async def test_a_meeting_in_which_everything_failed_still_says_so(tmp_path):
+    """A systematic failure -- a missing model path, an OOM on this board --
+    makes every segment fail the same way, and suppressing the record then
+    is the one case where the note would have been worth the most: the user
+    got no file and no explanation. The spec's 出錯的時候 table says the
+    transcript is 永遠完整附上 and that a failed segment is noted in the
+    record with its audio left where it is."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+    ext.agent = AsyncMock()
+    ext.ten_env.send_data = AsyncMock()
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+    ext._last_segment_dir = str(segment_dir)
+    ext.record.mark_failed("seg-1", "模型路徑不存在", started_at=STARTED_AT)
+    ext.record.mark_failed(
+        "seg-2", "模型路徑不存在", started_at=STARTED_AT + 300
+    )
+
+    await ext._assemble()
+
+    ext.ten_env.send_data.assert_awaited_once()
+    payload = json.loads(
+        ext.ten_env.send_data.await_args.args[0].get_property_to_json(None)[0]
+    )
+    assert "seg-1 段未能處理" in payload["transcript"]
+    assert "seg-2 段未能處理" in payload["transcript"]
+    assert payload["note"], "no file and no explanation is the old bug"
+    assert str(segment_dir) in payload["note"], "the audio is still there"
+    assert (
+        ext.agent.queue_llm_input.await_count == 0
+    ), "there is nothing to summarise; the board must not be asked"
+
+    written = list(segment_dir.glob("meeting_record_*.json"))
+    assert written, "the user gets no file at all"
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_nothing_ever_happened_in_writes_nothing(tmp_path):
+    """The other side of it: a record that never heard of a segment has
+    nothing to explain, and a file saying so would be noise."""
+    ext = make_extension(summary_timeout_s=0.05)
+    ext._assemble = MeetingControlExtension._assemble.__get__(ext)
+    ext.agent = AsyncMock()
+    ext.ten_env.send_data = AsyncMock()
+    segment_dir = tmp_path / "segments"
+    segment_dir.mkdir()
+    ext._last_segment_dir = str(segment_dir)
+
+    await ext._assemble()
+
+    ext.ten_env.send_data.assert_not_awaited()
+    assert not list(segment_dir.glob("meeting_record_*.json"))
+    await stop(ext)
+
+
+@pytest.mark.asyncio
+async def test_a_record_with_something_in_it_carries_no_note():
+    ext = make_extension(summary_timeout_s=0.05)
+    ext.agent = AsyncMock()
+    ext.record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 1.0, "end_s": 2.0, "speaker": 0, "text": "一。"}
+        ],
+    )
+    assert ext._record_payload()["note"] == ""
+    await stop(ext)
+
+
+@pytest.mark.asyncio
 async def test_the_meeting_record_is_written_next_to_its_own_audio(tmp_path):
     """The graph gives meeting_record nowhere to route to, so a file next
     to the segment audio is its only real destination."""
