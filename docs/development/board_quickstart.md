@@ -243,6 +243,31 @@ base64-encoded, as JSON:
 {"audio": "<base64 PCM16 mono 16kHz>"}
 ```
 
+**Send 16 ms per message — 512 bytes of PCM16 — and no more.** This is not a
+style preference, it is the one number that decides whether topic splitting
+works at all. `ten_vad_python` consumes exactly **one 16 ms hop per message it
+receives** (`extension.py:97-103`: it appends to a buffer, takes one hop, and
+returns — there is no loop), so a client sending larger chunks falls behind
+real time in direct proportion:
+
+| Chunk sent | VAD advances | Lag |
+| --- | --- | --- |
+| 16 ms | 16 ms | real time |
+| 20 ms | 16 ms | 1.25× behind |
+| 40 ms | 16 ms | 2.5× behind |
+| 100 ms | 16 ms | 6.25× behind |
+| 320 ms | 16 ms | 20× behind |
+
+The lag is cumulative and never recovers. At 100 ms chunks the VAD is still
+deciding about minute 1 when the meeting reaches minute 6, so
+`start_of_sentence` and `end_of_sentence` arrive far too late to mark real
+pauses, and a meeting that should split into topics becomes one long one.
+
+**No audio is lost** — the VAD passes every frame straight through before it
+does any of this (`extension.py:92`), so the recording and the transcript stay
+complete whatever you send. What degrades is only where the topic boundaries
+fall, which is silent and looks like the silence thresholds being wrong.
+
 That is the whole protocol. No handshake, no start/stop message, nothing to
 send when the meeting ends — just stop sending frames.
 
