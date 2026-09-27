@@ -169,6 +169,139 @@ Adding or removing a graph is not hot-reloadable — the frontend caches
 `/graphs`, so the server and the playground both need restarting. Editing
 values inside an existing graph takes effect on the next session.
 
+## The meeting-minutes graph
+
+A second example, at `ai_agents/agents/examples/meeting-minutes`, running a
+different graph: `meeting_minutes`. It records a meeting, closes and
+transcribes one topic at a time as silences end them, and asks the board's
+LLM for a summary. No playground, no RTC.
+
+```bash
+tools/ambarella/install_meeting_models.sh    # fetch its two speech models first
+cd ai_agents/agents/examples/meeting-minutes
+task run 2>&1 | tee /tmp/task_run.log
+```
+
+`meeting_minutes` has `auto_start: false`, so nothing starts on its own —
+drive it with `POST /start` and `"graph_name": "meeting_minutes"`, the way
+[`agent_api.md`](agent_api.md) describes. `AGORA_APP_ID` still has to be set
+even though this graph never touches RTC: the Go server checks it
+unconditionally at startup, before it looks at which graph anyone asked for.
+Port 8081 for the Go API server itself is the same story as the voice
+assistant's — see [Ports](#ports) above; nothing about it changes here.
+
+### Audio in, over a WebSocket
+
+There is no playground for this example. Audio arrives at the
+`websocket_server` extension instead of RTC or a browser: port `8765`, all
+interfaces (`0.0.0.0`) — its own `manifest.json` and `property.json` are
+where those live, since this graph doesn't override them. There is no path
+to get right; the server doesn't route on one. Send PCM16, mono, 16 kHz,
+base64-encoded, as JSON:
+
+```json
+{"audio": "<base64 PCM16 mono 16kHz>"}
+```
+
+That is the whole protocol. No handshake, no start/stop message, nothing to
+send when the meeting ends — just stop sending frames.
+
+### The models it expects
+
+| | Env override | Default |
+| --- | --- | --- |
+| Diarization, segmentation | `DIARIZATION_SEG_MODEL` | `/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx` |
+| Diarization, embedding | `DIARIZATION_EMB_MODEL` | `/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` |
+| SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
+
+```bash
+tools/ambarella/install_meeting_models.sh --help
+```
+
+fetches all three — the diarization pair by calling `probe_diarization.py
+--fetch`, SenseVoice as this script's own work — and prints the paths it
+resolved. As with the voice assistant's models, the defaults above assume
+this board's user is `lychee`; if yours is not, put the printed paths in
+`.env` under those three variable names.
+
+Recordings go to `/home/lychee/meeting_segments`: needs 250 MB free when the
+graph starts (checked once, not watched afterward), then about 115 MB/hour.
+Unlike the three model paths, this one is not an `${env:...}` override in
+`property.json` — a different user needs that file edited directly, or the
+path to exist as given.
+
+### Getting the minutes out
+
+Nothing routes the finished record to a UI — there isn't one. It is written
+to `meeting_record.json` in `/home/lychee/meeting_segments`, next to the
+audio it describes, holding `started_at`, `transcript`, `meeting_summary`,
+and a `segments` list.
+
+Silence drives when that file gets written:
+
+| Property | Default | Does |
+| --- | --- | --- |
+| `segment_silence_s` | `30` | closes the current topic |
+| `min_segment_s` | `5` | a segment shorter than this merges into the next one rather than standing alone |
+| `meeting_silence_s` | `600` | ends the meeting and triggers assembly |
+| `speakers` | `3` | told to the diarizer up front, on every segment |
+
+`speakers` matters: without a count, clustering over-splits one person into
+several — measured on the board, four speakers came back as seven.
+
+Assembly is one more turn to the board's LLM, asking for the whole
+meeting's conclusions from the per-topic summaries already gathered. So
+`meeting_record.json` appears some time after the last person stops
+talking, not the instant the 600 s timer fires.
+
+### Measuring before you rely on it
+
+Two numbers decide whether 30 s is a safe `segment_silence_s`: how long
+diarization takes on a closed topic, and how long SenseVoice takes on the
+same audio. Together they are how far processing lags behind the meeting —
+the default has to sit comfortably above that, or a topic closes before the
+previous one has finished being worked on.
+
+```bash
+python3 tools/ambarella/probe_diarization.py --audio /tmp/four.wav \
+  --speakers 4 --threads 4
+```
+
+(If `install_meeting_models.sh` already ran, the diarization models are
+already under `~/diarization_models` and this just uses them — no `--fetch`
+needed here.) `--threads 4` matches this graph's `meeting_transcriber`
+property (`num_threads: 4` in `tenapp/property.json`) — a separate setting
+from whatever thread count the voice assistant's own CPU speech setup uses.
+Compare the real-time factor it reports against the one already measured at
+two threads: **0.49**.
+
+SenseVoice's own speed on this board is **unmeasured** — there is no probe
+script for it yet. Time one pass by hand, over the same audio, the way
+`meeting_transcriber` itself loads the model:
+
+```python
+import time
+import sherpa_onnx
+
+recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+    model="path/to/sensevoice/model.onnx",   # whichever model*.onnx sorts first
+    tokens="path/to/sensevoice/tokens.txt",
+    num_threads=4,
+    use_itn=True,
+    provider="cpu",
+)
+samples = ...  # float32 in [-1, 1] — the same audio probe_diarization.py read
+stream = recognizer.create_stream()
+stream.accept_waveform(16000, samples)
+t0 = time.monotonic()
+recognizer.decode_stream(stream)
+print(f"{time.monotonic() - t0:.2f}s  ->  {stream.result.text}")
+```
+
+Add the two elapsed times to get how long a topic takes to process once it
+closes. If that is not comfortably under 30 s, `segment_silence_s` is
+cutting into the next topic's processing rather than waiting it out.
+
 ## After a conversation
 
 ```bash

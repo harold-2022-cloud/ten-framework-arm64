@@ -153,6 +153,130 @@ task run 2>&1 | tee /tmp/task_run.log
 **新增或移除 graph 不能熱更新**——前端會快取 `/graphs`，所以 server 和 playground
 都要重啟。改既有 graph 裡的值則是下一個 session 生效。
 
+## 會議記錄（meeting-minutes）graph
+
+另一個範例，在 `ai_agents/agents/examples/meeting-minutes`，跑的是不同的
+graph：`meeting_minutes`。它會錄下一場會議，隨著靜音把每個話題收掉、轉錄，
+然後跟板子的 LLM 要一份摘要。沒有 playground，也不走 RTC。
+
+```bash
+tools/ambarella/install_meeting_models.sh    # 先抓兩組語音模型
+cd ai_agents/agents/examples/meeting-minutes
+task run 2>&1 | tee /tmp/task_run.log
+```
+
+`meeting_minutes` 的 `auto_start` 是 `false`，所以不會自己啟動——要用
+`POST /start`、帶上 `"graph_name": "meeting_minutes"` 來啟動它，做法見
+[`agent_api.zh-TW.md`](agent_api.zh-TW.md)。就算這個 graph 完全不碰 RTC，
+`AGORA_APP_ID` 還是得填：Go server 在啟動時就會無條件檢查它，比看你要哪個
+graph 還早。Go API server 本身的 8081 port，跟語音助理是同一回事——見上面的
+[Port](#port)，這裡沒有任何不同。
+
+### 音訊怎麼進來：走 WebSocket
+
+這個範例沒有 playground。音訊是送進 `websocket_server` 這個擴充，不是走 RTC
+也不是瀏覽器：port `8765`，監聽所有介面（`0.0.0.0`）——這些預設值在它自己的
+`manifest.json` 和 `property.json` 裡，這個 graph 沒有覆蓋它們。也沒有路徑
+（path）要對：這個 server 不按路徑分流。送 PCM16、單聲道、16 kHz、
+base64 編碼，包成 JSON：
+
+```json
+{"audio": "<base64 PCM16 mono 16kHz>"}
+```
+
+協定就這樣，沒有別的了。沒有 handshake，沒有開始／結束訊息，會議結束時也
+不用送什麼——不送音訊了就是了。
+
+### 這個 graph 要的模型
+
+| | 環境變數覆蓋 | 預設值 |
+| --- | --- | --- |
+| Diarization，segmentation | `DIARIZATION_SEG_MODEL` | `/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx` |
+| Diarization，embedding | `DIARIZATION_EMB_MODEL` | `/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` |
+| SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
+
+```bash
+tools/ambarella/install_meeting_models.sh --help
+```
+
+會把三個都抓下來——diarization 那兩個是呼叫 `probe_diarization.py --fetch`，
+SenseVoice 才是這支腳本自己的新工作——然後印出它解出來的路徑。跟語音助理的
+模型一樣，上面的預設值假設板子的使用者是 `lychee`；如果不是，把印出來的路徑
+填進 `.env`，變數名稱就用上面那三個。
+
+錄音會放到 `/home/lychee/meeting_segments`：graph 啟動時要有 250 MB 空間
+（只在那時候檢查一次，之後不會再盯著），之後大概每小時 115 MB。跟上面三個
+模型路徑不一樣，這個路徑在 `property.json` 裡不是 `${env:...}` 覆蓋——換了
+使用者的話，得直接改那個檔案，或者讓那個路徑本身存在。
+
+### 會議記錄怎麼拿出來
+
+沒有任何東西把記錄送到 UI——因為根本沒有 UI。完成的記錄會寫成
+`/home/lychee/meeting_segments` 裡的 `meeting_record.json`，就在它描述的
+那份錄音旁邊，裡面有 `started_at`、`transcript`、`meeting_summary`，還有
+一個 `segments` 清單。
+
+那個檔案什麼時候寫出來，由靜音決定：
+
+| 屬性 | 預設值 | 作用 |
+| --- | --- | --- |
+| `segment_silence_s` | `30` | 把目前的話題收掉 |
+| `min_segment_s` | `5` | 短於這個長度的段落不會獨立成段，會併進下一段 |
+| `meeting_silence_s` | `600` | 結束整場會議，觸發彙整 |
+| `speakers` | `3` | 一開始就告訴 diarizer，每一段都用 |
+
+`speakers` 很重要：沒給人數的話，分群會把同一個人拆成好幾個——board 測試
+量到的是，四個人被判成七個。
+
+彙整是再跟板子的 LLM 講一次話，拿已經收集好的各話題摘要，去問整場會議的
+結論。所以 `meeting_record.json` 會在最後一個人講完話之後過一段時間才出現，
+不是 600 秒計時器一到就馬上有。
+
+### 動手依賴這些數字之前，先量一遍
+
+`segment_silence_s` 訂 30 秒安不安全，看兩個數字：diarization 處理一個收掉
+的話題要多久，SenseVoice 處理同一段音訊要多久。兩個加起來，就是處理進度
+落後會議本身多少——預設值要舒服地大於這個數字，不然一個話題還沒處理完，
+下一個就已經收掉了。
+
+```bash
+python3 tools/ambarella/probe_diarization.py --audio /tmp/four.wav \
+  --speakers 4 --threads 4
+```
+
+（如果已經跑過 `install_meeting_models.sh`，diarization 模型已經在
+`~/diarization_models` 底下了，這裡直接用，不用再 `--fetch`。）
+`--threads 4` 對應的是這個 graph 裡 `meeting_transcriber` 的屬性
+（`tenapp/property.json` 的 `num_threads: 4`）——跟語音助理自己 CPU 語音那
+邊用幾個執行緒，是不相干的另一個設定。拿它報出來的即時率，去跟兩個執行緒
+時已經量過的數字比：**0.49**。
+
+SenseVoice 在這塊板子上跑多快，目前**沒量過**——還沒有專門的探測腳本。就用
+`meeting_transcriber` 自己載入模型的方式，手動對同一段音訊計時一次：
+
+```python
+import time
+import sherpa_onnx
+
+recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+    model="path/to/sensevoice/model.onnx",   # 排序後排第一的那個 model*.onnx
+    tokens="path/to/sensevoice/tokens.txt",
+    num_threads=4,
+    use_itn=True,
+    provider="cpu",
+)
+samples = ...  # float32，範圍 [-1, 1]——跟 probe_diarization.py 讀進去的同一段音訊
+stream = recognizer.create_stream()
+stream.accept_waveform(16000, samples)
+t0 = time.monotonic()
+recognizer.decode_stream(stream)
+print(f"{time.monotonic() - t0:.2f}s  ->  {stream.result.text}")
+```
+
+把兩個耗時加起來，就是一個話題收掉之後要花多久處理完。如果這個數字沒有舒服
+地小於 30 秒，代表 `segment_silence_s` 已經在啃下一個話題的處理時間，而不是
+好好等它做完。
+
 ## 對話之後
 
 ```bash
