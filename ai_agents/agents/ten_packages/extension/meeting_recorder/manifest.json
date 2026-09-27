@@ -1,0 +1,33 @@
+{
+  "type": "extension",
+  "name": "meeting_recorder",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "output_dir": { "type": "string" },
+        "min_free_mb": { "type": "int64" }
+      }
+    },
+    "audio_frame_in": [{ "name": "pcm_frame" }],
+    "cmd_in": [{ "name": "close_segment" }],
+    "data_out": [{ "name": "segment_closed" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
