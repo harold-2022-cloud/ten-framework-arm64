@@ -41,7 +41,9 @@
                 "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
                 "model_type": 9,
                 "response_format": "sse",
-                "starts_in_reasoning": false
+                "starts_in_reasoning": false,
+                "reset_every_turn": true,
+                "prompt": ""
               }
             },
             {
@@ -52,7 +54,8 @@
                 "segment_silence_s": 30.0,
                 "meeting_silence_s": 600.0,
                 "min_segment_s": 5.0,
-                "speakers": 3
+                "speakers": 3,
+                "summary_timeout_s": 180.0
               }
             }
           ],

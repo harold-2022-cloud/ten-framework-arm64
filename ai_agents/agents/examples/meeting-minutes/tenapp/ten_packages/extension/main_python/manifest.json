@@ -24,6 +24,7 @@
         "meeting_silence_s": { "type": "float64" },
         "min_segment_s": { "type": "float64" },
         "speakers": { "type": "int64" },
+        "summary_timeout_s": { "type": "float64" },
         "segment_prompt": { "type": "string" },
         "meeting_prompt": { "type": "string" }
       }

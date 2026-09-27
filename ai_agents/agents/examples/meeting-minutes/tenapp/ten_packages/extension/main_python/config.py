@@ -23,6 +23,12 @@ class MeetingControlConfig(BaseModel):
 
     speakers: int = -1
 
+    # How long one LLM turn -- a segment's summary or the whole meeting's --
+    # may stay outstanding before it is given up on. Bounded so a hung board
+    # loses one summary rather than stalling every topic after it; the
+    # board itself holds a session for up to 180 s after a reply.
+    summary_timeout_s: float = 180.0
+
     segment_prompt: str = (
         "以下是一段會議錄音的逐字稿。用中文條列這一段的重點，"
         "以及任何被提出的待辦事項，每一項標上它的時間。不要客套話。\n\n"
