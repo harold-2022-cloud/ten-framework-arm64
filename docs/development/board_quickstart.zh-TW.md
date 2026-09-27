@@ -162,7 +162,20 @@ graph：`meeting_minutes`。它會錄下一場會議，隨著靜音把每個話�
 ```bash
 tools/ambarella/install_meeting_models.sh    # 先抓兩組語音模型
 cd ai_agents/agents/examples/meeting-minutes
+task install                                 # 只要一次；板子上請看下面
 task run 2>&1 | tee /tmp/task_run.log
+```
+
+`task install` 這一步不能省，而且省掉了不會大聲報錯：`server/bin/api` 是它
+建出來的，而 `POST /start` 是進到這個 graph 的唯一入口。沒有它，`task run`
+起來之後 API port 上不會有任何東西在聽。
+
+在板子上，`task install` 是 x86 的路徑，跑不起來——registry 沒有 arm64 的
+`agora_rtc`。改用安裝腳本，它支援用名字指定這個範例，而且會把後面該做的事
+做完（Go app、Python 套件、共用的 playground、API server）：
+
+```bash
+ai_agents/agents/scripts/install_board_arm64.sh --example meeting-minutes
 ```
 
 `meeting_minutes` 的 `auto_start` 是 `false`，所以不會自己啟動——要用

@@ -179,7 +179,21 @@ LLM for a summary. No playground, no RTC.
 ```bash
 tools/ambarella/install_meeting_models.sh    # fetch its two speech models first
 cd ai_agents/agents/examples/meeting-minutes
+task install                                 # once, and see below on the board
 task run 2>&1 | tee /tmp/task_run.log
+```
+
+`task install` is not optional here, and skipping it does not fail loudly: it
+is what builds `server/bin/api`, and `POST /start` is the only way into this
+graph. Without it `task run` comes up with nothing listening on the API port.
+
+On the board, `task install` is the x86 path and cannot work — the registry
+has no arm64 `agora_rtc`. Use the installer instead, which supports this
+example by name and finishes it the same way (the Go app, the Python packages,
+the shared playground and the API server):
+
+```bash
+ai_agents/agents/scripts/install_board_arm64.sh --example meeting-minutes
 ```
 
 `meeting_minutes` has `auto_start: false`, so nothing starts on its own —
