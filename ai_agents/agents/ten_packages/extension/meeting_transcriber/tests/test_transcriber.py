@@ -14,7 +14,14 @@ import pytest
 from meeting_transcriber.config import MeetingTranscriberConfig
 from meeting_transcriber.transcriber import MeetingTranscriber, read_pcm16
 
-from .fakes import FakeDiarizer, FakeRecogniser, FakeSegment, FakeTenEnv
+from .fakes import (
+    FakeDiarizationResult,
+    FakeDiarizer,
+    FakeRecogniser,
+    FakeSegment,
+    FakeStream,
+    FakeTenEnv,
+)
 
 
 def make(segments, texts, **overrides):
@@ -109,3 +116,28 @@ async def test_the_speaker_count_reaches_the_clusterer(tmp_path):
     )
     await transcriber.transcribe(str(pcm), speakers=3)
     assert seen["speakers"] == 3
+
+
+def test_the_fakes_expose_the_surface_the_real_engines_expose():
+    """A fake modelling a method the real class does not have proves
+    nothing -- that is exactly how get_result survived five green tests.
+    Read the names off the installed sherpa-onnx rather than hardcoding
+    what we expect it to look like, so a version mismatch fails here
+    instead of on the board's first real segment."""
+    sherpa_onnx = pytest.importorskip("sherpa_onnx")
+
+    for name in ("create_stream", "decode_stream"):
+        assert hasattr(sherpa_onnx.OfflineRecognizer, name), name
+        assert hasattr(FakeRecogniser, name), name
+
+    for name in ("accept_waveform", "result"):
+        assert hasattr(sherpa_onnx.OfflineStream, name), name
+        assert hasattr(FakeStream, name), name
+
+    assert hasattr(sherpa_onnx.OfflineSpeakerDiarization, "process")
+    assert hasattr(FakeDiarizer, "process")
+
+    assert hasattr(
+        sherpa_onnx.OfflineSpeakerDiarizationResult, "sort_by_start_time"
+    )
+    assert hasattr(FakeDiarizationResult, "sort_by_start_time")

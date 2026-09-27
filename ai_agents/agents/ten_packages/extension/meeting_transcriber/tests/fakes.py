@@ -21,6 +21,11 @@ class FakeSegment:
     speaker: int
 
 
+@dataclass
+class _FakeResult:
+    text: str
+
+
 class FakeDiarizationResult:
     def __init__(self, segments):
         self._segments = segments
@@ -44,14 +49,25 @@ class FakeDiarizer:
 class FakeStream:
     def __init__(self):
         self.samples = []
+        self._text = ""
 
     def accept_waveform(self, sample_rate, samples):
         self.rate = sample_rate
         self.samples.extend(list(samples))
 
+    @property
+    def result(self):
+        return _FakeResult(self._text)
+
 
 class FakeRecogniser:
-    """Hands back one scripted text per decode, in order."""
+    """Hands back one scripted text per decode, in order.
+
+    The real OfflineRecognizer has no get_result: the text is read back from
+    the stream itself, via its result property. So decode_stream is where the
+    next scripted text is assigned -- onto the stream that was decoded, not
+    handed back directly -- matching where transcriber.py reads it from.
+    """
 
     def __init__(self, texts: List[str]) -> None:
         self.texts = list(texts)
@@ -62,12 +78,9 @@ class FakeRecogniser:
 
     def decode_stream(self, stream):
         self.decoded += 1
-
-    def get_result(self, stream):
-        class _R:
-            text = self.texts.pop(0) if self.texts else ""
-
-        return _R()
+        stream._text = (  # pylint: disable=protected-access
+            self.texts.pop(0) if self.texts else ""
+        )
 
 
 class FakeTenEnv:

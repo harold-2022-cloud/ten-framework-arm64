@@ -140,7 +140,7 @@ class MeetingTranscriber:
             stream = self._recogniser.create_stream()
             stream.accept_waveform(SAMPLE_RATE, samples[begin:end])
             self._recogniser.decode_stream(stream)
-            text = self._recogniser.get_result(stream).text.strip()
+            text = stream.result.text.strip()
             if text:
                 out.append(
                     Utterance(

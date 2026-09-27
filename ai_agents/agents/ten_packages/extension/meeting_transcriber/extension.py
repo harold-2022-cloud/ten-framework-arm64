@@ -52,6 +52,16 @@ class MeetingTranscriberExtension(AsyncExtension):
         speakers, err = cmd.get_property_int("speakers")
         if err:
             speakers = self.config.speakers if self.config else -1
+        if speakers == -1:
+            # Not fatal -- auto-detection is a legitimate choice -- but on
+            # the board an unspecified count clustered four speakers into
+            # seven. Worth a line in the log before the transcript arrives
+            # over-split.
+            ten_env.log_warn(
+                "meeting_transcriber: speakers=-1, clustering will guess "
+                "the speaker count; expect over-splitting (one speaker "
+                "coming back as several)"
+            )
 
         payload = {"segment_id": segment_id, "utterances": [], "error": None}
         if self.transcriber is None:
