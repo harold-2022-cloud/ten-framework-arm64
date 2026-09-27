@@ -1,0 +1,46 @@
+{
+  "type": "extension",
+  "name": "main_python",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    },
+    {
+      "type": "system",
+      "name": "ten_ai_base",
+      "version": "0.7"
+    }
+  ],
+  "package": {
+    "include": ["manifest.json", "property.json", "**.py"]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "segment_silence_s": { "type": "float64" },
+        "meeting_silence_s": { "type": "float64" },
+        "min_segment_s": { "type": "float64" },
+        "speakers": { "type": "int64" },
+        "segment_prompt": { "type": "string" },
+        "meeting_prompt": { "type": "string" }
+      }
+    },
+    "cmd_in": [
+      { "name": "start_of_sentence" },
+      { "name": "end_of_sentence" }
+    ],
+    "cmd_out": [
+      { "name": "close_segment" },
+      { "name": "transcribe" }
+    ],
+    "data_in": [
+      { "name": "segment_closed" },
+      { "name": "segment_transcribed" }
+    ],
+    "data_out": [{ "name": "meeting_record" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
