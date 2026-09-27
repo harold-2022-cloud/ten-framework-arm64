@@ -247,25 +247,50 @@ path to exist as given.
 ### Getting the minutes out
 
 Nothing routes the finished record to a UI — there isn't one. It is written
-to `meeting_record.json` in `/home/lychee/meeting_segments`, next to the
-audio it describes, holding `started_at`, `transcript`, `meeting_summary`,
-and a `segments` list.
+to `meeting_record_<YYYYmmdd_HHMMSS>.json` in `/home/lychee/meeting_segments`,
+next to the audio it describes. The stamp is the meeting's own start, so a
+second meeting in the same directory does not overwrite the first one's
+minutes — the same reason the segment files carry a time.
 
-Silence drives when that file gets written:
+The file does not wait for the end of the meeting. It is rewritten each time
+a topic is transcribed, each time that topic's summary comes back, and each
+time a segment is marked failed, so a worker that dies mid-meeting leaves
+everything already processed on disk rather than only the raw audio.
+
+It holds:
+
+| Key | |
+| --- | --- |
+| `header` | 會議時間 as a range with a duration, and 與會 N 人 — the count the diarizer actually produced, not the `speakers` it was told to expect |
+| `started_at`, `ended_at`, `duration_s`, `speaker_count` | the same four numbers, unrendered |
+| `transcript` | every line on both clocks, `[14:12 / 07:02]`, and a note in place of any segment that failed |
+| `meeting_summary` | the assembly turn's answer; `""` if that turn failed — the transcript goes out either way |
+| `segments` | per topic: its id, its summary, its error |
+| `note` | set only when no segment produced any transcript at all, saying so and where the audio still is |
+
+Silence drives when the meeting ends:
 
 | Property | Default | Does |
 | --- | --- | --- |
-| `segment_silence_s` | `30` | closes the current topic |
+| `segment_silence_s` | `30` | closes the current topic, counted from when speech actually stopped |
 | `min_segment_s` | `5` | a segment shorter than this merges into the next one rather than standing alone |
 | `meeting_silence_s` | `600` | ends the meeting and triggers assembly |
 | `speakers` | `3` | told to the diarizer up front, on every segment |
+| `upload_gone_s` | `3` | no frames for this long means the upload is gone, and the silence is counted from the last frame |
 
 `speakers` matters: without a count, clustering over-splits one person into
 several — measured on the board, four speakers came back as seven.
 
+The two silence thresholds are measured from the end of speech, which the VAD
+reports, and only while nobody is talking — a monologue longer than 30 s is
+one topic, not two. `upload_gone_s` covers the case the VAD cannot report:
+a client that drops mid-sentence sends no end-of-speech at all, and the
+`websocket_server` extension only logs the disconnect. The frames stopping is
+what says so. Send them continuously; do not gate on voice.
+
 Assembly is one more turn to the board's LLM, asking for the whole
 meeting's conclusions from the per-topic summaries already gathered. So
-`meeting_record.json` appears some time after the last person stops
+`meeting_summary` lands in the file some time after the last person stops
 talking, not the instant the 600 s timer fires.
 
 ### Measuring before you rely on it
