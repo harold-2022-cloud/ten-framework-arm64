@@ -113,7 +113,7 @@ curl -s -X POST http://127.0.0.1:8081/start \
 | `user_uid` | uint32 | The human's RTC uid. |
 | `bot_uid` | uint32 | The agent's RTC uid. |
 | `token` | string | From `/token/generate`. |
-| `timeout` | int | Seconds of silence before the worker is reaped. Falls back to `WORKER_QUIT_TIMEOUT_SECONDS`. |
+| `timeout` | int | Seconds of silence before the worker is reaped. Falls back to `WORKER_QUIT_TIMEOUT_SECONDS`. **Only a positive value is honoured** — `-1` is not "never expire"; it falls back to the default. |
 | `properties` | object | Per-extension overrides, below. |
 | `worker_http_server_port` | int32 | Usually left out. |
 | `tenapp_dir` | string | **Ignored.** The server always uses the directory it was launched with. |

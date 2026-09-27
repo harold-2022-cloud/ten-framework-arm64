@@ -204,6 +204,32 @@ unconditionally at startup, before it looks at which graph anyone asked for.
 Port 8081 for the Go API server itself is the same story as the voice
 assistant's — see [Ports](#ports) above; nothing about it changes here.
 
+### Keep the worker alive, or the meeting dies at 60 seconds
+
+The Go server reaps a worker whose last `/ping` is older than its timeout, and
+**audio does not count as a ping** — only `POST /ping` refreshes it
+(`http_server.go:230`). `.env` ships `WORKER_QUIT_TIMEOUT_SECONDS=60`, so a
+meeting nobody pings is killed a minute in, mid-sentence, with nothing in the
+log saying why.
+
+This graph needs the worker alive well past the last word: `meeting_silence_s`
+is 600, so assembly happens ten minutes after the room goes quiet. Either ping
+every 30 s for the whole meeting, or ask for a long timeout when you start it:
+
+```bash
+curl -s -X POST http://127.0.0.1:8081/start \
+  -H 'Content-Type: application/json' \
+  -d '{"request_id":"meeting-1","channel_name":"meeting-1",
+       "graph_name":"meeting_minutes","timeout":7200}'
+```
+
+`timeout` is in seconds and is honoured only when positive
+(`http_server.go:306`). **`-1` does not mean "never expire".** The constant
+`WORKER_TIMEOUT_INFINITY = -1` exists and the reaper honours it
+(`worker_common.go:154`), but the request path gates on `> 0`, so `-1` falls
+through to the default and you get 60 seconds. Ask for a number larger than the
+meeting you expect.
+
 ### Audio in, over a WebSocket
 
 There is no playground for this example. Audio arrives at the

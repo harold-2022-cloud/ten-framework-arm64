@@ -109,7 +109,7 @@ curl -s -X POST http://127.0.0.1:8081/start \
 | `user_uid` | uint32 | 使用者的 RTC uid。 |
 | `bot_uid` | uint32 | agent 的 RTC uid。 |
 | `token` | string | 第 2 步拿到的。 |
-| `timeout` | int | 多少秒沒有 ping 就回收這個 worker。沒給就用 `WORKER_QUIT_TIMEOUT_SECONDS`。 |
+| `timeout` | int | 多少秒沒有 ping 就回收這個 worker。沒給就用 `WORKER_QUIT_TIMEOUT_SECONDS`。**只有正數會生效**——`-1` 不是「永不過期」，會掉回預設值。 |
 | `properties` | object | 各節點的屬性覆寫，見下。 |
 | `worker_http_server_port` | int32 | 通常不給。 |
 | `tenapp_dir` | string | **會被忽略。** server 永遠用啟動時指定的那個目錄。 |

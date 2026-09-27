@@ -185,6 +185,29 @@ ai_agents/agents/scripts/install_board_arm64.sh --example meeting-minutes
 graph 還早。Go API server 本身的 8081 port，跟語音助理是同一回事——見上面的
 [Port](#port)，這裡沒有任何不同。
 
+### 讓 worker 活著，不然會議一分鐘就結束
+
+Go server 會回收「最後一次 `/ping` 超過 timeout」的 worker，而**送音訊不算
+ping**——只有 `POST /ping` 會更新它（`http_server.go:230`）。`.env` 裡
+`WORKER_QUIT_TIMEOUT_SECONDS=60`，所以沒有人 ping 的會議會在一分鐘後、話講到
+一半被殺掉，而且日誌裡不會說是為什麼。
+
+這個 graph 需要 worker 活得比最後一句話久很多：`meeting_silence_s` 是 600，
+也就是安靜十分鐘之後才會彙整。要嘛整場每 30 秒 ping 一次，要嘛啟動的時候就
+要一個夠長的 timeout：
+
+```bash
+curl -s -X POST http://127.0.0.1:8081/start \
+  -H 'Content-Type: application/json' \
+  -d '{"request_id":"meeting-1","channel_name":"meeting-1",
+       "graph_name":"meeting_minutes","timeout":7200}'
+```
+
+`timeout` 的單位是秒，而且只有正數才會生效（`http_server.go:306`）。
+**`-1` 不是「永不過期」。** `WORKER_TIMEOUT_INFINITY = -1` 這個常數存在，回收
+的那一端也認得它（`worker_common.go:154`），但請求這一端的判斷是 `> 0`，所以
+`-1` 會掉回預設值，你拿到的是 60 秒。請直接給一個比你預期的會議還大的數字。
+
 ### 音訊怎麼進來：走 WebSocket
 
 這個範例沒有 playground。音訊是送進 `websocket_server` 這個擴充，不是走 RTC
