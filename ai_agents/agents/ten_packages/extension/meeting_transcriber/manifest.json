@@ -1,0 +1,36 @@
+{
+  "type": "extension",
+  "name": "meeting_transcriber",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "segmentation_model": { "type": "string" },
+        "embedding_model": { "type": "string" },
+        "asr_model_dir": { "type": "string" },
+        "num_threads": { "type": "int64" },
+        "speakers": { "type": "int64" },
+        "cluster_threshold": { "type": "float64" }
+      }
+    },
+    "cmd_in": [{ "name": "transcribe" }],
+    "data_out": [{ "name": "segment_transcribed" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
