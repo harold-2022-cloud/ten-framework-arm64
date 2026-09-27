@@ -1,0 +1,115 @@
+{
+  "ten": {
+    "predefined_graphs": [
+      {
+        "name": "meeting_minutes",
+        "auto_start": false,
+        "graph": {
+          "nodes": [
+            {
+              "type": "extension",
+              "name": "websocket_server",
+              "addon": "websocket_server"
+            },
+            { "type": "extension", "name": "vad", "addon": "ten_vad_python" },
+            {
+              "type": "extension",
+              "name": "recorder",
+              "addon": "meeting_recorder",
+              "property": {
+                "output_dir": "/home/lychee/meeting_segments",
+                "min_free_mb": 250
+              }
+            },
+            {
+              "type": "extension",
+              "name": "transcriber",
+              "addon": "meeting_transcriber",
+              "property": {
+                "segmentation_model": "${env:DIARIZATION_SEG_MODEL|/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx}",
+                "embedding_model": "${env:DIARIZATION_EMB_MODEL|/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx}",
+                "asr_model_dir": "${env:SENSEVOICE_MODEL_DIR|/home/lychee/sensevoice}",
+                "num_threads": 4,
+                "speakers": 3
+              }
+            },
+            {
+              "type": "extension",
+              "name": "llm",
+              "addon": "ambarella_llm2_python",
+              "property": {
+                "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
+                "model_type": 9,
+                "response_format": "sse",
+                "starts_in_reasoning": false
+              }
+            },
+            {
+              "type": "extension",
+              "name": "main_control",
+              "addon": "main_python",
+              "property": {
+                "segment_silence_s": 30.0,
+                "meeting_silence_s": 600.0,
+                "min_segment_s": 5.0,
+                "speakers": 3
+              }
+            }
+          ],
+          "connections": [
+            {
+              "extension": "websocket_server",
+              "audio_frame": [
+                { "name": "pcm_frame", "dest": [{ "extension": "vad" }] }
+              ]
+            },
+            {
+              "extension": "vad",
+              "audio_frame": [
+                { "name": "pcm_frame", "dest": [{ "extension": "recorder" }] }
+              ],
+              "cmd": [
+                {
+                  "name": "start_of_sentence",
+                  "dest": [{ "extension": "main_control" }]
+                },
+                {
+                  "name": "end_of_sentence",
+                  "dest": [{ "extension": "main_control" }]
+                }
+              ]
+            },
+            {
+              "extension": "recorder",
+              "data": [
+                {
+                  "name": "segment_closed",
+                  "dest": [{ "extension": "main_control" }]
+                }
+              ]
+            },
+            {
+              "extension": "transcriber",
+              "data": [
+                {
+                  "name": "segment_transcribed",
+                  "dest": [{ "extension": "main_control" }]
+                }
+              ]
+            },
+            {
+              "extension": "main_control",
+              "cmd": [
+                {
+                  "name": "close_segment",
+                  "dest": [{ "extension": "recorder" }]
+                },
+                { "name": "transcribe", "dest": [{ "extension": "transcriber" }] }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

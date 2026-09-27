@@ -188,3 +188,52 @@ async def test_a_meeting_that_resumes_can_be_assembled_again():
     await stop(ext)
 
     assert ext._assemble.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_each_segment_is_summarised_as_it_lands():
+    """Work spread across the meeting, not piled up at the end."""
+    ext = make_extension()
+    ext.agent = AsyncMock()
+    ext.record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 1.0, "end_s": 4.0, "speaker": 0, "text": "下週出。"}
+        ],
+    )
+    await ext._summarise_segment("seg-1")
+
+    ext.agent.queue_llm_input.assert_awaited_once()
+    sent = ext.agent.queue_llm_input.await_args.args[0]
+    assert "下週出。" in sent
+    assert ext.config.segment_prompt.strip()[:6] in sent
+
+
+@pytest.mark.asyncio
+async def test_the_summary_comes_back_into_the_record():
+    """Queued and forgotten is the same as never asked."""
+    ext = make_extension()
+    ext.agent = AsyncMock()
+    ext.record.add_segment(
+        "seg-1",
+        started_at=STARTED_AT,
+        utterances=[
+            {"start_s": 1.0, "end_s": 4.0, "speaker": 0, "text": "下週出。"}
+        ],
+    )
+    await ext._summarise_segment("seg-1")
+    ext.on_llm_text("重點：版本下週出。")
+
+    entry = next(s for s in ext.record.ordered() if s.segment_id == "seg-1")
+    assert entry.summary == "重點：版本下週出。"
+
+
+@pytest.mark.asyncio
+async def test_an_answer_with_no_segment_waiting_is_dropped_not_misfiled():
+    """The board can finish a turn after its segment was already assembled."""
+    ext = make_extension()
+    ext.agent = AsyncMock()
+    ext.on_llm_text("重點：沒有人在等這個。")
+
+    assert all(s.summary == "" for s in ext.record.ordered())

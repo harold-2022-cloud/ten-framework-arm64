@@ -1,0 +1,35 @@
+{
+  "type": "app",
+  "name": "meeting_minutes",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_go",
+      "version": "0.11"
+    },
+    {
+      "type": "system",
+      "name": "ten_ai_base",
+      "version": "0.7"
+    },
+    {
+      "path": "../../../ten_packages/extension/meeting_recorder"
+    },
+    {
+      "path": "../../../ten_packages/extension/meeting_transcriber"
+    },
+    {
+      "path": "../../../ten_packages/extension/websocket_server"
+    },
+    {
+      "path": "../../../ten_packages/extension/ten_vad_python"
+    },
+    {
+      "path": "../../../ten_packages/extension/ambarella_llm2_python"
+    }
+  ],
+  "scripts": {
+    "start": "python scripts/start.py"
+  }
+}

@@ -25,6 +25,9 @@ from ten_runtime import (
     StatusCode,
 )
 
+from .agent.agent import Agent
+from .agent.decorators import agent_event_handler
+from .agent.events import LLMResponseEvent
 from .config import MeetingControlConfig
 from .record import MeetingRecord
 
@@ -40,6 +43,7 @@ class MeetingControlExtension(AsyncExtension):
         super().__init__(name)
         self.ten_env: Optional[AsyncTenEnv] = None
         self.config: Optional[MeetingControlConfig] = None
+        self.agent: Optional[Agent] = None
         self.record = MeetingRecord()
         self.meeting_started_at = 0.0
         self._last_speech_at = 0.0
@@ -49,17 +53,29 @@ class MeetingControlExtension(AsyncExtension):
         self._tick_s = 1.0
         self._ticker: Optional[asyncio.Task] = None
         self._pending: dict = {}
+        # The board serves one LLM user at a time, so at most one segment's
+        # summary is ever in flight. This is which one the next answer
+        # belongs to.
+        self._awaiting_summary: Optional[str] = None
 
     async def on_init(self, ten_env: AsyncTenEnv) -> None:
         self.ten_env = ten_env
         config_json, _ = await ten_env.get_property_to_json("")
         self.config = MeetingControlConfig.model_validate_json(config_json)
+        self.agent = Agent(ten_env)
+        for attr_name in dir(self):
+            fn = getattr(self, attr_name)
+            event_type = getattr(fn, "_agent_event_type", None)
+            if event_type:
+                self.agent.on(event_type, fn)
         self._ticker = asyncio.create_task(self._tick())
 
     async def on_deinit(self, _ten_env: AsyncTenEnv) -> None:
         self._stopped = True
         if self._ticker and not self._ticker.done():
             self._ticker.cancel()
+        if self.agent:
+            await self.agent.stop()
 
     # --- the clock --------------------------------------------------------
 
@@ -113,6 +129,44 @@ class MeetingControlExtension(AsyncExtension):
 
     async def _close_segment(self) -> None:
         await self.ten_env.send_cmd(Cmd.create(CMD_CLOSE_SEGMENT))
+
+    async def _summarise_segment(self, segment_id: str) -> None:
+        """One LLM turn per topic, as the topic lands.
+
+        The board serves one user at a time and holds a session for 180 s after
+        a reply, so these queue rather than overlap -- which the silences give
+        room for.
+        """
+        entry = next(
+            (s for s in self.record.ordered() if s.segment_id == segment_id),
+            None,
+        )
+        if entry is None or not entry.utterances:
+            return
+        lines = "\n".join(
+            f"[{int(u['start_s'] // 60):02d}:{int(u['start_s'] % 60):02d}] "
+            f"說話人{u['speaker']}: {u['text']}"
+            for u in entry.utterances
+        )
+        self._awaiting_summary = segment_id
+        await self.agent.queue_llm_input(self.config.segment_prompt + lines)
+
+    def on_llm_text(self, text: str) -> None:
+        """The board answers one turn at a time, so the answer belongs to the
+        segment we last asked about. An answer with nothing waiting is dropped:
+        the segment it belonged to has already been assembled, and filing it
+        against whatever is current would put one topic's summary under
+        another's heading.
+        """
+        if self._awaiting_summary is None:
+            return
+        self.record.add_summary(self._awaiting_summary, text.strip())
+        self._awaiting_summary = None
+
+    @agent_event_handler(LLMResponseEvent)
+    async def _on_llm_response(self, event: LLMResponseEvent) -> None:
+        if event.is_final and event.type == "message":
+            self.on_llm_text(event.text)
 
     async def _assemble(self) -> None:
         if self.record.is_empty:
@@ -184,3 +238,4 @@ class MeetingControlExtension(AsyncExtension):
             self.record.add_segment(
                 segment_id, started_at, payload["utterances"]
             )
+            await self._summarise_segment(segment_id)
