@@ -17,13 +17,20 @@ deadline, and a known timestamp -- and then checks what comes back against
 that ground truth, several times over, because one good reply says nothing
 about whether the next one parses.
 
-Two prompts are tried by default, and the comparison is the point: one simply
-asks for JSON, the other supplies the schema and a worked example. If the bare
-ask already holds, the pipeline needs nothing clever. If only the schema
-version holds, that prompt is a requirement and belongs in the config. If
-neither holds, the record's shape has to change -- actions become free text
-that a person reads, and the design says so rather than shipping a field that
-is empty half the time.
+Three prompts are tried by default and the ladder is the point: one simply
+asks for JSON, one supplies the schema, one supplies the schema and asks for
+the timestamp to be copied rather than computed. Whichever rung holds first is
+the one the pipeline has to climb to. If none holds, the record's shape has to
+change -- actions become free text that a person reads, and the design says so
+rather than shipping a field that is empty half the time.
+
+Two runs per prompt, not ten. Measured on an N1-655 on 2026-09-28: five runs
+of one prompt came back byte-identical, md5 and all, each having spent its own
+110 seconds generating rather than being served from a cache. The board decodes
+greedily, so repeating an input measures the same answer again. The second run
+is there to notice the day that stops being true. What repetition cannot tell
+you, and what a later probe should, is whether a prompt survives a different
+meeting -- other speakers, other phrasing, a meeting with no todos in it.
 
   python3 tools/ambarella/probe_structured_minutes.py
   python3 tools/ambarella/probe_structured_minutes.py --runs 10
@@ -154,7 +161,34 @@ PROMPT_SCHEMA = """\
 逐字稿：
 """
 
-PROMPTS = {"plain": PROMPT_PLAIN, "schema": PROMPT_SCHEMA}
+# Same as PROMPT_SCHEMA but for one field. Measured on an N1-655 on
+# 2026-09-28: asked for raised_at_s as a number, the model wrote
+#
+#     "raised_at_s": 14*60+2+12 = 862
+#
+# -- an arithmetic expression with an equals sign, which is not JSON at all,
+# so the whole reply was unparseable rather than one field being wrong. The
+# sum is also wrong twice over: 14*60+2+12 is 854 rather than the 862 it
+# wrote, and it multiplied the wall clock 14:03 when the second it wanted was
+# the meeting offset 01:12, which is 72.
+#
+# So do not ask a 7B to do arithmetic inside a JSON value. Ask it to copy the
+# clock it can see and convert in Python, which is the same trade due_raw
+# already makes: keep the model's own characters, parse them in code.
+PROMPT_QUOTED = PROMPT_SCHEMA.replace(
+    '      "raised_at_s": 在會議的第幾秒被提出，用整數\n',
+    '      "raised_at": "那句話所在行的第二個時間，原樣抄過來，例如 08:15"\n',
+).replace(
+    "只列真的被指派給某個人去做的事。",
+    "raised_at 直接抄逐字稿裡的 MM:SS，不要換算成秒、不要寫算式。\n\n"
+    "只列真的被指派給某個人去做的事。",
+)
+
+PROMPTS = {
+    "plain": PROMPT_PLAIN,
+    "schema": PROMPT_SCHEMA,
+    "quoted": PROMPT_QUOTED,
+}
 
 
 def say(title):
@@ -213,16 +247,21 @@ def strip_reasoning(text):
 
 
 def extract_json(text):
-    """The first balanced {...} in the reply, or None.
+    """The first balanced {...} in the reply, and why it failed if it did.
 
-    Deliberately forgiving, and for a reason: the pipeline will be just as
-    forgiving, so a probe that demanded a bare JSON body would report
-    failures the real code recovers from. Markdown fences, a sentence of
-    preamble, a sign-off afterwards -- all survive this.
+    Returns (payload, complaint). Deliberately forgiving about what surrounds
+    the object, and for a reason: the pipeline will be just as forgiving, so a
+    probe that demanded a bare JSON body would report failures the real code
+    recovers from. Markdown fences, a sentence of preamble, a sign-off
+    afterwards -- all survive this.
+
+    The complaint carries the characters around the break. "NO JSON" on its
+    own sends you to the saved file; "NO JSON near: 14*60+2+12 = 862" is the
+    whole diagnosis on one line, and that is a real reply from an N1-655.
     """
     start = text.find("{")
     if start < 0:
-        return None
+        return None, "no opening brace"
     depth = 0
     in_string = False
     escaped = False
@@ -243,11 +282,14 @@ def extract_json(text):
         elif char == "}":
             depth -= 1
             if depth == 0:
+                blob = text[start : index + 1]
                 try:
-                    return json.loads(text[start : index + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None
+                    return json.loads(blob), None
+                except json.JSONDecodeError as broke:
+                    here = max(0, broke.pos - 20)
+                    snippet = blob[here : broke.pos + 24].replace("\n", " ")
+                    return None, f"near: {snippet.strip()}"
+    return None, "no closing brace"
 
 
 def describe_shape(payload):
@@ -414,11 +456,11 @@ def run_variant(name, args, out_dir):
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(raw)
 
-        payload = extract_json(answer)
+        payload, complaint = extract_json(answer)
         if payload is None:
             print(
-                f"  run {run:>2}  {elapsed:6.1f}s  NO JSON        "
-                f"({len(answer)} chars) -> {os.path.basename(path)}"
+                f"  run {run:>2}  {elapsed:6.1f}s  NO JSON, {complaint} "
+                f"-> {os.path.basename(path)}"
             )
             continue
         tally["parsed"] += 1
@@ -511,14 +553,16 @@ def main():
     parser.add_argument(
         "--runs",
         type=int,
-        default=5,
-        help="runs per prompt; one good reply proves nothing about the next",
+        default=2,
+        help="runs per prompt; two, because this board is deterministic --"
+        " see the module docstring before raising it",
     )
     parser.add_argument(
         "--prompts",
-        choices=("both", "plain", "schema"),
-        default="both",
-        help="'both' is the useful one: it says whether the schema is needed",
+        choices=("all", "plain", "schema", "quoted"),
+        default="all",
+        help="'all' is the useful one: it says how much shape the model"
+        " has to be told",
     )
     parser.add_argument(
         "--timeout",
@@ -567,7 +611,8 @@ def main():
     else:
         args.session_id = str(random.randint(1, 2**31 - 1))
 
-    names = ["plain", "schema"] if args.prompts == "both" else [args.prompts]
+    order = ["plain", "schema", "quoted"]
+    names = order if args.prompts == "all" else [args.prompts]
     os.makedirs(args.out, exist_ok=True)
 
     say("0. Context")
@@ -642,16 +687,34 @@ def main():
             f"{rates[name]:.0%} complete   {state} (bar {args.bar:.0%})",
         )
 
+    # The rungs are ordered by how much the model has to be told. The first
+    # one that holds is the one the pipeline has to climb to; anything above
+    # it is cost with nothing bought.
+    advice = {
+        "plain": (
+            "The bare ask is enough. actions[] can be built as designed,",
+            "and the prompt needs nothing beyond what it already says.",
+        ),
+        "schema": (
+            "The schema prompt is required, the bare ask is not enough.",
+            "Put PROMPT_SCHEMA's wording into the meeting prompt config",
+            "and treat it as load-bearing, not cosmetic.",
+        ),
+        "quoted": (
+            "The schema is required AND the timestamp has to be copied",
+            "rather than computed. Use PROMPT_QUOTED's wording, keep the",
+            "model's MM:SS as given, and convert to seconds in Python --",
+            "the same trade due_raw already makes.",
+        ),
+    }
     print()
-    if rates.get("plain", 0.0) >= args.bar:
-        print("  The bare ask is enough. actions[] can be built as designed,")
-        print("  and the prompt needs nothing beyond what it already says.")
-    elif rates.get("schema", 0.0) >= args.bar:
-        print("  The schema prompt is required, the bare ask is not enough.")
-        print("  Put PROMPT_SCHEMA's wording into the meeting prompt config")
-        print("  and treat it as load-bearing, not cosmetic.")
+    for rung in ("plain", "schema", "quoted"):
+        if rates.get(rung, 0.0) >= args.bar:
+            for line in advice[rung]:
+                print(f"  {line}")
+            break
     else:
-        print("  Neither prompt held. The record's shape has to change:")
+        print("  No prompt held. The record's shape has to change:")
         print("  keep the model's prose in `summary`, leave `actions` empty,")
         print("  and let a person pull the todos out of the transcript --")
         print("  which is exactly the fallback the design already carries.")
