@@ -237,10 +237,48 @@ PROMPT_QUOTED = """\
 逐字稿：
 """
 
+# The fourth rung, and a different shape: two turns instead of one.
+#
+# Four rounds on an N1-655 said the same thing from both ends. The bare
+# prompt found all three planted actions with the right owners and the right
+# deadlines, and then filed them under a key it invented with the timestamps
+# in a separate array. Every prompt that pinned the format down took content
+# away with it, and monotonically: the quoted prompt at 1719 bytes found two
+# of three, and at 2218 bytes -- three more corrections, all of them fair --
+# it found one, got no owner right, and invented an action that was never
+# assigned. The model extracts, and the model formats. What it does not do is
+# both at once, and leaning harder on the format is what costs the content.
+#
+# So stop asking. One turn reads the meeting, which is the thing it is good
+# at, and a second turn reshapes that answer, which is a transcription job
+# with no meeting in it. Two turns cost another 30 seconds on a meeting that
+# already takes half an hour.
+#
+# Short on purpose. The lesson of round four is that this model does worse
+# the more it is told, so the conversion says what the shape is and stops.
+PROMPT_CONVERT = """\
+下面是一份會議整理。把它改寫成 JSON，只改格式，不要增加或刪除任何待辦。
+
+只輸出 JSON，不要其他文字：
+
+{
+  "summary": "整理裡的結論",
+  "actions": [
+    {"what": "要做的事", "owner": "說話人N", "due_raw": "期限，沒有就 null",
+     "raised_at": "MM:SS"}
+  ]
+}
+
+raised_at 用資料裡那件事對應的「分:秒」，不是「時:分」。找不到就填 null。
+
+會議整理：
+"""
+
 PROMPTS = {
     "plain": PROMPT_PLAIN,
     "schema": PROMPT_SCHEMA,
     "quoted": PROMPT_QUOTED,
+    "twostep": PROMPT_PLAIN,  # turn one; turn two is PROMPT_CONVERT
 }
 
 
@@ -283,6 +321,44 @@ def ask(host, port, prompt, model_type, timeout, session_id):
     with urllib.request.urlopen(request, timeout=timeout) as response:
         raw = response.read().decode("utf-8", errors="replace")
     return raw, time.time() - started
+
+
+def ask_twice(args, prompt, out_dir, name, run):
+    """Read the meeting, then reshape the reading. Two turns, one result.
+
+    Turn one's reply is saved beside turn two's, because when the pair fails
+    it matters which half did. --convert-from skips turn one and feeds a
+    saved reply instead: the board is deterministic, so re-reading the same
+    transcript costs 108 seconds to produce bytes already on disk.
+    """
+    if args.convert_from:
+        with open(args.convert_from, encoding="utf-8") as handle:
+            first = handle.read()
+        spent = 0.0
+    else:
+        first, spent = ask(
+            args.host,
+            args.port,
+            prompt,
+            args.model_type,
+            args.timeout,
+            args.session_id,
+        )
+        path = os.path.join(out_dir, f"{name}-run{run:02d}-turn1.txt")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(first)
+
+    second_prompt = PROMPT_CONVERT + strip_reasoning(first)
+    time.sleep(args.settle)
+    raw, more = ask(
+        args.host,
+        args.port,
+        second_prompt,
+        args.model_type,
+        args.timeout,
+        args.session_id,
+    )
+    return raw, spent + more
 
 
 def strip_reasoning(text):
@@ -484,9 +560,15 @@ def score(payload, tolerance_s):
 
 
 def run_variant(name, args, out_dir):
+    two_step = name == "twostep"
     prompt = PROMPTS[name] + TRANSCRIPT
     say(f"Prompt '{name}' -- {args.runs} runs")
     kv("prompt bytes", len(prompt.encode("utf-8")))
+    if two_step:
+        kv("turn 1", "PROMPT_PLAIN, which reads the meeting")
+        kv("turn 2", "PROMPT_CONVERT, which only reshapes turn 1's answer")
+        if args.convert_from:
+            kv("turn 1 taken from", args.convert_from)
 
     tally = {
         "http_ok": 0,
@@ -507,14 +589,17 @@ def run_variant(name, args, out_dir):
         if run > 1:
             time.sleep(args.settle)
         try:
-            raw, elapsed = ask(
-                args.host,
-                args.port,
-                prompt,
-                args.model_type,
-                args.timeout,
-                args.session_id,
-            )
+            if two_step:
+                raw, elapsed = ask_twice(args, prompt, out_dir, name, run)
+            else:
+                raw, elapsed = ask(
+                    args.host,
+                    args.port,
+                    prompt,
+                    args.model_type,
+                    args.timeout,
+                    args.session_id,
+                )
         except (urllib.error.URLError, OSError, TimeoutError) as failure:
             print(f"  run {run:>2}  transport failed: {failure}")
             tally["transport_errors"].append(str(failure))
@@ -638,8 +723,14 @@ def main():
         " see the module docstring before raising it",
     )
     parser.add_argument(
+        "--convert-from",
+        default="",
+        help="a saved turn-one reply, so 'twostep' skips re-reading the"
+        " transcript; the board is deterministic, so that costs nothing",
+    )
+    parser.add_argument(
         "--prompts",
-        choices=("all", "plain", "schema", "quoted"),
+        choices=("all", "plain", "schema", "quoted", "twostep"),
         default="all",
         help="'all' is the useful one: it says how much shape the model"
         " has to be told",
@@ -692,7 +783,7 @@ def main():
     else:
         args.session_id = str(random.randint(1, 2**31 - 1))
 
-    order = ["plain", "schema", "quoted"]
+    order = ["plain", "schema", "quoted", "twostep"]
     names = order if args.prompts == "all" else [args.prompts]
     os.makedirs(args.out, exist_ok=True)
 
@@ -787,9 +878,16 @@ def main():
             "model's MM:SS as given, and convert to seconds in Python --",
             "the same trade due_raw already makes.",
         ),
+        "twostep": (
+            "One turn cannot read the meeting and shape the answer at once,",
+            "but two can. main_control asks PROMPT_PLAIN for the reading and",
+            "PROMPT_CONVERT for the shape, and parses the second reply. That",
+            "is one more LLM turn per meeting, about 30 s on a meeting that",
+            "already takes half an hour.",
+        ),
     }
     print()
-    for rung in ("plain", "schema", "quoted"):
+    for rung in ("plain", "schema", "quoted", "twostep"):
         if rates.get(rung, 0.0) >= args.bar:
             for line in advice[rung]:
                 print(f"  {line}")
