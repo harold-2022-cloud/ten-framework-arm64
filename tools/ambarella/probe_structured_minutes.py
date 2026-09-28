@@ -129,6 +129,14 @@ GROUND_TRUTH = [
 # over-producing, which is its own kind of unusable.
 DISTRACTORS = ("記憶體", "CI", "自建")
 
+# Every wall clock the transcript shows. A raised_at equal to one of these is
+# the wrong clock copied, not a near miss, and saying so beats tolerating it:
+# measured on an N1-655 on 2026-09-28 the model answered 14:16 where 14:48
+# was wanted, and 14:16 read as 856 seconds fell inside a 60-second tolerance
+# of the real 888 by luck. A wrong answer that scores is worse than one that
+# does not.
+WALL_CLOCKS = frozenset(re.findall(r"\[(\d{2}:\d{2}) /", TRANSCRIPT))
+
 PROMPT_PLAIN = """\
 以下是一場會議的逐字稿，每行開頭的 [時鐘 / 會議第幾分幾秒] 是那句話的時間。
 
@@ -161,28 +169,73 @@ PROMPT_SCHEMA = """\
 逐字稿：
 """
 
-# Same as PROMPT_SCHEMA but for one field. Measured on an N1-655 on
-# 2026-09-28: asked for raised_at_s as a number, the model wrote
+# The third rung. Measured on an N1-655 on 2026-09-28, PROMPT_SCHEMA asked
+# for raised_at_s as a number and the model wrote
 #
 #     "raised_at_s": 14*60+2+12 = 862
 #
 # -- an arithmetic expression with an equals sign, which is not JSON at all,
 # so the whole reply was unparseable rather than one field being wrong. The
-# sum is also wrong twice over: 14*60+2+12 is 854 rather than the 862 it
-# wrote, and it multiplied the wall clock 14:03 when the second it wanted was
-# the meeting offset 01:12, which is 72.
+# sum is wrong twice over besides: 14*60+2+12 is 854, not 862, and it
+# multiplied the wall clock 14:03 when the second it wanted was the meeting
+# offset 01:12, which is 72. Do not ask a 7B to do arithmetic inside a JSON
+# value: have it copy the clock it can see, and convert in Python. That is
+# the trade due_raw already makes -- keep the model's characters, parse them
+# in code.
 #
-# So do not ask a 7B to do arithmetic inside a JSON value. Ask it to copy the
-# clock it can see and convert in Python, which is the same trade due_raw
-# already makes: keep the model's own characters, parse them in code.
-PROMPT_QUOTED = PROMPT_SCHEMA.replace(
-    '      "raised_at_s": 在會議的第幾秒被提出，用整數\n',
-    '      "raised_at": "那句話所在行的第二個時間，原樣抄過來，例如 08:15"\n',
-).replace(
-    "只列真的被指派給某個人去做的事。",
-    "raised_at 直接抄逐字稿裡的 MM:SS，不要換算成秒、不要寫算式。\n\n"
-    "只列真的被指派給某個人去做的事。",
-)
+# Three more things this wording fixes, all of them faults in the prompt
+# rather than in the model, each measured in the same run:
+#
+#   The schema's field descriptions sat in the value positions, and the model
+#   copied "整場會議的結論，兩三句" out verbatim as the summary. An example
+#   has to look like an answer, so this one is a filled-in example and the
+#   instruction to replace it is said out loud.
+#
+#   "那句話所在行的第二個時間" was not clear enough and it copied the first,
+#   giving 14:10 where 08:15 was wanted. The bracket is now spelled out.
+#
+#   "只列真的被指派給某個人去做的事" excluded 說話人2 volunteering 我下週二
+#   前把結果給你, which is a correct reading of the words and the wrong
+#   behaviour for a meeting: a todo someone takes on is still a todo.
+#
+# The one thing left that is genuinely the model's is owner -- it named the
+# speaker who did the assigning rather than the person assigned to. Said
+# plainly here; whether saying it is enough is what the next run measures.
+PROMPT_QUOTED = """\
+以下是一場會議的逐字稿。每行開頭是 [牆鐘 / 會議第幾分幾秒]，
+例如 [14:10 / 08:15] 表示這句話發生在會議開始後的 08:15。
+
+只輸出一個 JSON 物件，不要有任何其他文字、不要用 markdown 圍欄。
+下面是一個填好的範例，照它的格式，但內容要換成這場會議真正的內容：
+
+{
+  "summary": "討論了改版時程，並確認了兩份文件的負責人。",
+  "actions": [
+    {
+      "what": "把設定檔的預設值寫進 README",
+      "owner": "說話人3",
+      "due_raw": "這週五前",
+      "raised_at": "12:40"
+    }
+  ]
+}
+
+三件事要特別注意：
+
+一、raised_at 抄該行方括號裡「斜線後面」的那個 MM:SS，原樣抄過來。
+    例如 [14:10 / 08:15] 就填 "08:15"。不要抄斜線前面的，
+    不要換算成秒，不要寫算式。
+
+二、owner 是「要去做這件事的人」，不是講這句話的人。
+    有人說「說話人3，這件事你來處理」，負責人是說話人3。
+
+三、actions 要包含被交辦的事，也要包含自己承諾要做的事。
+    有人說「我下週二前給你」，那就是他的待辦。
+    但只是討論到、或明講之後再處理的，不要放進 actions。
+    沒有講明期限的，due_raw 填 null。
+
+逐字稿：
+"""
 
 PROMPTS = {
     "plain": PROMPT_PLAIN,
@@ -346,6 +399,7 @@ def score(payload, tolerance_s):
         "due_ok": 0,
         "time_ok": 0,
         "invented": [],
+        "wrong_clock": 0,
         "n_actions": 0,
     }
     if not isinstance(payload, dict):
@@ -359,7 +413,7 @@ def score(payload, tolerance_s):
     blobs = []
     for action in actions:
         if not isinstance(action, dict):
-            blobs.append(("", "", "", None))
+            blobs.append(("", "", "", None, ""))
             continue
         what = str(action.get("what") or action.get("task") or "")
         owner = str(action.get("owner") or action.get("who") or "")
@@ -367,24 +421,26 @@ def score(payload, tolerance_s):
             str(action.get(field) or "")
             for field in ("due_raw", "due", "deadline", "when")
         )
-        when = as_seconds(
+        given = (
             action.get("raised_at_s")
             if action.get("raised_at_s") is not None
             else action.get("raised_at")
         )
-        blobs.append((what, owner, due, when))
+        blobs.append(
+            (what, owner, due, as_seconds(given), str(given or "").strip())
+        )
 
     for truth in GROUND_TRUTH:
         hit = None
-        for what, owner, due, when in blobs:
+        for what, owner, due, when, raw_when in blobs:
             if all(word in what for word in truth["keywords"]):
-                hit = (what, owner, due, when)
+                hit = (what, owner, due, when, raw_when)
                 break
         if hit is None:
             result["missed"].append(truth["key"])
             continue
         result["found"].append(truth["key"])
-        _, owner, due, when = hit
+        _, owner, due, when, raw_when = hit
         if truth["owner"] in owner:
             result["owner_ok"] += 1
         # An item assigned without a deadline is right to have none, so a
@@ -392,16 +448,31 @@ def score(payload, tolerance_s):
         # deadline has to carry the words that were actually said.
         blank = not due.strip()
         nulled = "null" in due.lower() or "none" in due.lower()
+        # Saying there is no deadline, in the transcript's own words, is
+        # identifying that there is no deadline. Measured on an N1-655 on
+        # 2026-09-28 the model answered 沒有特別期限，但盡快 -- a quote of
+        # the line that assigned the task -- and scoring that a miss was the
+        # probe being wrong, not the model.
+        if any(
+            phrase in due
+            for phrase in ("沒有特別期限", "沒有期限", "無期限", "未指定")
+        ):
+            nulled = True
         if truth.get("due_may_be_blank") and (blank or nulled):
             result["due_ok"] += 1
         elif not truth["due_terms"] and (blank or nulled):
             result["due_ok"] += 1
         elif any(term in due for term in truth["due_terms"]):
             result["due_ok"] += 1
-        if when is not None and abs(when - truth["raised_at_s"]) <= tolerance_s:
+        if raw_when in WALL_CLOCKS:
+            result["wrong_clock"] += 1
+        elif (
+            when is not None
+            and abs(when - truth["raised_at_s"]) <= tolerance_s
+        ):
             result["time_ok"] += 1
 
-    for what, _, _, _ in blobs:
+    for what, _, _, _, _ in blobs:
         for noise in DISTRACTORS:
             if noise in what:
                 result["invented"].append(what[:40])
@@ -426,6 +497,7 @@ def run_variant(name, args, out_dir):
         "due_ok": 0,
         "time_ok": 0,
         "invented": 0,
+        "wrong_clock": 0,
         "seconds": [],
         "transport_errors": [],
         "invented_keys": [],
@@ -480,6 +552,7 @@ def run_variant(name, args, out_dir):
         tally["owner_ok"] += marks["owner_ok"]
         tally["due_ok"] += marks["due_ok"]
         tally["time_ok"] += marks["time_ok"]
+        tally["wrong_clock"] += marks["wrong_clock"]
         if marks["invented"]:
             tally["invented"] += 1
         complete = not marks["missed"]
@@ -489,6 +562,8 @@ def run_variant(name, args, out_dir):
         flags = []
         if marks["missed"]:
             flags.append("missed " + ",".join(marks["missed"]))
+        if marks["wrong_clock"]:
+            flags.append(f"wall clock {marks['wrong_clock']}")
         if marks["invented"]:
             flags.append(f"invented {len(marks['invented'])}")
         print(
@@ -534,6 +609,11 @@ def report(name, tally, runs):
         kv("owner correct", f"{tally['owner_ok']}/{graded}")
         kv("deadline correct", f"{tally['due_ok']}/{graded}")
         kv("raised-at within tolerance", f"{tally['time_ok']}/{graded}")
+        if tally["wrong_clock"]:
+            kv(
+                "copied the wall clock",
+                f"{tally['wrong_clock']} -- wanted the MM:SS after the slash",
+            )
     kv("runs that invented an action", tally["invented"])
     return tally["complete"] / runs if runs else 0.0
 
@@ -579,8 +659,9 @@ def main():
     parser.add_argument(
         "--tolerance",
         type=int,
-        default=60,
-        help="seconds of slack on raised_at_s before it counts as wrong",
+        default=30,
+        help="seconds of slack on the raise time; a copied MM:SS is exact,"
+        " so this only ever covers a model that points at a nearby line",
     )
     parser.add_argument(
         "--bar",
