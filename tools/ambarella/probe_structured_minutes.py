@@ -79,30 +79,41 @@ TRANSCRIPT = """\
 [14:19 / 17:10] 說話人3: 那今天就到這裡。
 """
 
-# What a correct answer contains. Each planted action carries a keyword that
-# has to appear somewhere in `what`, the speaker who owns it, the deadline as
-# it was said, and the second of the meeting it was raised at -- read off the
-# second clock in the transcript above.
+# What a correct answer contains: for each planted action, the one word that
+# makes it actionable, the speaker who owns it, the deadline as it was said,
+# and the second of the meeting it was raised at -- read off the second clock
+# in the transcript above.
+#
+# One word each, and it is deliberately the distinguishing one rather than
+# the topic. A todo that reads "API 文件" names a subject; nobody can act on
+# it. "補上錯誤碼" is the task. Measured on an N1-655 on 2026-09-28 the bare
+# prompt produced exactly that -- "API 文件", with the actual instruction
+# dropped -- which is a real defect in the output, not a strict test.
 GROUND_TRUTH = [
     {
         "key": "測試結果",
-        "keywords": ("測試",),
+        "keywords": ("測試",),  # 給出測試結果
         "owner": "2",
         "due_terms": ("下週二", "下周二"),
         "raised_at_s": 72,  # 01:12
     },
     {
         "key": "API 文件錯誤碼",
-        "keywords": ("文件", "錯誤碼"),
+        "keywords": ("錯誤碼",),  # not 文件: the task is the error codes
         "owner": "3",
         "due_terms": ("10 月 5", "10月5", "10-05", "10/5"),
         "raised_at_s": 495,  # 08:15
     },
     {
         "key": "客戶驗收標準",
-        "keywords": ("驗收", "客戶"),
+        "keywords": ("驗收",),  # 確認驗收標準
         "owner": "2",
-        "due_terms": (),  # deliberately open-ended: due may be null
+        # Assigned with no deadline ("沒有特別期限，但盡快"), but the person
+        # taking it then says 我這週找他們. Both a null and 這週 are correct
+        # readings of the transcript, so both score -- measured on an N1-655
+        # on 2026-09-28, where the model gave 這週 and was right to.
+        "due_terms": ("這週", "本週", "这周"),
+        "due_may_be_blank": True,
         "raised_at_s": 888,  # 14:48
     },
 ]
@@ -239,6 +250,29 @@ def extract_json(text):
     return None
 
 
+def describe_shape(payload):
+    """What the model called things, when it did not call them 'actions'.
+
+    Whether a tolerant parser could ever work turns on one question: does
+    the model invent the same key every time, or a different one each run?
+    Measured on an N1-655 on 2026-09-28 the bare prompt produced
+    "unresolved Matters" -- with a space and a capital -- which is exactly
+    the shape of name that will not repeat. Printing the keys per run
+    answers that from the summary instead of from eleven saved files.
+
+    Returns (top-level keys, the key holding a list of objects).
+    """
+    if not isinstance(payload, dict):
+        return type(payload).__name__, None
+    keys = ", ".join(str(k) for k in list(payload)[:6])
+    listy = None
+    for key, value in payload.items():
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            listy = str(key)
+            break
+    return keys, listy
+
+
 def as_seconds(value):
     """An int, a float, "888", or "14:48" -- all mean the same second."""
     if isinstance(value, bool):
@@ -311,13 +345,15 @@ def score(payload, tolerance_s):
         _, owner, due, when = hit
         if truth["owner"] in owner:
             result["owner_ok"] += 1
-        # An open-ended item is right to have no deadline; anything else has
-        # to carry the words that were actually said.
-        if not truth["due_terms"]:
-            blank = not due.strip()
-            nulled = "null" in due.lower() or "none" in due.lower()
-            if blank or nulled:
-                result["due_ok"] += 1
+        # An item assigned without a deadline is right to have none, so a
+        # blank scores wherever the transcript left it open. Otherwise the
+        # deadline has to carry the words that were actually said.
+        blank = not due.strip()
+        nulled = "null" in due.lower() or "none" in due.lower()
+        if truth.get("due_may_be_blank") and (blank or nulled):
+            result["due_ok"] += 1
+        elif not truth["due_terms"] and (blank or nulled):
+            result["due_ok"] += 1
         elif any(term in due for term in truth["due_terms"]):
             result["due_ok"] += 1
         if when is not None and abs(when - truth["raised_at_s"]) <= tolerance_s:
@@ -350,6 +386,7 @@ def run_variant(name, args, out_dir):
         "invented": 0,
         "seconds": [],
         "transport_errors": [],
+        "invented_keys": [],
     }
 
     for run in range(1, args.runs + 1):
@@ -388,9 +425,13 @@ def run_variant(name, args, out_dir):
 
         marks = score(payload, args.tolerance)
         if not marks["schema"]:
+            keys, listy = describe_shape(payload)
+            if listy:
+                tally["invented_keys"].append(listy)
             print(
-                f"  run {run:>2}  {elapsed:6.1f}s  JSON, no 'actions' list "
-                f"-> {os.path.basename(path)}"
+                f"  run {run:>2}  {elapsed:6.1f}s  no 'actions' list; "
+                f"keys: {keys}"
+                + (f"; objects under {listy!r}" if listy else "")
             )
             continue
         tally["schema"] += 1
@@ -430,6 +471,17 @@ def report(name, tally, runs):
     kv("median seconds", f"{sorted(seconds)[len(seconds) // 2]:.1f}")
     kv("a JSON object came back", f"{tally['parsed']}/{runs}")
     kv("it had an actions list", f"{tally['schema']}/{runs}")
+    if tally["invented_keys"]:
+        distinct = sorted(set(tally["invented_keys"]))
+        kv("instead it used", ", ".join(repr(k) for k in distinct))
+        # One name reused every run could be parsed tolerantly; a different
+        # name each run can only be fixed by telling the model the schema.
+        kv(
+            "same name every time",
+            "yes -- a tolerant parser could work"
+            if len(distinct) == 1
+            else "no -- only the schema prompt can fix this",
+        )
     kv("all 3 planted actions found", f"{tally['complete']}/{runs}")
     # Denominator is the actions the runs could have got right: three per
     # run that produced a list at all. A run that never got that far is
