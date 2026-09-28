@@ -36,9 +36,12 @@ as headers, and the reply's chain-of-thought dropped at the closing think tag.
 A probe that invented its own protocol would measure something the pipeline
 will never do.
 
-Each run gets a fresh Session-Id as well as Reset-En, so no run can see the
-one before it -- otherwise "stable across ten runs" would only mean the board
-kept answering the same conversation.
+Every run reuses one Session-Id and clears the history with Reset-En, which is
+what the extension itself does. A fresh id per run looks safer and is not: the
+board runs --max_user 1 and holds a session for 180 seconds after it replies,
+so a second id inside that window is a second user and is refused. Measured and
+written down in docs/development/board_llm_measurements.zh-TW.md -- one request
+per 180 seconds is all a rotating client ever gets.
 
 Stdlib only: it has to run on the board itself, where aiohttp may not be.
 Reads only, apart from the replies it saves for you to read.
@@ -154,13 +157,16 @@ def kv(key, value):
 # --------------------------------------------------------------- the wire
 
 
-def ask(host, port, prompt, model_type, timeout):
+def ask(host, port, prompt, model_type, timeout, session_id):
     """One turn, spoken the way ambarella_llm2_python speaks it.
 
     Non-streaming: the pipeline's summary turns wait for a whole answer
     anyway, and a single body is far easier to save and re-read than a
     reassembled stream. Stream-Off is exactly the case _strip_reasoning
     exists for, so the reply arrives with its chain-of-thought attached.
+
+    One session for every run, with Reset-En clearing the history each time.
+    See the module docstring: rotating the id costs 180 seconds a request.
     """
     url = f"http://{host}:{port}/"
     request = urllib.request.Request(
@@ -168,8 +174,7 @@ def ask(host, port, prompt, model_type, timeout):
         data=prompt.encode("utf-8"),
         method="POST",
         headers={
-            # Parsed numerically by the board, so decimal and non-zero.
-            "Session-Id": str(random.randint(1, 2**31 - 1)),
+            "Session-Id": session_id,
             "Model-Type": str(model_type),
             "Stream-Off": "1",
             "Reset-En": "1",
@@ -352,7 +357,12 @@ def run_variant(name, args, out_dir):
             time.sleep(args.settle)
         try:
             raw, elapsed = ask(
-                args.host, args.port, prompt, args.model_type, args.timeout
+                args.host,
+                args.port,
+                prompt,
+                args.model_type,
+                args.timeout,
+                args.session_id,
             )
         except (urllib.error.URLError, OSError, TimeoutError) as failure:
             print(f"  run {run:>2}  transport failed: {failure}")
@@ -482,8 +492,28 @@ def main():
         default=0.8,
         help="fraction of runs that must find all 3 actions to pass",
     )
+    parser.add_argument(
+        "--min-answered",
+        type=float,
+        default=0.6,
+        help="fraction of requests that must reach the board before any"
+        " verdict on the model is printed at all",
+    )
+    parser.add_argument(
+        "--session-id",
+        default="",
+        help="reused by every run; random non-zero integer when empty",
+    )
     parser.add_argument("--out", default="/tmp/structured_minutes_probe")
     args = parser.parse_args()
+
+    # The board parses Session-Id numerically, so it has to be decimal digits
+    # and must not come out as zero -- the same rule the extension enforces.
+    if args.session_id:
+        if not args.session_id.isdigit() or int(args.session_id) == 0:
+            parser.error("--session-id must be a non-zero decimal integer")
+    else:
+        args.session_id = str(random.randint(1, 2**31 - 1))
 
     names = ["plain", "schema"] if args.prompts == "both" else [args.prompts]
     os.makedirs(args.out, exist_ok=True)
@@ -493,6 +523,7 @@ def main():
     kv("model type", args.model_type)
     kv("prompts", ", ".join(names))
     kv("runs per prompt", args.runs)
+    kv("session id (reused)", args.session_id)
     kv("planted actions", len(GROUND_TRUTH))
     kv("replies saved to", args.out)
     # A JSON answer of this shape is 300-500 characters; at the 8-11 chars/s
@@ -511,13 +542,21 @@ def main():
         tallies[name] = run_variant(name, args, args.out)
         rates[name] = report(name, tallies[name], args.runs)
 
-    # A board that never answered has told us nothing about the model, and
-    # the advice below would be actively wrong -- it would send someone to
-    # redesign the record over what is probably a stopped demo server.
-    if not any(t["http_ok"] for t in tallies.values()):
-        say("Nothing was measured")
-        print("  Not one request reached the board, so this says nothing")
-        print("  about whether the model can produce structured minutes.\n")
+    # A board that mostly did not answer has told us nothing about the model,
+    # and the advice below would be actively wrong -- it would send someone to
+    # redesign the record over what is probably a stopped or wedged demo
+    # server. One reply out of ten is a transport result, not a model result.
+    answered = sum(t["http_ok"] for t in tallies.values())
+    attempted = len(names) * args.runs
+    if answered < attempted * args.min_answered:
+        say("Nothing conclusive was measured")
+        print(
+            f"  Only {answered} of {attempted} requests reached the board,"
+            f" under the {args.min_answered:.0%} this needs to judge the"
+            " model."
+        )
+        print("  What came back says nothing about whether the model can")
+        print("  produce structured minutes.\n")
         seen = []
         for tally in tallies.values():
             for error in tally["transport_errors"]:
@@ -525,6 +564,15 @@ def main():
                     seen.append(error)
         for error in seen:
             print(f"    {error}")
+        print(
+            "\n  'Remote end closed connection' after one good reply is the"
+            "\n  board's own limit, not a crash: --max_user 1 holds a session"
+            "\n  for 180 s after it answers. This probe reuses one Session-Id"
+            "\n  to stay inside that, so seeing it here means something else"
+            "\n  is holding the slot -- a worker mid-meeting, another probe,"
+            "\n  or a session the last run never released. Wait 180 s and"
+            "\n  retry before anything more drastic."
+        )
         print("\n  Check that the LLM demo server is up and listening:")
         print(f"    curl -sS -X POST --url http://{args.host}:{args.port}/ \\")
         print("      -H 'Session-Id: 1234' -H 'Model-Type: "
