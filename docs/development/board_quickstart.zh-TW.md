@@ -153,169 +153,47 @@ task run 2>&1 | tee /tmp/task_run.log
 **新增或移除 graph 不能熱更新**——前端會快取 `/graphs`，所以 server 和 playground
 都要重啟。改既有 graph 裡的值則是下一個 session 生效。
 
-## 會議記錄（meeting-minutes）graph
+## 會議記錄 graph：正在改寫，暫時不能跑
 
-另一個範例，在 `ai_agents/agents/examples/meeting-minutes`，跑的是不同的
-graph：`meeting_minutes`。它會錄下一場會議，隨著靜音把每個話題收掉、轉錄，
-然後跟板子的 LLM 要一份摘要。沒有 playground，也不走 RTC。
+原本這裡有一個 `ai_agents/agents/examples/meeting-minutes` 範例，跑
+`meeting_minutes` graph：音訊從 WebSocket 串流進來，靠靜音把話題一段段收掉、
+轉錄、摘要。**那個範例已經刪除**，因為需求變了，而它的每一個分段決定都建立在
+「音訊即時連續到達」上。
 
-```bash
-tools/ambarella/install_meeting_models.sh    # 先抓兩組語音模型
-cd ai_agents/agents/examples/meeting-minutes
-task install                                 # 只要一次；板子上請看下面
-task run 2>&1 | tee /tmp/task_run.log
-```
+新的形狀是：會議在手機上完整錄成一個 Ogg-Opus 檔，散會後一次 HTTP 上傳，板子
+收到檔案才開始處理。分段跑在**音訊時間**上而不是牆鐘上，歸檔在板子本機留下
+原始音訊、會議記錄和整場結論。它會加進
+`examples/voice-assistant/tenapp` 成為那裡的第 14 張 graph，和 13 張對話
+graph 並存——同一套部署，`POST /start` 帶 `graph_name` 切換場景。
 
-`task install` 這一步不能省，而且省掉了不會大聲報錯：`server/bin/api` 是它
-建出來的，而 `POST /start` 是進到這個 graph 的唯一入口。沒有它，`task run`
-起來之後 API port 上不會有任何東西在聽。
-
-在板子上，`task install` 是 x86 的路徑，跑不起來——registry 沒有 arm64 的
-`agora_rtc`。改用安裝腳本，它支援用名字指定這個範例，而且會把後面該做的事
-做完（Go app、Python 套件、共用的 playground、API server）：
+**還沒實作。** 舊範例的代碼停在 `67085cfef`，要看任何一個檔案：
 
 ```bash
-ai_agents/agents/scripts/install_board_arm64.sh --example meeting-minutes
+git show 67085cfef:ai_agents/agents/examples/meeting-minutes/tenapp/property.json
 ```
 
-`meeting_minutes` 的 `auto_start` 是 `false`，所以不會自己啟動——要用
-`POST /start`、帶上 `"graph_name": "meeting_minutes"` 來啟動它，做法見
-[`agent_api.zh-TW.md`](agent_api.zh-TW.md)。就算這個 graph 完全不碰 RTC，
-`AGORA_APP_ID` 還是得填：Go server 在啟動時就會無條件檢查它，比看你要哪個
-graph 還早。Go API server 本身的 8081 port，跟語音助理是同一回事——見上面的
-[Port](#port)，這裡沒有任何不同。
+### 現在還能做的事
 
-### 讓 worker 活著，不然會議一分鐘就結束
-
-Go server 會回收「最後一次 `/ping` 超過 timeout」的 worker，而**送音訊不算
-ping**——只有 `POST /ping` 會更新它（`http_server.go:230`）。`.env` 裡
-`WORKER_QUIT_TIMEOUT_SECONDS=60`，所以沒有人 ping 的會議會在一分鐘後、話講到
-一半被殺掉，而且日誌裡不會說是為什麼。
-
-這個 graph 需要 worker 活得比最後一句話久很多：`meeting_silence_s` 是 600，
-也就是安靜十分鐘之後才會彙整。要嘛整場每 30 秒 ping 一次，要嘛啟動的時候就
-要一個夠長的 timeout：
-
-```bash
-curl -s -X POST http://127.0.0.1:8081/start \
-  -H 'Content-Type: application/json' \
-  -d '{"request_id":"meeting-1","channel_name":"meeting-1",
-       "graph_name":"meeting_minutes","timeout":7200}'
-```
-
-`timeout` 的單位是秒，而且只有正數才會生效（`http_server.go:306`）。
-**`-1` 不是「永不過期」。** `WORKER_TIMEOUT_INFINITY = -1` 這個常數存在，回收
-的那一端也認得它（`worker_common.go:154`），但請求這一端的判斷是 `> 0`，所以
-`-1` 會掉回預設值，你拿到的是 60 秒。請直接給一個比你預期的會議還大的數字。
-
-### 音訊怎麼進來：走 WebSocket
-
-這個範例沒有 playground。音訊是送進 `websocket_server` 這個擴充，不是走 RTC
-也不是瀏覽器：port `8765`，監聽所有介面（`0.0.0.0`）——這些預設值在它自己的
-`manifest.json` 和 `property.json` 裡，這個 graph 沒有覆蓋它們。也沒有路徑
-（path）要對：這個 server 不按路徑分流。送 PCM16、單聲道、16 kHz、
-base64 編碼，包成 JSON：
-
-```json
-{"audio": "<base64 PCM16 mono 16kHz>"}
-```
-
-**一則訊息送 16 ms，也就是 512 bytes 的 PCM16，不要更多。** 這不是風格
-偏好，是決定分段能不能運作的那一個數字。`ten_vad_python` 每收到一則訊息
-**只吃一個 16 ms 的 hop**（`extension.py:97-103`：把資料接到 buffer 後端、
-取走一個 hop、然後 return——沒有迴圈），所以送得比這個大的 client 會正比地
-落後真實時間：
-
-| 一次送 | VAD 前進 | 落後 |
-| --- | --- | --- |
-| 16 ms | 16 ms | 即時 |
-| 20 ms | 16 ms | 1.25 倍 |
-| 40 ms | 16 ms | 2.5 倍 |
-| 100 ms | 16 ms | 6.25 倍 |
-| 320 ms | 16 ms | 20 倍 |
-
-而且會累積，不會自己追上來。一次送 100 ms 的話，會議進行到第 6 分鐘時
-VAD 還在判斷第 1 分鐘，`start_of_sentence` 和 `end_of_sentence` 晚到完全
-對不上真正的停頓，本來該切成好幾個話題的會議會變成一個很長的話題。
-
-**音訊不會掉**——VAD 在做這些之前就把每一個 frame 原樣往下送了
-（`extension.py:92`），所以不管你送多大，錄音和逐字稿都是完整的。壞掉的只有
-話題邊界落在哪裡，而且它不會報錯，看起來會像是沉默門檻設錯了。
-
-協定就這樣，沒有別的了。沒有 handshake，沒有開始／結束訊息，會議結束時也
-不用送什麼——不送音訊了就是了。
-
-### 這個 graph 要的模型
-
-| | 環境變數覆蓋 | 預設值 |
-| --- | --- | --- |
-| Diarization，segmentation | `DIARIZATION_SEG_MODEL` | `/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx` |
-| Diarization，embedding | `DIARIZATION_EMB_MODEL` | `/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` |
-| SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
+模型的安裝腳本仍然有效，而且新設計用的是同兩組模型（diarization 那一對加上
+SenseVoice）：
 
 ```bash
 tools/ambarella/install_meeting_models.sh
 ```
 
-會把三個都抓下來——diarization 那兩個是呼叫 `probe_diarization.py --fetch`，
-SenseVoice 才是這支腳本自己的新工作——然後印出它解出來的路徑。跟語音助理的
-模型一樣，上面的預設值假設板子的使用者是 `lychee`；如果不是，把印出來的路徑
-填進 `.env`，變數名稱就用上面那三個。
+結構化待辦那件事已經量過了，結論是這顆 7B 做不到——六輪數據和探測腳本在：
 
-錄音會放到 `/home/lychee/meeting_segments`：graph 啟動時要有 250 MB 空間
-（只在那時候檢查一次，之後不會再盯著），之後大概每小時 115 MB。跟上面三個
-模型路徑不一樣，這個路徑在 `property.json` 裡不是 `${env:...}` 覆蓋——換了
-使用者的話，得直接改那個檔案，或者讓那個路徑本身存在。
+```bash
+python3 tools/ambarella/probe_structured_minutes.py --prompts quoted
+```
 
-### 會議記錄怎麼拿出來
+順帶量到兩個對任何 graph 都適用的事實：**板子的 LLM 是決定性的**（同輸入同輸出
+到 byte，所以「跑十次看穩不穩」驗不出東西，要驗只能換輸入），以及**一次 LLM
+turn 實際要 23–135 秒**，視輸出長度而定。
 
-沒有任何東西把記錄送到 UI——因為根本沒有 UI。完成的記錄會寫成
-`/home/lychee/meeting_segments` 裡的
-`meeting_record_<YYYYmmdd_HHMMSS>.json`，就在它描述的那份錄音旁邊。時間戳
-是這場會議自己的開始時間，所以同一個目錄裡的第二場會議不會蓋掉第一場的
-記錄——跟錄音檔名帶時間是同一個理由。
+## 本地語音模型：動手依賴這些數字之前，先量一遍
 
-這個檔案不會等到散會才出現。每轉錄完一個話題、每拿到那個話題的摘要、每標記
-一段失敗，都會重寫一次，所以 worker 中途掛掉的話，已經處理完的東西都還在
-磁碟上，不是只剩原始錄音。
-
-裡面有：
-
-| 欄位 | |
-| --- | --- |
-| `header` | 會議時間（起訖加時長）和與會 N 人——人數是 diarizer 實際分出來的，不是 `speakers` 告訴它的那個數字 |
-| `started_at`、`ended_at`、`duration_s`、`speaker_count` | 同樣四個數字，沒有排版過的版本 |
-| `transcript` | 每一行都帶兩個時鐘，`[14:12 / 07:02]`；失敗的段落在原位留一行註記 |
-| `meeting_summary` | 彙整那一輪的回答；那一輪失敗的話是 `""`——逐字稿無論如何都會附上 |
-| `segments` | 每個話題的 id、摘要、錯誤 |
-| `note` | 只有在沒有任何一段產出逐字稿時才有：說明這件事，以及原始錄音還在哪裡 |
-
-會議什麼時候算結束，由靜音決定：
-
-| 屬性 | 預設值 | 作用 |
-| --- | --- | --- |
-| `segment_silence_s` | `30` | 把目前的話題收掉；從「真的停止說話」算起 |
-| `min_segment_s` | `5` | 短於這個長度的段落不會獨立成段，會併進下一段 |
-| `meeting_silence_s` | `600` | 結束整場會議，觸發彙整 |
-| `speakers` | `3` | 一開始就告訴 diarizer，每一段都用 |
-| `upload_gone_s` | `3` | 這麼久沒有 frame 進來就當上傳端不在了，靜音從最後一個 frame 算起 |
-
-`speakers` 很重要：沒給人數的話，分群會把同一個人拆成好幾個——board 測試
-量到的是，四個人被判成七個。
-
-兩個靜音門檻都是從「說話結束」算起——那是 VAD 報的——而且只在沒有人在講話的
-時候才走：講超過 30 秒不停的一段話是一個話題，不是兩個。`upload_gone_s`
-處理的是 VAD 報不出來的那種情況：上傳端講到一半斷線，完全不會有結束訊號，
-而 `websocket_server` 擴充對斷線只寫一行 log。能說明這件事的是 frame 停了。
-所以請持續送 frame，不要只在有人聲的時候送。
-
-彙整是再跟板子的 LLM 講一次話，拿已經收集好的各話題摘要，去問整場會議的
-結論。所以 `meeting_summary` 會在最後一個人講完話之後過一段時間才落到檔案
-裡，不是 600 秒計時器一到就馬上有。
-
-### 動手依賴這些數字之前，先量一遍
-
-`segment_silence_s` 訂 30 秒安不安全，看兩個數字：diarization 處理一個收掉
+分段門檻訂 30 秒安不安全，看兩個數字：diarization 處理一個收掉
 的話題要多久，SenseVoice 處理同一段音訊要多久。兩個加起來，就是處理進度
 落後會議本身多少——預設值要舒服地大於這個數字，不然一個話題還沒處理完，
 下一個就已經收掉了。
@@ -354,9 +232,9 @@ recognizer.decode_stream(stream)
 print(f"{time.monotonic() - t0:.2f}s  ->  {stream.result.text}")
 ```
 
-把兩個耗時加起來，就是一個話題收掉之後要花多久處理完。如果這個數字沒有舒服
-地小於 30 秒，代表 `segment_silence_s` 已經在啃下一個話題的處理時間，而不是
-好好等它做完。
+把兩個耗時加起來，就是一個話題要花多久處理完。乘上一場會的話題數，就是散會
+之後要等多久——新設計是批次的，所以這個數字決定的是等待時間，不再像舊設計那樣
+決定「處理追不追得上錄音」。
 
 ## 對話之後
 

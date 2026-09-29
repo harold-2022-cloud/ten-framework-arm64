@@ -3,8 +3,13 @@
 # This file is part of TEN Framework, an open source project.
 # Licensed under the Apache License, Version 2.0.
 #
-# Fetch the meeting-minutes graph's speech models onto an Ambarella board:
-# the diarization pair (segmentation + embedding) and SenseVoice ASR.
+# Fetch the meeting graph's speech models onto an Ambarella board: the
+# diarization pair (segmentation + embedding) and SenseVoice ASR.
+#
+# The meeting-minutes example these were first written for has been deleted
+# and the graph is being rebuilt around a whole-file upload. The models do
+# not change -- the same two sets serve either shape -- so this script is
+# still the way to get them onto a board.
 #
 #   tools/ambarella/install_meeting_models.sh
 #   tools/ambarella/install_meeting_models.sh --force
@@ -217,7 +222,7 @@ printf '    DIARIZATION_SEG_MODEL=%s\n' "$SEG_DIR/model.onnx"
 printf '    DIARIZATION_EMB_MODEL=%s\n' "$EMB_FILE"
 printf '    SENSEVOICE_MODEL_DIR=%s\n' "$SENSEVOICE_MODEL_DIR"
 echo
-echo "  Next: docs/development/board_quickstart.md, the meeting-minutes"
+echo "  Next: docs/development/board_quickstart.md, the meeting graph"
 echo "  section -- or its Traditional Chinese twin, board_quickstart.zh-TW.md."
 echo
 echo "  log: $LOG"

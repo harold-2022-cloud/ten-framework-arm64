@@ -169,185 +169,55 @@ Adding or removing a graph is not hot-reloadable — the frontend caches
 `/graphs`, so the server and the playground both need restarting. Editing
 values inside an existing graph takes effect on the next session.
 
-## The meeting-minutes graph
+## The meeting graph: being rewritten, not runnable right now
 
-A second example, at `ai_agents/agents/examples/meeting-minutes`, running a
-different graph: `meeting_minutes`. It records a meeting, closes and
-transcribes one topic at a time as silences end them, and asks the board's
-LLM for a summary. No playground, no RTC.
+There used to be a second example here, at
+`ai_agents/agents/examples/meeting-minutes`, running a `meeting_minutes`
+graph: audio streamed in over a WebSocket and silence closed each topic for
+transcription and summary. **That example has been deleted.** The
+requirement changed, and every segmentation decision in it rested on audio
+arriving continuously and in real time.
 
-```bash
-tools/ambarella/install_meeting_models.sh    # fetch its two speech models first
-cd ai_agents/agents/examples/meeting-minutes
-task install                                 # once, and see below on the board
-task run 2>&1 | tee /tmp/task_run.log
-```
+The new shape: the meeting is recorded whole on a phone as one Ogg-Opus
+file and uploaded over HTTP once, after it ends. The board starts work when
+the file lands. Segmentation runs on **audio time** rather than the wall
+clock, and the archive keeps the original audio, the record and the whole
+meeting's conclusions on the board itself. It will live in
+`examples/voice-assistant/tenapp` as that tenapp's 14th graph, alongside the
+13 conversation graphs — one deployment, `POST /start` with a `graph_name`
+to pick the scenario.
 
-`task install` is not optional here, and skipping it does not fail loudly: it
-is what builds `server/bin/api`, and `POST /start` is the only way into this
-graph. Without it `task run` comes up with nothing listening on the API port.
-
-On the board, `task install` is the x86 path and cannot work — the registry
-has no arm64 `agora_rtc`. Use the installer instead, which supports this
-example by name and finishes it the same way (the Go app, the Python packages,
-the shared playground and the API server):
+**Not implemented yet.** The old example's code stops at `67085cfef`:
 
 ```bash
-ai_agents/agents/scripts/install_board_arm64.sh --example meeting-minutes
+git show 67085cfef:ai_agents/agents/examples/meeting-minutes/tenapp/property.json
 ```
 
-`meeting_minutes` has `auto_start: false`, so nothing starts on its own —
-drive it with `POST /start` and `"graph_name": "meeting_minutes"`, the way
-[`agent_api.md`](agent_api.md) describes. `AGORA_APP_ID` still has to be set
-even though this graph never touches RTC: the Go server checks it
-unconditionally at startup, before it looks at which graph anyone asked for.
-Port 8081 for the Go API server itself is the same story as the voice
-assistant's — see [Ports](#ports) above; nothing about it changes here.
+### What still works today
 
-### Keep the worker alive, or the meeting dies at 60 seconds
-
-The Go server reaps a worker whose last `/ping` is older than its timeout, and
-**audio does not count as a ping** — only `POST /ping` refreshes it
-(`http_server.go:230`). `.env` ships `WORKER_QUIT_TIMEOUT_SECONDS=60`, so a
-meeting nobody pings is killed a minute in, mid-sentence, with nothing in the
-log saying why.
-
-This graph needs the worker alive well past the last word: `meeting_silence_s`
-is 600, so assembly happens ten minutes after the room goes quiet. Either ping
-every 30 s for the whole meeting, or ask for a long timeout when you start it:
-
-```bash
-curl -s -X POST http://127.0.0.1:8081/start \
-  -H 'Content-Type: application/json' \
-  -d '{"request_id":"meeting-1","channel_name":"meeting-1",
-       "graph_name":"meeting_minutes","timeout":7200}'
-```
-
-`timeout` is in seconds and is honoured only when positive
-(`http_server.go:306`). **`-1` does not mean "never expire".** The constant
-`WORKER_TIMEOUT_INFINITY = -1` exists and the reaper honours it
-(`worker_common.go:154`), but the request path gates on `> 0`, so `-1` falls
-through to the default and you get 60 seconds. Ask for a number larger than the
-meeting you expect.
-
-### Audio in, over a WebSocket
-
-There is no playground for this example. Audio arrives at the
-`websocket_server` extension instead of RTC or a browser: port `8765`, all
-interfaces (`0.0.0.0`) — its own `manifest.json` and `property.json` are
-where those live, since this graph doesn't override them. There is no path
-to get right; the server doesn't route on one. Send PCM16, mono, 16 kHz,
-base64-encoded, as JSON:
-
-```json
-{"audio": "<base64 PCM16 mono 16kHz>"}
-```
-
-**Send 16 ms per message — 512 bytes of PCM16 — and no more.** This is not a
-style preference, it is the one number that decides whether topic splitting
-works at all. `ten_vad_python` consumes exactly **one 16 ms hop per message it
-receives** (`extension.py:97-103`: it appends to a buffer, takes one hop, and
-returns — there is no loop), so a client sending larger chunks falls behind
-real time in direct proportion:
-
-| Chunk sent | VAD advances | Lag |
-| --- | --- | --- |
-| 16 ms | 16 ms | real time |
-| 20 ms | 16 ms | 1.25× behind |
-| 40 ms | 16 ms | 2.5× behind |
-| 100 ms | 16 ms | 6.25× behind |
-| 320 ms | 16 ms | 20× behind |
-
-The lag is cumulative and never recovers. At 100 ms chunks the VAD is still
-deciding about minute 1 when the meeting reaches minute 6, so
-`start_of_sentence` and `end_of_sentence` arrive far too late to mark real
-pauses, and a meeting that should split into topics becomes one long one.
-
-**No audio is lost** — the VAD passes every frame straight through before it
-does any of this (`extension.py:92`), so the recording and the transcript stay
-complete whatever you send. What degrades is only where the topic boundaries
-fall, which is silent and looks like the silence thresholds being wrong.
-
-That is the whole protocol. No handshake, no start/stop message, nothing to
-send when the meeting ends — just stop sending frames.
-
-### The models it expects
-
-| | Env override | Default |
-| --- | --- | --- |
-| Diarization, segmentation | `DIARIZATION_SEG_MODEL` | `/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx` |
-| Diarization, embedding | `DIARIZATION_EMB_MODEL` | `/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` |
-| SenseVoice ASR | `SENSEVOICE_MODEL_DIR` | `~/sensevoice` |
+The model installer is unchanged, and the new design wants the same two
+model sets (the diarization pair plus SenseVoice):
 
 ```bash
 tools/ambarella/install_meeting_models.sh
 ```
 
-fetches all three — the diarization pair by calling `probe_diarization.py
---fetch`, SenseVoice as this script's own work — and prints the paths it
-resolved. As with the voice assistant's models, the defaults above assume
-this board's user is `lychee`; if yours is not, put the printed paths in
-`.env` under those three variable names.
+Whether the board's 7B can produce structured action items has been
+measured, and the answer is no. Six rounds of evidence, and the probe:
 
-Recordings go to `/home/lychee/meeting_segments`: needs 250 MB free when the
-graph starts (checked once, not watched afterward), then about 115 MB/hour.
-Unlike the three model paths, this one is not an `${env:...}` override in
-`property.json` — a different user needs that file edited directly, or the
-path to exist as given.
+```bash
+python3 tools/ambarella/probe_structured_minutes.py --prompts quoted
+```
 
-### Getting the minutes out
+It also measured two things that hold for any graph on this board: **the
+LLM is deterministic** (same input, same output down to the byte, so
+repeating a prompt measures nothing — vary the input instead), and **one LLM
+turn really costs 23–135 seconds**, depending on how much it writes.
 
-Nothing routes the finished record to a UI — there isn't one. It is written
-to `meeting_record_<YYYYmmdd_HHMMSS>.json` in `/home/lychee/meeting_segments`,
-next to the audio it describes. The stamp is the meeting's own start, so a
-second meeting in the same directory does not overwrite the first one's
-minutes — the same reason the segment files carry a time.
+## Local speech models: measure before you rely on it
 
-The file does not wait for the end of the meeting. It is rewritten each time
-a topic is transcribed, each time that topic's summary comes back, and each
-time a segment is marked failed, so a worker that dies mid-meeting leaves
-everything already processed on disk rather than only the raw audio.
-
-It holds:
-
-| Key | |
-| --- | --- |
-| `header` | 會議時間 as a range with a duration, and 與會 N 人 — the count the diarizer actually produced, not the `speakers` it was told to expect |
-| `started_at`, `ended_at`, `duration_s`, `speaker_count` | the same four numbers, unrendered |
-| `transcript` | every line on both clocks, `[14:12 / 07:02]`, and a note in place of any segment that failed |
-| `meeting_summary` | the assembly turn's answer; `""` if that turn failed — the transcript goes out either way |
-| `segments` | per topic: its id, its summary, its error |
-| `note` | set only when no segment produced any transcript at all, saying so and where the audio still is |
-
-Silence drives when the meeting ends:
-
-| Property | Default | Does |
-| --- | --- | --- |
-| `segment_silence_s` | `30` | closes the current topic, counted from when speech actually stopped |
-| `min_segment_s` | `5` | a segment shorter than this merges into the next one rather than standing alone |
-| `meeting_silence_s` | `600` | ends the meeting and triggers assembly |
-| `speakers` | `3` | told to the diarizer up front, on every segment |
-| `upload_gone_s` | `3` | no frames for this long means the upload is gone, and the silence is counted from the last frame |
-
-`speakers` matters: without a count, clustering over-splits one person into
-several — measured on the board, four speakers came back as seven.
-
-The two silence thresholds are measured from the end of speech, which the VAD
-reports, and only while nobody is talking — a monologue longer than 30 s is
-one topic, not two. `upload_gone_s` covers the case the VAD cannot report:
-a client that drops mid-sentence sends no end-of-speech at all, and the
-`websocket_server` extension only logs the disconnect. The frames stopping is
-what says so. Send them continuously; do not gate on voice.
-
-Assembly is one more turn to the board's LLM, asking for the whole
-meeting's conclusions from the per-topic summaries already gathered. So
-`meeting_summary` lands in the file some time after the last person stops
-talking, not the instant the 600 s timer fires.
-
-### Measuring before you rely on it
-
-Two numbers decide whether 30 s is a safe `segment_silence_s`: how long
-diarization takes on a closed topic, and how long SenseVoice takes on the
+Two numbers decide whether a 30 s segmentation threshold is safe: how long
+diarization takes on one topic, and how long SenseVoice takes on the
 same audio. Together they are how far processing lags behind the meeting —
 the default has to sit comfortably above that, or a topic closes before the
 previous one has finished being worked on.
@@ -359,9 +229,9 @@ python3 tools/ambarella/probe_diarization.py --audio /tmp/four.wav \
 
 (If `install_meeting_models.sh` already ran, the diarization models are
 already under `~/diarization_models` and this just uses them — no `--fetch`
-needed here.) `--threads 4` matches this graph's `meeting_transcriber`
-property (`num_threads: 4` in `tenapp/property.json`) — a separate setting
-from whatever thread count the voice assistant's own CPU speech setup uses.
+needed here.) `--threads 4` matches what `meeting_transcriber` will be
+given — a separate setting from whatever thread count the voice assistant's
+own CPU speech setup uses.
 Compare the real-time factor it reports against the one already measured at
 two threads: **0.49**.
 
@@ -388,9 +258,11 @@ recognizer.decode_stream(stream)
 print(f"{time.monotonic() - t0:.2f}s  ->  {stream.result.text}")
 ```
 
-Add the two elapsed times to get how long a topic takes to process once it
-closes. If that is not comfortably under 30 s, `segment_silence_s` is
-cutting into the next topic's processing rather than waiting it out.
+Add the two elapsed times to get how long one topic takes to process.
+Multiply by the topics in a meeting and that is how long you wait after it
+ends — the new design is batch, so this number sets the wait rather than
+deciding, as the old one did, whether processing can keep up with the
+recording at all.
 
 ## After a conversation
 
