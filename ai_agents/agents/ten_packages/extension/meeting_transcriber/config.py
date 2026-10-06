@@ -27,6 +27,12 @@ class MeetingTranscriberConfig(BaseModel):
     speakers: int = -1
     cluster_threshold: float = 0.5
 
+    # One voice embedding per turn, for linking speakers across topics.
+    # Shorter turns give embeddings too noisy to trust; longer ones are
+    # embedded from their middle, which is enough and keeps the cost flat.
+    embed_min_turn_s: float = 1.0
+    embed_max_turn_s: float = 10.0
+
     def validate_models(self) -> None:
         """Fail when the pipeline is wired, not at the first silence."""
         for name, path in (

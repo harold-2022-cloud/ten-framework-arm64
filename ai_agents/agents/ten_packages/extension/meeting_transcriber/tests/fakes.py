@@ -94,3 +94,37 @@ class FakeTenEnv:
     log_info = _record
     log_warn = _record
     log_error = _record
+
+
+class FakeEmbeddingStream:
+    """sherpa-onnx's OnlineStream as the extractor uses it."""
+
+    def __init__(self):
+        self.samples = []
+        self.finished = False
+
+    def accept_waveform(self, sample_rate, samples):
+        self.rate = sample_rate
+        self.samples.extend(list(samples))
+
+    def input_finished(self):
+        self.finished = True
+
+
+class FakeExtractor:
+    """Stands in for SpeakerEmbeddingExtractor: answers every stream with the
+    same raw vector, and keeps the samples each one was fed."""
+
+    def __init__(self, vector=(3.0, 4.0)):
+        self.vector = list(vector)
+        self.fed = []
+
+    def create_stream(self):
+        return FakeEmbeddingStream()
+
+    def is_ready(self, stream):
+        return stream.finished and bool(stream.samples)
+
+    def compute(self, stream):
+        self.fed.append(stream.samples)
+        return list(self.vector)

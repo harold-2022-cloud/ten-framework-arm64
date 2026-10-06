@@ -32,11 +32,41 @@ class Utterance:
     end_s: float
     speaker: int
     text: str
+    # Unit-length voice embedding for linking speakers across topics; None
+    # for a turn too short to give a trustworthy one.
+    embedding: Optional[List[float]] = None
 
 
-def read_pcm16(path: str) -> np.ndarray:
-    """The recorder's own format: mono, 16 kHz, no header."""
-    raw = open(path, "rb").read()
+def utterances_payload(utterances: List[Utterance]) -> List[dict]:
+    """The utterances as segment_transcribed carries them."""
+    return [
+        {
+            "start_s": u.start_s,
+            "end_s": u.end_s,
+            "speaker": u.speaker,
+            "text": u.text,
+            "embedding": u.embedding,
+        }
+        for u in utterances
+    ]
+
+
+def read_pcm16(
+    path: str, start_s: float = 0.0, duration_s: Optional[float] = None
+) -> np.ndarray:
+    """The recorder's own format: mono, 16 kHz, no header.
+
+    A slice reads only its own bytes -- one topic out of an hour's PCM, not
+    the hour. Without start_s and duration_s it reads the whole file.
+    """
+    with open(path, "rb") as pcm:
+        pcm.seek(int(round(start_s * SAMPLE_RATE)) * BYTES_PER_SAMPLE)
+        if duration_s is None:
+            raw = pcm.read()
+        else:
+            raw = pcm.read(
+                int(round(duration_s * SAMPLE_RATE)) * BYTES_PER_SAMPLE
+            )
     raw = raw[: len(raw) - (len(raw) % BYTES_PER_SAMPLE)]
     samples = np.frombuffer(raw, dtype=np.int16)
     return (samples.astype(np.float32) / 32768.0).copy()
@@ -70,6 +100,20 @@ def load_diarizer(config: MeetingTranscriberConfig):
     )
 
 
+def load_extractor(config: MeetingTranscriberConfig):
+    """The diarizer's own embedding model, loaded again on its own: the
+    diarizer keeps its embeddings internal, and step 3 needs one per turn."""
+    import sherpa_onnx  # pylint: disable=import-outside-toplevel
+
+    return sherpa_onnx.SpeakerEmbeddingExtractor(
+        sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+            model=config.embedding_model,
+            num_threads=config.num_threads,
+            provider="cpu",
+        )
+    )
+
+
 def load_recogniser(config: MeetingTranscriberConfig):
     import sherpa_onnx  # pylint: disable=import-outside-toplevel
 
@@ -97,17 +141,29 @@ class MeetingTranscriber:
         ten_env,
         load_diarizer: Optional[Callable[[Any], Any]] = None,
         load_recogniser: Optional[Callable[[Any], Any]] = None,
+        load_extractor: Optional[Callable[[Any], Any]] = None,
     ) -> None:
         self.config = config
         self.ten_env = ten_env
         self._load_diarizer = load_diarizer or globals()["load_diarizer"]
         self._load_recogniser = load_recogniser or globals()["load_recogniser"]
+        self._load_extractor = load_extractor or globals()["load_extractor"]
         self._diarizer = None
+        self._diarizer_speakers: Optional[int] = None
         self._recogniser = None
+        self._extractor = None
         self._lock = asyncio.Lock()
 
-    async def transcribe(self, path: str, speakers: int) -> List[Utterance]:
-        samples = read_pcm16(path)
+    async def transcribe(
+        self,
+        path: str,
+        speakers: int,
+        start_s: float = 0.0,
+        duration_s: Optional[float] = None,
+    ) -> List[Utterance]:
+        """Who said what in one topic. Utterance times are offsets within
+        the slice; the caller adds the topic's own start_s."""
+        samples = read_pcm16(path, start_s, duration_s)
         if samples.size == 0:
             return []
         # One segment at a time: both models are hundreds of megabytes and the
@@ -120,11 +176,33 @@ class MeetingTranscriber:
     def _ensure_loaded(self, speakers: int) -> None:
         """Lazily, and only once: 47 MB has no business being resident for a
         whole meeting when it is wanted for a minute of it."""
-        if self._diarizer is None:
+        # Rebuilt when the count changes: one worker serves meeting after
+        # meeting, and a diarizer built for the first one's four people would
+        # cluster the next one's seven as four.
+        if self._diarizer is None or self._diarizer_speakers != speakers:
             config = self.config.model_copy(update={"speakers": speakers})
             self._diarizer = self._load_diarizer(config)
+            self._diarizer_speakers = speakers
         if self._recogniser is None:
             self._recogniser = self._load_recogniser(self.config)
+        if self._extractor is None:
+            self._extractor = self._load_extractor(self.config)
+
+    def _embed(self, samples: np.ndarray, begin: int, end: int):
+        """One turn's voice, from its middle embed_max_turn_s at most, scaled
+        to unit length; None when the turn is under embed_min_turn_s."""
+        if (end - begin) / SAMPLE_RATE < self.config.embed_min_turn_s:
+            return None
+        keep = min(end - begin, int(self.config.embed_max_turn_s * SAMPLE_RATE))
+        start = begin + (end - begin - keep) // 2
+        stream = self._extractor.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, samples[start : start + keep])
+        stream.input_finished()
+        if not self._extractor.is_ready(stream):
+            return None
+        vector = np.asarray(self._extractor.compute(stream), dtype=np.float64)
+        norm = float(np.linalg.norm(vector))
+        return (vector / norm).tolist() if norm > 0 else None
 
     def _work(self, samples: np.ndarray, speakers: int) -> List[Utterance]:
         # Runs on a worker thread. Both calls are C++ holding it for seconds.
@@ -148,6 +226,7 @@ class MeetingTranscriber:
                         end_s=turn.end,
                         speaker=turn.speaker,
                         text=text,
+                        embedding=self._embed(samples, begin, end),
                     )
                 )
         return out

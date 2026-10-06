@@ -17,7 +17,7 @@ from ten_runtime import (
 )
 
 from .config import MeetingTranscriberConfig
-from .transcriber import MeetingTranscriber
+from .transcriber import MeetingTranscriber, utterances_payload
 
 CMD_TRANSCRIBE = "transcribe"
 DATA_SEGMENT_TRANSCRIBED = "segment_transcribed"
@@ -47,7 +47,15 @@ class MeetingTranscriberExtension(AsyncExtension):
             await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))
             return
 
-        path, _ = cmd.get_property_string("path")
+        path, _ = cmd.get_property_string("pcm_path")
+        # A topic is a slice of the meeting's PCM; without these two the
+        # whole file is read, as before.
+        start_s, err = cmd.get_property_float("start_s")
+        if err:
+            start_s = 0.0
+        duration_s, err = cmd.get_property_float("duration_s")
+        if err:
+            duration_s = None
         segment_id, _ = cmd.get_property_string("segment_id")
         speakers, err = cmd.get_property_int("speakers")
         if err:
@@ -68,16 +76,10 @@ class MeetingTranscriberExtension(AsyncExtension):
             payload["error"] = "transcriber was never initialised"
         else:
             try:
-                utterances = await self.transcriber.transcribe(path, speakers)
-                payload["utterances"] = [
-                    {
-                        "start_s": u.start_s,
-                        "end_s": u.end_s,
-                        "speaker": u.speaker,
-                        "text": u.text,
-                    }
-                    for u in utterances
-                ]
+                utterances = await self.transcriber.transcribe(
+                    path, speakers, start_s, duration_s
+                )
+                payload["utterances"] = utterances_payload(utterances)
             except Exception as failure:  # pylint: disable=broad-except
                 # One segment failing must not take the meeting with it: the
                 # record says which one, and the rest stands.
