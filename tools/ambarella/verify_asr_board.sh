@@ -59,17 +59,20 @@ if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --q
   echo "      the tree, not the commit printed above."
 fi
 
-# Read the log once and match in the shell. A `git log | grep -q` pipeline
-# reports 141 under pipefail -- grep exits on the first match and git dies of
-# SIGPIPE -- so every commit would look missing however many are there.
-SUBJECTS=$(git -C "$REPO_ROOT" log --oneline -40)
+# Asked of the whole history, with git doing the matching. A window of the
+# last 40 commits went stale the day 14 unrelated ones landed on top and
+# reported a current checkout as behind. And no `git log | grep -q`: under
+# pipefail grep exits on the first match, git dies of SIGPIPE, and every
+# commit would look missing however many are there.
 for subject in \
   "keep the partial fallback clear of the ASR's own final" \
   "write the input audio when dump is on" \
   "say which silence ended an utterance"
 do
-  if [[ "$SUBJECTS" == *"$subject"* ]]; then
-    echo "  present: $subject"
+  found=$(git -C "$REPO_ROOT" log -1 --format=%h --fixed-strings \
+    --grep="$subject" HEAD)
+  if [[ -n "$found" ]]; then
+    echo "  present: $found $subject"
   else
     fail "this checkout is behind; missing commit: $subject
        git -C $REPO_ROOT pull --ff-only"
