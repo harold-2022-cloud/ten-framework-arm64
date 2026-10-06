@@ -125,6 +125,23 @@ class MeetingRecord:
             for u in topic.utterances
         )
 
+    def llm_lines_for(self, topic_id: str) -> str:
+        """What the LLM reads: who said what, without the clock.
+
+        Measured on the board (probe_meeting_summary.py): a 1601-character
+        topic with timestamps, under a prompt asking to mark time and
+        speaker, came back copied line by line, twice -- 3419 characters in
+        346 s, past the graph's 175 s. Without timestamps and with the
+        labels in simplified characters, the same topic was summarised in
+        102 characters and 11 s. Traditional characters in the prompt also
+        came back as broken bytes more often (說 as U+FFFD)."""
+        topic = self._topics.get(topic_id)
+        if topic is None or topic.error:
+            return ""
+        return "\n".join(
+            f"说话人{u['speaker'] + 1}：{u['text']}" for u in topic.utterances
+        )
+
     def to_json(
         self,
         summary: str,

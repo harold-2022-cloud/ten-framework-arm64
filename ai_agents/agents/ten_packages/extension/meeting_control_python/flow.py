@@ -29,7 +29,7 @@ from typing import Optional
 from .actions import parse_actions
 from .config import MeetingControlConfig
 from .minutes import render_minutes
-from .record import MeetingRecord, _mmss
+from .record import MeetingRecord
 from .speakers import link
 from .state import write_state
 
@@ -171,16 +171,18 @@ class MeetingFlow:
         for done, topic in enumerate(topics, 1):
             if not topic.error and topic.utterances:
                 answer = await self._ask(
-                    self.config.segment_prompt + self.record.lines_for(topic.id)
+                    self.config.segment_prompt
+                    + self.record.llm_lines_for(topic.id)
                 )
                 self.record.add_summary(topic.id, answer)
                 self._persist()
             write_state(self.work_dir, "summarising", topics_done=done)
 
         write_state(self.work_dir, "concluding")
+        # Numbered, not timed: a clock in front of the 7B invites copying.
         summaries = "\n\n".join(
-            f"{_mmss(t.start_s)}–{_mmss(t.end_s)}：{t.summary}"
-            for t in topics
+            f"第{n}段：{t.summary}"
+            for n, t in enumerate(topics, 1)
             if t.summary
         )
         if summaries:

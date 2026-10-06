@@ -172,7 +172,20 @@ async def test_summaries_wait_for_every_topic_and_use_meeting_numbers(meeting):
     await f.on_transcribed(transcribed("t02", said(1, 5, 0, "我來回應。", B)))
 
     # Topic 2's own speaker 0 is the meeting's second voice.
-    assert "說話人2：我來回應。" in board.prompts[1]
+    assert "说话人2：我來回應。" in board.prompts[1]
+    assert "[00:" not in board.prompts[1]  # no clock for the LLM (record.py)
+
+
+@pytest.mark.asyncio
+async def test_the_conclusion_reads_the_summaries_without_the_clock(meeting):
+    board = Board(answers=["一的重點", "二的重點", "結論"])
+
+    await run_two_topics(meeting, board)
+
+    conclusion = board.prompts[-1]
+    assert "第1段：一的重點" in conclusion
+    assert "第2段：二的重點" in conclusion
+    assert "05:00" not in conclusion
 
 
 @pytest.mark.asyncio

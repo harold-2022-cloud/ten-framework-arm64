@@ -28,7 +28,7 @@ asks the same question with no time limit and shows the whole answer.
              lines repeat, the head and the tail
 
 --variants asks the same topic several ways and tabulates them. The first
-run showed why the shipped prompt is slow: thinking was already bypassed,
+run showed why the prompt then shipped was slow: thinking was bypassed,
 the first character came at 2.9 s and the model wrote 10 characters a
 second -- but it wrote 3419 of them, copying the 1601-character transcript
 line by line, twice, rather than summarising it. "Mark the time and the

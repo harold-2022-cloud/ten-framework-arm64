@@ -15,15 +15,17 @@ class MeetingControlConfig(BaseModel):
     summary_timeout_s: float = 180.0
 
     # Short on purpose: on the board's 7B every addition to a prompt cost
-    # content, even corrections that were each right (PRD Part 2).
+    # content, even corrections that were each right (PRD Part 2). Simplified
+    # characters, and no asking for times: the earlier "條列重點……標上時間和
+    # 說話人" had the model copy a topic's transcript line by line, twice, in
+    # 346 s; this one summarised it in 11 s (probe_meeting_summary.py).
     segment_prompt: str = (
-        "以下是一段會議的逐字稿，每行標了時間和說話人。"
-        "用中文條列這一段的重點，以及被提出的待辦事項，標上時間和說話人。"
-        "不要客套話。\n\n"
+        "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、"
+        "做了什么决定、谁要做什么。不要逐句复述原文。\n\n"
     )
     meeting_prompt: str = (
-        "以下是一場會議各段的重點。用中文整理出：一、結論；"
-        "二、待辦事項，標上提出的時間和人。不要客套話。\n\n"
+        "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
+        "二、待办事项，写明谁要做什么。不要逐句复述原文。\n\n"
     )
 
     # Used when an upload does not say how many people were there.

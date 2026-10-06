@@ -56,6 +56,18 @@ def test_with_a_recording_start_the_wall_clock_comes_first(taipei):
     assert record.lines_for("t02") == "[14:35 / 05:12] 說話人2：下週出版本。"
 
 
+def test_the_llm_reads_who_said_what_without_the_clock():
+    # On the board's 7B, timestamped lines under "mark the time and the
+    # speaker" came back copied line by line, twice: 3419 characters in
+    # 346 s. Without the clock, and with simplified labels, it summarised
+    # the same topic in 102 characters and 11 s.
+    record = MeetingRecord("m1", recorded_at=1790663400.0)
+    record.add_topic("t02", 300.0, 600.0, [said(12.5, 15.0, 1, "下週出版本。")])
+
+    assert record.llm_lines_for("t02") == "说话人2：下週出版本。"
+    assert record.lines_for("t02").startswith("[")  # minutes keep the clock
+
+
 def test_turns_come_out_in_meeting_time_with_their_topic_and_voice():
     record = MeetingRecord("m1")
     record.add_topic(
