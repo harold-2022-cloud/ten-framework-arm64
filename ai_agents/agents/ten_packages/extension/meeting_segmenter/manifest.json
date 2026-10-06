@@ -1,0 +1,35 @@
+{
+  "type": "extension",
+  "name": "meeting_segmenter",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "segment_silence_s": { "type": "float64" },
+        "min_segment_s": { "type": "float64" },
+        "max_segment_s": { "type": "float64" },
+        "vad_model": { "type": "string" },
+        "vad_threshold": { "type": "float64" }
+      }
+    },
+    "cmd_in": [{ "name": "segment_audio" }],
+    "data_out": [{ "name": "segments_ready" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
