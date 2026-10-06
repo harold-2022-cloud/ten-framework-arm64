@@ -153,33 +153,70 @@ task run 2>&1 | tee /tmp/task_run.log
 **新增或移除 graph 不能熱更新**——前端會快取 `/graphs`，所以 server 和 playground
 都要重啟。改既有 graph 裡的值則是下一個 session 生效。
 
-## 會議記錄 graph：正在改寫，暫時不能跑
+## 會議記錄 graph
 
-原本這裡有一個 `ai_agents/agents/examples/meeting-minutes` 範例，跑
-`meeting_minutes` graph：音訊從 WebSocket 串流進來，靠靜音把話題一段段收掉、
-轉錄、摘要。**那個範例已經刪除**，因為需求變了，而它的每一個分段決定都建立在
-「音訊即時連續到達」上。
+`meeting_minutes` 是 voice-assistant tenapp 的第 14 張 graph，和 13 張對話 graph
+並存——同一套部署，`POST /start` 帶 `graph_name` 切換場景。會議在手機上完整錄成
+一個 Ogg-Opus 檔（16 kHz 單聲道），散會後一次 HTTP 上傳。板子把它切成話題、逐話題
+分說話人並轉文字、讓同一個聲音在整場都是同一個編號、用板上的 LLM 逐話題摘要，
+最後在板子上留下原始音訊、`record.json` 和 `minutes.txt`。一小時的會約要 75 分鐘。
 
-新的形狀是：會議在手機上完整錄成一個 Ogg-Opus 檔，散會後一次 HTTP 上傳，板子
-收到檔案才開始處理。分段跑在**音訊時間**上而不是牆鐘上，歸檔在板子本機留下
-原始音訊、會議記錄和整場結論。它會加進
-`examples/voice-assistant/tenapp` 成為那裡的第 14 張 graph，和 13 張對話
-graph 並存——同一套部署，`POST /start` 帶 `graph_name` 切換場景。
+（原本這裡的串流範例 `examples/meeting-minutes` 已刪除，代碼停在 `67085cfef`。）
 
-**還沒實作。** 舊範例的代碼停在 `67085cfef`，要看任何一個檔案：
+### 安裝
 
 ```bash
-git show 67085cfef:ai_agents/agents/examples/meeting-minutes/tenapp/property.json
+tools/ambarella/install_meeting_models.sh        # 四個模型
+ai_agents/agents/scripts/install_board_arm64.sh  # pull 之後要再跑一次
 ```
 
-### 現在還能做的事
+安裝器要重跑，是因為這張 graph 帶進了四個擴充——`meeting_uploader`、
+`meeting_segmenter`、`meeting_transcriber`、`meeting_control_python`——它們的
+Python 套件（`soundfile`、`aiohttp`、`sherpa-onnx`）必須裝進 runtime 用的 3.12，
+而不是 shell 的 3.13。裝完要重啟：新增 graph 不能熱更新。
 
-模型的安裝腳本仍然有效，而且新設計用的是同兩組模型（diarization 那一對加上
-SenseVoice）：
+`ai_agents/.env` 裡視情況設：
+
+| 變數 | 預設 | 什麼時候要設 |
+| --- | --- | --- |
+| `DIARIZATION_SEG_MODEL`、`DIARIZATION_EMB_MODEL`、`SENSEVOICE_MODEL_DIR`、`MEETING_VAD_MODEL` | `/home/lychee` 底下 | 板子的使用者不是 `lychee`；`install_meeting_models.sh` 最後會印出路徑 |
+| `MEETINGS_DIR` | `/tmp/meetings` | 板子的 `/tmp` 是 tmpfs——歸檔會佔記憶體、重開機就不見 |
+| `MEETING_AUTH_TOKEN` | 空，不檢查 | 設了之後，8765 的每個請求都要帶 `Authorization: Bearer <token>` |
+
+### 在板子上驗證
 
 ```bash
-tools/ambarella/install_meeting_models.sh
+python3.12 tools/ambarella/check_meeting_board.py --check
+python3.12 tools/ambarella/check_meeting_board.py \
+  --audio ~/meeting_probe/M_R003S01C01.wav \
+  --rttm ~/meeting_probe/M_R003S01C01.rttm --speakers 6 --minutes 12
 ```
+
+第一行只檢查不動手：server 列得出這張 graph、LLM daemon 有回應、模型都在、
+3.12 import 得到需要的套件、存會議的地方不是 tmpfs 且空間夠、8765 沒被佔。
+第二行像客戶端一樣跑一場會：用 `run_meeting_speaker_probe.sh` 之前放到板子上的
+AISHELL-4 錄音，截 12 分鐘讓它跨兩個話題；報告話題數、人數、摘要、時間、
+worker 記憶體，並對照標註算出「說話時間算錯人」的比例。它**故意用 `timeout` 60 秒
+啟動**：處理遠超過 60 秒，worker 撐到最後還在回應，就證明它自己保活成功。
+結果存在 `~/meeting_probe/board_check`。
+
+### 使用
+
+```bash
+BOARD=192.168.1.50
+curl -s -X POST http://$BOARD:8081/start -H 'Content-Type: application/json' \
+  -d '{"request_id":"1","channel_name":"meeting-1","graph_name":"meeting_minutes","timeout":600}'
+until curl -sf http://$BOARD:8765/meetings > /dev/null; do sleep 1; done
+curl -s -X POST http://$BOARD:8765/meeting/upload \
+  -F 'file=@meeting.ogg' -F 'speakers=6' -F 'title=週會'
+curl -s http://$BOARD:8765/meeting/<meeting_id>        # 狀態、進度
+curl -s -O http://$BOARD:8765/meeting/<meeting_id>/minutes.txt
+```
+
+上傳完客戶端就可以離線：處理期間 worker 自己 ping server，所以 `timeout` 只要
+涵蓋上傳和取回結果。一次只處理一場——處理中再上傳會回 409。
+
+### 已經量過的
 
 結構化待辦那件事已經量過了，結論是這顆 7B 做不到——六輪數據和探測腳本在：
 

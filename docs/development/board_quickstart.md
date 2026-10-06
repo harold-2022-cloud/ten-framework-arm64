@@ -169,38 +169,80 @@ Adding or removing a graph is not hot-reloadable — the frontend caches
 `/graphs`, so the server and the playground both need restarting. Editing
 values inside an existing graph takes effect on the next session.
 
-## The meeting graph: being rewritten, not runnable right now
+## The meeting graph
 
-There used to be a second example here, at
-`ai_agents/agents/examples/meeting-minutes`, running a `meeting_minutes`
-graph: audio streamed in over a WebSocket and silence closed each topic for
-transcription and summary. **That example has been deleted.** The
-requirement changed, and every segmentation decision in it rested on audio
-arriving continuously and in real time.
+`meeting_minutes` is the voice-assistant tenapp's 14th graph, beside the 13
+conversation graphs — one deployment, `POST /start` with a `graph_name` to
+pick the scenario. A meeting is recorded whole on a phone as one Ogg-Opus
+file (16 kHz mono) and uploaded over HTTP once it ends. The board cuts it
+into topics, tells the speakers apart and transcribes each topic, gives
+every voice one number across the meeting, summarises each topic with its
+own LLM, and keeps the audio, `record.json` and `minutes.txt` on the board.
+An hour of meeting takes about 75 minutes.
 
-The new shape: the meeting is recorded whole on a phone as one Ogg-Opus
-file and uploaded over HTTP once, after it ends. The board starts work when
-the file lands. Segmentation runs on **audio time** rather than the wall
-clock, and the archive keeps the original audio, the record and the whole
-meeting's conclusions on the board itself. It will live in
-`examples/voice-assistant/tenapp` as that tenapp's 14th graph, alongside the
-13 conversation graphs — one deployment, `POST /start` with a `graph_name`
-to pick the scenario.
+(The streaming example that used to be here, `examples/meeting-minutes`, is
+deleted; its code stops at `67085cfef`.)
 
-**Not implemented yet.** The old example's code stops at `67085cfef`:
+### Set it up
 
 ```bash
-git show 67085cfef:ai_agents/agents/examples/meeting-minutes/tenapp/property.json
+tools/ambarella/install_meeting_models.sh        # the four models
+ai_agents/agents/scripts/install_board_arm64.sh  # again, after pulling
 ```
 
-### What still works today
+The installer has to run again because the graph brought four extensions —
+`meeting_uploader`, `meeting_segmenter`, `meeting_transcriber`,
+`meeting_control_python` — and their Python packages (`soundfile`,
+`aiohttp`, `sherpa-onnx`) must land in the runtime's 3.12, not the shell's
+3.13. Then restart: adding a graph is not hot-reloadable.
 
-The model installer is unchanged, and the new design wants the same two
-model sets (the diarization pair plus SenseVoice):
+In `ai_agents/.env`, if they apply:
+
+| Variable | Default | When to set it |
+| --- | --- | --- |
+| `DIARIZATION_SEG_MODEL`, `DIARIZATION_EMB_MODEL`, `SENSEVOICE_MODEL_DIR`, `MEETING_VAD_MODEL` | under `/home/lychee` | the board's user is not `lychee`; `install_meeting_models.sh` prints the paths |
+| `MEETINGS_DIR` | `/tmp/meetings` | `/tmp` is tmpfs on the board — archives would live in RAM and vanish on reboot |
+| `MEETING_AUTH_TOKEN` | empty, no check | every request to 8765 must then carry `Authorization: Bearer <token>` |
+
+### Check it on the board
 
 ```bash
-tools/ambarella/install_meeting_models.sh
+python3.12 tools/ambarella/check_meeting_board.py --check
+python3.12 tools/ambarella/check_meeting_board.py \
+  --audio ~/meeting_probe/M_R003S01C01.wav \
+  --rttm ~/meeting_probe/M_R003S01C01.rttm --speakers 6 --minutes 12
 ```
+
+The first only looks: the server lists the graph, the LLM daemon answers,
+the models exist, the packages import under 3.12, where meetings land is
+not tmpfs and has room, nothing holds 8765. The second runs a meeting the
+way a client would — the AISHELL-4 recording `run_meeting_speaker_probe.sh`
+already put on the board, cut to 12 minutes so it spans two topics — and
+reports topics, speakers, summaries, time, the worker's memory and, from
+the reference, the share of speech given to the wrong person (2.3% for
+these 12 minutes in the dev container). It starts the graph with `timeout` 60 on purpose:
+processing takes far longer, so a worker that is still answering at the
+end proves it kept itself alive. Results go to `~/meeting_probe/board_check`.
+
+### Use it
+
+```bash
+BOARD=192.168.1.50
+curl -s -X POST http://$BOARD:8081/start -H 'Content-Type: application/json' \
+  -d '{"request_id":"1","channel_name":"meeting-1","graph_name":"meeting_minutes","timeout":600}'
+until curl -sf http://$BOARD:8765/meetings > /dev/null; do sleep 1; done
+curl -s -X POST http://$BOARD:8765/meeting/upload \
+  -F 'file=@meeting.ogg' -F 'speakers=6' -F 'title=weekly'
+curl -s http://$BOARD:8765/meeting/<meeting_id>        # state, progress
+curl -s -O http://$BOARD:8765/meeting/<meeting_id>/minutes.txt
+```
+
+The client can go offline after the upload: while a meeting is being
+processed the worker pings the server for itself, so `timeout` only has to
+cover the upload and fetching the result. One meeting at a time — a second
+upload while one is processing gets 409.
+
+### Already measured
 
 Whether the board's 7B can produce structured action items has been
 measured, and the answer is no. Six rounds of evidence, and the probe:
