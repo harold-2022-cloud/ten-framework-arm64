@@ -1,0 +1,43 @@
+{
+  "type": "extension",
+  "name": "meeting_control_python",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    },
+    {
+      "type": "system",
+      "name": "ten_ai_base",
+      "version": "0.7"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "summary_timeout_s": { "type": "float64" },
+        "segment_prompt": { "type": "string" },
+        "meeting_prompt": { "type": "string" },
+        "speakers": { "type": "int64" },
+        "link_over_factor": { "type": "int64" },
+        "link_threshold": { "type": "float64" },
+        "link_same_voice": { "type": "float64" }
+      }
+    },
+    "cmd_in": [{ "name": "meeting_uploaded" }],
+    "cmd_out": [{ "name": "segment_audio" }, { "name": "transcribe" }],
+    "data_in": [{ "name": "segments_ready" }, { "name": "segment_transcribed" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
