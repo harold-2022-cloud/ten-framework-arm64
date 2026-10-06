@@ -10,6 +10,7 @@ so the JSON parsed here is the JSON the llm extension sends.
 
 import asyncio
 import json
+import os
 
 import pytest
 from ten_ai_base.struct import (
@@ -145,3 +146,54 @@ async def test_an_error_from_the_llm_answers_nothing_and_says_so():
 
     assert await LLMClient(env).ask("問題") == ""
     assert env.errors
+
+
+def llm_interface():
+    """The schema the runtime checks chat_completion against: in the
+    standalone app task test-extension installs, else the shared system
+    packages -- the same two places tests/bin/start looks."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for base in (
+        os.path.join(here, ".ten", "app", "ten_packages", "system"),
+        os.path.join(here, "..", "..", "system"),
+    ):
+        path = os.path.join(base, "ten_ai_base", "api", "llm-interface.json")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    return None
+
+
+TYPES = {
+    "string": str,
+    "bool": bool,
+    "array": list,
+    "object": dict,
+    "int64": int,
+    "float64": float,
+}
+
+
+@pytest.mark.asyncio
+async def test_a_question_is_one_the_llm_interface_accepts():
+    # The runtime validates chat_completion against llm-interface.json before
+    # the llm extension sees it, and refuses a null where the schema wants an
+    # array: "tools: unsupported conversion from null to array". Every
+    # summary of a real run came back empty that way.
+    interface = llm_interface()
+    if interface is None:
+        pytest.skip("ten_ai_base's llm-interface.json is not installed")
+    schema = next(
+        c["property"]["properties"]
+        for c in interface["cmd_in"]
+        if c["name"] == "chat_completion"
+    )
+    env = Env([done("好"), end()])
+
+    await LLMClient(env).ask("重點？")
+
+    name, payload = env.sent[0]
+    assert name == "chat_completion"
+    for key, value in payload.items():
+        if key in schema:
+            assert isinstance(value, TYPES[schema[key]["type"]]), (key, value)

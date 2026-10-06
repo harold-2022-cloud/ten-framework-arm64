@@ -56,7 +56,12 @@ class LLMClient:
             return ""
 
     async def _collect(self, request: LLMRequest) -> str:
-        cmd = self._cmd("chat_completion", request.model_dump())
+        # No nulls: the runtime checks chat_completion against ten_ai_base's
+        # llm-interface.json and refuses "tools": null where it wants an
+        # array, before the llm extension ever sees the question.
+        cmd = self._cmd(
+            "chat_completion", request.model_dump(exclude_none=True)
+        )
         text = ""
         async for result, _ in self.ten_env.send_cmd_ex(cmd):
             if result is None:
