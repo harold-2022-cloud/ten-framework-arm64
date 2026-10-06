@@ -22,4 +22,7 @@ class MeetingSegmenterConfig(BaseModel):
     # that one ships a Linux library for x86_64 only and raises
     # NotImplementedError on the aarch64 board.
     vad_model: str = ""
-    vad_threshold: float = 0.5
+    # Not the model's usual 0.5: on far-field meeting audio that heard only
+    # 37-50% of the speech, and missed speech reads as silence to cut on.
+    # 0.3 heard 99% (PRD Part 2). Keep in step with property.json.
+    vad_threshold: float = 0.3
