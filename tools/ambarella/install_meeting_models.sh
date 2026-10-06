@@ -4,7 +4,8 @@
 # Licensed under the Apache License, Version 2.0.
 #
 # Fetch the meeting graph's speech models onto an Ambarella board: the
-# diarization pair (segmentation + embedding) and SenseVoice ASR.
+# diarization pair (segmentation + embedding), SenseVoice ASR, and the VAD
+# meeting_segmenter cuts topics with.
 #
 # The meeting-minutes example these were first written for has been deleted
 # and the graph is being rebuilt around a whole-file upload. The models do
@@ -34,6 +35,10 @@
 # hardcoded, so the archive can rename itself without silently breaking the
 # graph.
 #
+# The VAD is sherpa-onnx's export of TEN VAD, ten-vad.onnx: one 332 KB file,
+# no archive. Not the ten-vad pip package -- that one ships a Linux library
+# for x86_64 only and raises NotImplementedError on this board's aarch64.
+#
 # Idempotent: a model already in place is left alone unless --force.
 #
 # Roots, all overridable by environment variable:
@@ -47,28 +52,35 @@
 #   SENSEVOICE_MODEL_DIR   where the graph's asr_model_dir actually looks
 #                          (default ~/sensevoice). This script points it, as
 #                          a symlink, at the extracted SenseVoice bundle.
+#   VAD_ROOT               where ten-vad.onnx lands (default ~/vad_models).
 #
-# The graph itself reads three separate ${env:...} overrides for the
-# resolved model paths -- DIARIZATION_SEG_MODEL, DIARIZATION_EMB_MODEL,
-# SENSEVOICE_MODEL_DIR -- with defaults baked in for a board whose user is
-# lychee. This script prints the paths it resolved at the end; copy them
-# into ai_agents/.env when this board's user is someone else.
+# The graph itself reads four separate ${env:...} overrides for the resolved
+# model paths -- DIARIZATION_SEG_MODEL, DIARIZATION_EMB_MODEL,
+# SENSEVOICE_MODEL_DIR, MEETING_VAD_MODEL -- with defaults baked in for a
+# board whose user is lychee. This script prints the paths it resolved at the
+# end; copy them into ai_agents/.env when this board's user is someone else.
 #
 set -euo pipefail
 
 DIAR_ROOT="${DIAR_ROOT:-$HOME/diarization_models}"
 ASR_DL_ROOT="${ASR_DL_ROOT:-$HOME/sensevoice_dl}"
 SENSEVOICE_MODEL_DIR="${SENSEVOICE_MODEL_DIR:-$HOME/sensevoice}"
+VAD_ROOT="${VAD_ROOT:-$HOME/vad_models}"
+VAD_FILE="$VAD_ROOT/ten-vad.onnx"
 
 # already verified reachable on 2026-09-26
 ASR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2"
+# verified reachable on 2026-10-06; the md5 is the file meeting_segmenter's
+# tests and the AISHELL-4 measurements ran against
+VAD_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/ten-vad.onnx"
+VAD_MD5="00fe0cdcdaebe6e3b80ec81315427a2b"
 
 FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
     -h|--help)
-      sed -n '6,50p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '6,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -121,20 +133,24 @@ if [[ -z "$(find "$ASR_DL_ROOT" -maxdepth 2 -name 'model*.onnx' 2>/dev/null \
   | head -1)" ]]; then
   NEED_NET=1
 fi
+if [[ ! -s "$VAD_FILE" ]]; then
+  NEED_NET=1
+fi
 
 if [[ "$NEED_NET" -eq 0 ]]; then
-  ok "all three already in place; nothing to download"
+  ok "all four already in place; nothing to download"
 elif curl -fsS --max-time 10 -o /dev/null "https://github.com"; then
   ok "github.com reachable"
 else
   die "cannot reach github.com -- download the archives elsewhere and place
   them by hand: the diarization pair under $DIAR_ROOT, following
   probe_diarization.py's own layout (run it with --fetch on a host that can
-  reach github.com and copy the result across), and the SenseVoice tarball
-  at $ASR_DL_ROOT/$(basename "$ASR_URL"). Then re-run this script."
+  reach github.com and copy the result across), the SenseVoice tarball
+  at $ASR_DL_ROOT/$(basename "$ASR_URL"), and ten-vad.onnx at $VAD_FILE.
+  Then re-run this script."
 fi
 
-mkdir -p "$DIAR_ROOT" "$ASR_DL_ROOT"
+mkdir -p "$DIAR_ROOT" "$ASR_DL_ROOT" "$VAD_ROOT"
 
 # ------------------------------------------------------------------ 1
 say "1. Diarization models (segmentation + embedding)"
@@ -213,6 +229,29 @@ ln -sfn "$BUNDLE" "$SENSEVOICE_MODEL_DIR"
 ok "$SENSEVOICE_MODEL_DIR -> $BUNDLE"
 
 # ------------------------------------------------------------------ 3
+say "3. VAD for meeting_segmenter (TEN VAD, sherpa-onnx export)"
+
+if [[ "$FORCE" -eq 1 ]]; then
+  rm -f "$VAD_FILE"
+fi
+if [[ -s "$VAD_FILE" ]]; then
+  ok "ten-vad.onnx already in place"
+else
+  info "downloading ten-vad.onnx"
+  curl -fL -o "$VAD_FILE.part" "$VAD_URL" || die "download failed: $VAD_URL"
+  mv "$VAD_FILE.part" "$VAD_FILE"
+fi
+VAD_BYTES=$(stat -c %s "$VAD_FILE")
+[[ "$VAD_BYTES" -gt 100000 ]] \
+  || die "$VAD_FILE is $VAD_BYTES bytes -- truncated; re-run with --force"
+if [[ "$(md5sum "$VAD_FILE" | cut -d' ' -f1)" != "$VAD_MD5" ]]; then
+  warn "ten-vad.onnx differs from the file measured on 2026-10-06 ($VAD_MD5);"
+  warn "the release asset has changed -- the segmenter's threshold may need"
+  warn "re-checking against it"
+fi
+ok "ten-vad.onnx  $((VAD_BYTES / 1024)) KB  $VAD_FILE"
+
+# ------------------------------------------------------------------ 4
 say "Done"
 echo "  Resolved model paths. This board's graph defaults assume the user"
 echo "  is lychee; if it is not, or these roots were moved, put these in"
@@ -221,6 +260,7 @@ echo
 printf '    DIARIZATION_SEG_MODEL=%s\n' "$SEG_DIR/model.onnx"
 printf '    DIARIZATION_EMB_MODEL=%s\n' "$EMB_FILE"
 printf '    SENSEVOICE_MODEL_DIR=%s\n' "$SENSEVOICE_MODEL_DIR"
+printf '    MEETING_VAD_MODEL=%s\n' "$VAD_FILE"
 echo
 echo "  Next: docs/development/board_quickstart.md, the meeting graph"
 echo "  section -- or its Traditional Chinese twin, board_quickstart.zh-TW.md."
