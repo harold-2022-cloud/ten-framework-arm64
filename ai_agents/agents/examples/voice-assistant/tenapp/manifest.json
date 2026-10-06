@@ -64,6 +64,18 @@
       "path": "../../../ten_packages/extension/ambarella_llm2_python"
     },
     {
+      "path": "../../../ten_packages/extension/meeting_uploader"
+    },
+    {
+      "path": "../../../ten_packages/extension/meeting_segmenter"
+    },
+    {
+      "path": "../../../ten_packages/extension/meeting_transcriber"
+    },
+    {
+      "path": "../../../ten_packages/extension/meeting_control_python"
+    },
+    {
       "path": "../../../ten_packages/extension/speechmatics_asr_python"
     },
     {
