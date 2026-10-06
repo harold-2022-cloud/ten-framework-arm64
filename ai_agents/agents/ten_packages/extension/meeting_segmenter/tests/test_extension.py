@@ -42,6 +42,7 @@ class SegmentTester(AsyncExtensionTester):
         self.payload = None
         self.status = None
         self.timed_out = False
+        self.order = []
 
     async def on_start(self, ten_env: AsyncTenEnvTester) -> None:
         asyncio.create_task(self._watchdog(ten_env))
@@ -49,6 +50,7 @@ class SegmentTester(AsyncExtensionTester):
         cmd.set_property_string("ogg_path", self.ogg_path)
         cmd.set_property_string("work_dir", self.work_dir)
         result, _ = await ten_env.send_cmd(cmd)
+        self.order.append("result")
         self.status = result.get_status_code() if result else None
         await asyncio.sleep(0)
         if self.payload is not None:
@@ -58,6 +60,7 @@ class SegmentTester(AsyncExtensionTester):
         if data.get_name() == "segments_ready":
             payload, _ = data.get_property_to_json(None)
             self.payload = json.loads(payload)
+            self.order.append("data")
             if self.status is not None:
                 ten_env.stop_test()
 
@@ -85,6 +88,18 @@ def test_an_undecodable_upload_comes_back_as_an_error_not_a_crash(tmp_path):
     assert tester.status == StatusCode.OK
     assert tester.payload["segments"] == []
     assert tester.payload["error"]
+
+
+def test_the_command_is_answered_before_the_audio_is_decoded(tmp_path):
+    """Decoding and scanning an hour of audio may outlast the runtime's
+    180 s command timeout on the board; the transcriber's topics did. The
+    command is only an acknowledgement; the topics come as data."""
+    ogg = tmp_path / "audio.ogg"
+    ogg.write_bytes(b"not an ogg")
+
+    tester = run(tmp_path, ogg, vad_model="/unused.onnx")
+
+    assert tester.order == ["result", "data"]
 
 
 @pytest.mark.skipif(

@@ -4,8 +4,9 @@
 #
 """A file in, a transcript out, one segment at a time."""
 
+import asyncio
 import json
-from typing import Optional
+from typing import Optional, Set
 
 from ten_runtime import (
     AsyncExtension,
@@ -28,6 +29,7 @@ class MeetingTranscriberExtension(AsyncExtension):
         super().__init__(name)
         self.config: Optional[MeetingTranscriberConfig] = None
         self.transcriber: Optional[MeetingTranscriber] = None
+        self.tasks: Set[asyncio.Task] = set()
 
     async def on_init(self, ten_env: AsyncTenEnv) -> None:
         config_json, _ = await ten_env.get_property_to_json("")
@@ -71,6 +73,27 @@ class MeetingTranscriberExtension(AsyncExtension):
                 "coming back as several)"
             )
 
+        # Acknowledged now, answered as segment_transcribed: a topic takes
+        # minutes, and the runtime fails a command whose result has not come
+        # back in 180 s ("in paths timeout") -- every six-minute topic did.
+        await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))
+        task = asyncio.create_task(
+            self._transcribe(
+                ten_env, segment_id, path, speakers, start_s, duration_s
+            )
+        )
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def _transcribe(
+        self,
+        ten_env: AsyncTenEnv,
+        segment_id: str,
+        path: str,
+        speakers: int,
+        start_s: float,
+        duration_s: Optional[float],
+    ) -> None:
         payload = {"segment_id": segment_id, "utterances": [], "error": None}
         if self.transcriber is None:
             payload["error"] = "transcriber was never initialised"
@@ -91,4 +114,3 @@ class MeetingTranscriberExtension(AsyncExtension):
             None, json.dumps(payload, ensure_ascii=False)
         )
         await ten_env.send_data(data)
-        await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))

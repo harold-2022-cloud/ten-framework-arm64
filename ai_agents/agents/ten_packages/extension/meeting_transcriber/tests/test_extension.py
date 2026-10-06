@@ -38,12 +38,14 @@ class TranscribeTester(AsyncExtensionTester):
         self.payload = None
         self.status = None
         self.timed_out = False
+        self.order = []
 
     async def on_start(self, ten_env: AsyncTenEnvTester) -> None:
         asyncio.create_task(self._watchdog(ten_env))
         cmd = Cmd.create("transcribe")
         cmd.set_property_from_json(None, json.dumps(self.props))
         result, _ = await ten_env.send_cmd(cmd)
+        self.order.append("result")
         self.status = result.get_status_code() if result else None
         if self.payload is not None:
             ten_env.stop_test()
@@ -52,6 +54,7 @@ class TranscribeTester(AsyncExtensionTester):
         if data.get_name() == "segment_transcribed":
             payload, _ = data.get_property_to_json(None)
             self.payload = json.loads(payload)
+            self.order.append("data")
             if self.status is not None:
                 ten_env.stop_test()
 
@@ -86,6 +89,32 @@ def test_without_models_the_answer_is_an_error_naming_the_topic(tmp_path):
     assert tester.payload["segment_id"] == "t03"
     assert tester.payload["utterances"] == []
     assert tester.payload["error"]
+
+
+def test_the_command_is_answered_before_the_topic_is_transcribed(tmp_path):
+    """A topic takes minutes; the runtime fails a command whose result has
+    not come back in 180 s ("in paths timeout"), and on the dev container
+    every six-minute topic of a meeting failed that way. So the command is
+    only an acknowledgement, and the transcript comes as data.
+
+    The model files exist but are empty: the transcriber is built, starts a
+    diarization child, and that child fails to load them -- slow enough that
+    the order is the extension's, not a race in the tester."""
+    pcm = tmp_path / "a.pcm"
+    pcm.write_bytes(b"\x00\x01" * 16000)
+    for name in ("seg.onnx", "emb.onnx"):
+        (tmp_path / name).write_bytes(b"")
+    (tmp_path / "asr").mkdir()
+
+    tester = run(
+        {"pcm_path": str(pcm), "segment_id": "t01", "speakers": 2},
+        segmentation_model=str(tmp_path / "seg.onnx"),
+        embedding_model=str(tmp_path / "emb.onnx"),
+        asr_model_dir=str(tmp_path / "asr"),
+    )
+
+    assert tester.order == ["result", "data"]
+    assert "diarization" in tester.payload["error"]
 
 
 @pytest.mark.skipif(
