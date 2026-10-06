@@ -1,0 +1,8 @@
+{
+  "listen_port": 8765,
+  "meetings_dir": "/tmp/meetings",
+  "max_upload_mb": 64.0,
+  "min_free_mb": 250.0,
+  "auth_token": "",
+  "keepalive_s": 20.0
+}

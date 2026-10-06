@@ -1,0 +1,37 @@
+{
+  "type": "extension",
+  "name": "meeting_uploader",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "type": "system",
+      "name": "ten_runtime_python",
+      "version": "0.11"
+    }
+  ],
+  "package": {
+    "include": [
+      "manifest.json",
+      "property.json",
+      "**.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "api": {
+    "property": {
+      "properties": {
+        "listen_port": { "type": "int64" },
+        "meetings_dir": { "type": "string" },
+        "max_upload_mb": { "type": "float64" },
+        "min_free_mb": { "type": "float64" },
+        "auth_token": { "type": "string" },
+        "channel": { "type": "string" },
+        "ping_url": { "type": "string" },
+        "keepalive_s": { "type": "float64" }
+      }
+    },
+    "cmd_out": [{ "name": "meeting_uploaded" }]
+  },
+  "scripts": { "test": "tests/bin/start" }
+}
