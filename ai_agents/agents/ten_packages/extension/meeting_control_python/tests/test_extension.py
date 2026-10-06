@@ -9,8 +9,7 @@ the controller sends and sends back the data those extensions would. There
 is no llm node here, so every summary comes back empty -- which is itself
 the point of one test: a meeting still ends archived without its LLM.
 
-    task test-extension \\
-      EXTENSION=agents/examples/voice-assistant/tenapp/ten_packages/extension/meeting_control_python
+    task test-extension EXTENSION=agents/ten_packages/extension/meeting_control_python
 """
 
 import asyncio
