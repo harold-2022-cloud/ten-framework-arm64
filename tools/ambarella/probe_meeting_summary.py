@@ -139,13 +139,17 @@ def build_prompt(
     return head + "\n".join(lines), topic
 
 
-def ask(base_url, prompt, max_seconds, raw_path, quiet=False):
+def new_session_id():
+    # The daemon parses this as a number and refuses zero.
+    return str(random.randint(100_000_000, 999_999_999))
+
+
+def ask(base_url, prompt, max_seconds, raw_path, quiet=False, session_id=None):
     """Stream one answer. Returns (raw text, first_s, total_s, how it ended)."""
     url = urllib.parse.urlparse(base_url)
     conn = http.client.HTTPConnection(url.hostname, url.port or 80, timeout=120)
     headers = {
-        # The daemon parses this as a number and refuses zero.
-        "Session-Id": str(random.randint(100_000_000, 999_999_999)),
+        "Session-Id": session_id or new_session_id(),
         "Model-Type": "9",
         "Stream-Off": "0",
         "Reset-En": "1",
@@ -232,18 +236,35 @@ def copied_share(answer, transcript, run=10):
     return sum(covered) / max(len(answer), 1)
 
 
+def ask_patiently(base_url, prompt, max_seconds, raw_path, session_id):
+    """ask(), again after a refusal. The daemon serves one session at a
+    time and refuses by closing the connection with no response at all."""
+    for attempt in range(1, 4):
+        try:
+            return ask(base_url, prompt, max_seconds, raw_path, True, session_id)
+        except (http.client.RemoteDisconnected, ConnectionError) as err:
+            info(f"refused ({type(err).__name__}), attempt {attempt} of 3; "
+                 "waiting 20 s")
+            time.sleep(20)
+    return "", None, 0.0, "refused three times"
+
+
 def run_variants(args, record, base_url, out_dir):
     rows = []
+    # One session for every variant, cleared by Reset-En each time -- what
+    # probe_structured_minutes.py does, and what the graph's llm node does.
+    # A fresh Session-Id per variant was refused on the third.
+    session_id = new_session_id()
     for name, times, label, instruction in VARIANTS:
         say(f"variant {name}")
         prompt, topic = build_prompt(record, args.topic, instruction, times, label)
         transcript = "\n".join(u["text"] for u in topic["utterances"])
-        raw, first, total, ended = ask(
+        raw, first, total, ended = ask_patiently(
             base_url,
             prompt,
             args.variant_seconds,
             os.path.join(out_dir, f"{name}.sse"),
-            quiet=True,
+            session_id,
         )
         answer = unescape(raw)
         with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
