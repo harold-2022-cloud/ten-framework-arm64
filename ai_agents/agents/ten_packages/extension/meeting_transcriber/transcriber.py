@@ -6,22 +6,26 @@
 
 Diarization gives the turns, recognition gives the words, and the join is by
 time: each speaker turn is cut out of the samples and recognised on its own.
-Both engines are offline and both are slow enough to matter, so they run in an
-executor and the loop keeps going.
+Both engines are offline and slow enough to matter. Recognition runs on an
+executor thread; diarization runs in a child process, because it holds the
+GIL for the whole call and would stop every extension's loop (diarize.py).
 """
 
 import asyncio
 import glob
+import json
 import os
+import shutil
+import sys
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 import numpy as np
 
 from .config import MeetingTranscriberConfig
+from .diarize import SAMPLE_RATE, read_pcm16
 
-BYTES_PER_SAMPLE = 2
-SAMPLE_RATE = 16000
+DIARIZE_SCRIPT = os.path.join(os.path.dirname(__file__), "diarize.py")
 
 
 @dataclass
@@ -51,53 +55,32 @@ def utterances_payload(utterances: List[Utterance]) -> List[dict]:
     ]
 
 
-def read_pcm16(
-    path: str, start_s: float = 0.0, duration_s: Optional[float] = None
-) -> np.ndarray:
-    """The recorder's own format: mono, 16 kHz, no header.
-
-    A slice reads only its own bytes -- one topic out of an hour's PCM, not
-    the hour. Without start_s and duration_s it reads the whole file.
-    """
-    with open(path, "rb") as pcm:
-        pcm.seek(int(round(start_s * SAMPLE_RATE)) * BYTES_PER_SAMPLE)
-        if duration_s is None:
-            raw = pcm.read()
-        else:
-            raw = pcm.read(
-                int(round(duration_s * SAMPLE_RATE)) * BYTES_PER_SAMPLE
-            )
-    raw = raw[: len(raw) - (len(raw) % BYTES_PER_SAMPLE)]
-    samples = np.frombuffer(raw, dtype=np.int16)
-    return (samples.astype(np.float32) / 32768.0).copy()
+def child_python() -> str:
+    """The interpreter the runtime embeds, by its versioned name: on the
+    board the runtime loads 3.12 while the shell's python3 is 3.13, and
+    sherpa-onnx is installed for the former."""
+    versioned = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    return shutil.which(versioned) or sys.executable or "python3"
 
 
-def load_diarizer(config: MeetingTranscriberConfig):
-    """Imported here so the rest of this file, and its tests, need no models."""
-    import sherpa_onnx  # pylint: disable=import-outside-toplevel
-
-    return sherpa_onnx.OfflineSpeakerDiarization(
-        sherpa_onnx.OfflineSpeakerDiarizationConfig(
-            segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
-                pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
-                    model=config.segmentation_model
-                ),
-                num_threads=config.num_threads,
-                provider="cpu",
-            ),
-            embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                model=config.embedding_model,
-                num_threads=config.num_threads,
-                provider="cpu",
-            ),
-            clustering=sherpa_onnx.FastClusteringConfig(
-                num_clusters=config.speakers,
-                threshold=config.cluster_threshold,
-            ),
-            min_duration_on=0.3,
-            min_duration_off=0.5,
-        )
+async def diarize_in_child(request: dict) -> List[list]:
+    """diarize.py in its own process: the turns, or RuntimeError with the
+    child's last words."""
+    child = await asyncio.create_subprocess_exec(
+        child_python(),
+        DIARIZE_SCRIPT,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
+    out, err = await child.communicate(json.dumps(request).encode())
+    lines = out.decode(errors="replace").strip().splitlines()
+    if child.returncode != 0 or not lines:
+        tail = err.decode(errors="replace").strip().splitlines()[-3:]
+        raise RuntimeError(
+            f"diarization exited {child.returncode}: " + " | ".join(tail)
+        )
+    return json.loads(lines[-1])["turns"]
 
 
 def load_extractor(config: MeetingTranscriberConfig):
@@ -139,17 +122,15 @@ class MeetingTranscriber:
         self,
         config: MeetingTranscriberConfig,
         ten_env,
-        load_diarizer: Optional[Callable[[Any], Any]] = None,
+        diarize: Optional[Callable[[dict], Awaitable[List[list]]]] = None,
         load_recogniser: Optional[Callable[[Any], Any]] = None,
         load_extractor: Optional[Callable[[Any], Any]] = None,
     ) -> None:
         self.config = config
         self.ten_env = ten_env
-        self._load_diarizer = load_diarizer or globals()["load_diarizer"]
+        self._diarize = diarize or diarize_in_child
         self._load_recogniser = load_recogniser or globals()["load_recogniser"]
         self._load_extractor = load_extractor or globals()["load_extractor"]
-        self._diarizer = None
-        self._diarizer_speakers: Optional[int] = None
         self._recogniser = None
         self._extractor = None
         self._lock = asyncio.Lock()
@@ -166,23 +147,26 @@ class MeetingTranscriber:
         samples = read_pcm16(path, start_s, duration_s)
         if samples.size == 0:
             return []
+        request = {
+            "pcm_path": path,
+            "start_s": start_s,
+            "duration_s": duration_s,
+            "speakers": speakers,
+            "cluster_threshold": self.config.cluster_threshold,
+            "segmentation_model": self.config.segmentation_model,
+            "embedding_model": self.config.embedding_model,
+            "num_threads": self.config.num_threads,
+        }
         # One segment at a time: both models are hundreds of megabytes and the
         # board has four cores shared with everything else.
         async with self._lock:
+            turns = await self._diarize(request)
             return await asyncio.get_running_loop().run_in_executor(
-                None, self._work, samples, speakers
+                None, self._recognise, samples, turns
             )
 
-    def _ensure_loaded(self, speakers: int) -> None:
-        """Lazily, and only once: 47 MB has no business being resident for a
-        whole meeting when it is wanted for a minute of it."""
-        # Rebuilt when the count changes: one worker serves meeting after
-        # meeting, and a diarizer built for the first one's four people would
-        # cluster the next one's seven as four.
-        if self._diarizer is None or self._diarizer_speakers != speakers:
-            config = self.config.model_copy(update={"speakers": speakers})
-            self._diarizer = self._load_diarizer(config)
-            self._diarizer_speakers = speakers
+    def _ensure_loaded(self) -> None:
+        """Lazily, and only once."""
         if self._recogniser is None:
             self._recogniser = self._load_recogniser(self.config)
         if self._extractor is None:
@@ -204,15 +188,17 @@ class MeetingTranscriber:
         norm = float(np.linalg.norm(vector))
         return (vector / norm).tolist() if norm > 0 else None
 
-    def _work(self, samples: np.ndarray, speakers: int) -> List[Utterance]:
-        # Runs on a worker thread. Both calls are C++ holding it for seconds.
-        self._ensure_loaded(speakers)
-        turns = self._diarizer.process(samples).sort_by_start_time()
-
+    def _recognise(
+        self, samples: np.ndarray, turns: List[list]
+    ) -> List[Utterance]:
+        # Runs on an executor thread. Recognition gives the GIL back while it
+        # decodes (measured: no loop stall over 0.2 s); an embedding holds it
+        # for well under a second per turn.
+        self._ensure_loaded()
         out: List[Utterance] = []
-        for turn in turns:
-            begin = int(turn.start * SAMPLE_RATE)
-            end = min(int(turn.end * SAMPLE_RATE), samples.size)
+        for start_s, end_s, speaker in turns:
+            begin = int(start_s * SAMPLE_RATE)
+            end = min(int(end_s * SAMPLE_RATE), samples.size)
             if end <= begin:
                 continue
             stream = self._recogniser.create_stream()
@@ -222,9 +208,9 @@ class MeetingTranscriber:
             if text:
                 out.append(
                     Utterance(
-                        start_s=turn.start,
-                        end_s=turn.end,
-                        speaker=turn.speaker,
+                        start_s=start_s,
+                        end_s=end_s,
+                        speaker=speaker,
                         text=text,
                         embedding=self._embed(samples, begin, end),
                     )

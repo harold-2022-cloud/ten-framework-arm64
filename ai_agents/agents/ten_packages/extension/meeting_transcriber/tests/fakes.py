@@ -13,6 +13,8 @@ are 47 MB and live on the board.
 from dataclasses import dataclass
 from typing import List
 
+from meeting_transcriber.diarize import diarize_slice
+
 
 @dataclass
 class FakeSegment:
@@ -128,3 +130,14 @@ class FakeExtractor:
     def compute(self, stream):
         self.fed.append(stream.samples)
         return list(self.vector)
+
+
+def in_process(load):
+    """What the child process runs, run here instead with a fake diarizer:
+    the transcriber's tests are about what happens around diarization, not
+    about the process it happens in (test_diarize.py covers that)."""
+
+    async def diarize(request):
+        return diarize_slice(request, load=load)
+
+    return diarize

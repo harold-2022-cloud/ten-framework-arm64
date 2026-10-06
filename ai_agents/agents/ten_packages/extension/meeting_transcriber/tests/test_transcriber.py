@@ -20,6 +20,7 @@ from meeting_transcriber.transcriber import (
 )
 
 from .fakes import (
+    in_process,
     FakeDiarizationResult,
     FakeDiarizer,
     FakeEmbeddingStream,
@@ -38,7 +39,7 @@ def make(segments, texts, **overrides):
     return MeetingTranscriber(
         config=MeetingTranscriberConfig(**overrides),
         ten_env=FakeTenEnv(),
-        load_diarizer=lambda _c: FakeDiarizer(segments),
+        diarize=in_process(lambda _c: FakeDiarizer(segments)),
         load_extractor=lambda _c: FakeExtractor(),
         load_recogniser=lambda _c: FakeRecogniser(texts),
     )
@@ -119,7 +120,7 @@ async def test_the_speaker_count_reaches_the_clusterer(tmp_path):
             asr_model_dir="/unused",
         ),
         ten_env=FakeTenEnv(),
-        load_diarizer=spy,
+        diarize=in_process(spy),
         load_extractor=lambda _c: FakeExtractor(),
         load_recogniser=lambda _c: FakeRecogniser(["好。"]),
     )
@@ -194,7 +195,7 @@ async def test_a_topic_is_diarized_from_its_slice_alone(tmp_path):
             asr_model_dir="/unused",
         ),
         ten_env=FakeTenEnv(),
-        load_diarizer=lambda _c: diarizer,
+        diarize=in_process(lambda _c: diarizer),
         load_extractor=lambda _c: FakeExtractor(),
         load_recogniser=lambda _c: FakeRecogniser(["話題二。"]),
     )
@@ -229,7 +230,7 @@ async def test_a_second_meeting_with_a_different_count_is_clustered_to_it(
             asr_model_dir="/unused",
         ),
         ten_env=FakeTenEnv(),
-        load_diarizer=loader,
+        diarize=in_process(loader),
         load_extractor=lambda _c: FakeExtractor(),
         load_recogniser=lambda _c: FakeRecogniser(["好。", "好。"]),
     )
@@ -248,7 +249,7 @@ def with_extractor(segments, texts, extractor):
             asr_model_dir="/unused",
         ),
         ten_env=FakeTenEnv(),
-        load_diarizer=lambda _c: FakeDiarizer(segments),
+        diarize=in_process(lambda _c: FakeDiarizer(segments)),
         load_extractor=lambda _c: extractor,
         load_recogniser=lambda _c: FakeRecogniser(texts),
     )
