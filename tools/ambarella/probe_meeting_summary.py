@@ -8,6 +8,7 @@
   python3.12 tools/ambarella/probe_meeting_summary.py              # topic 1
   python3.12 tools/ambarella/probe_meeting_summary.py --topic 2
   python3.12 tools/ambarella/probe_meeting_summary.py --record path/record.json
+  python3.12 tools/ambarella/probe_meeting_summary.py --variants   # compare prompts
 
 On the board the meeting graph's summaries came back empty: the first
 topic's answer began 2.8 s after a 1601-character prompt went in, was
@@ -25,6 +26,14 @@ asks the same question with no time limit and shows the whole answer.
   report     time to the first character and to the end, characters and
              characters per second, how much came before </think>, whether
              lines repeat, the head and the tail
+
+--variants asks the same topic several ways and tabulates them. The first
+run showed why the shipped prompt is slow: thinking was already bypassed,
+the first character came at 2.9 s and the model wrote 10 characters a
+second -- but it wrote 3419 of them, copying the 1601-character transcript
+line by line, twice, rather than summarising it. "Mark the time and the
+speaker" reads to a 7B as "list every timestamped line". The board's model
+decodes greedily, so one run per variant is the whole answer.
 
 Run it with nothing else using the LLM: the daemon serves one session at a
 time and refuses a second by closing the connection. Everything is also
@@ -109,7 +118,9 @@ def segment_prompt():
     return module.MeetingControlConfig().segment_prompt
 
 
-def build_prompt(record_path, topic_no):
+def build_prompt(
+    record_path, topic_no, instruction=None, times=True, label="說話人"
+):
     with open(record_path, encoding="utf-8") as f:
         record = json.load(f)
     topics = record["topics"]
@@ -120,14 +131,15 @@ def build_prompt(record_path, topic_no):
         sys.exit(f"topic {topic_no} failed in that run: {topic['error']}")
     # record.py's lines_for(), for a record with no recorded_at.
     lines = [
-        f"[{mmss(topic['start_s'] + u['start_s'])}] "
-        f"說話人{u['speaker'] + 1}：{u['text']}"
+        (f"[{mmss(topic['start_s'] + u['start_s'])}] " if times else "")
+        + f"{label}{u['speaker'] + 1}：{u['text']}"
         for u in topic["utterances"]
     ]
-    return segment_prompt() + "\n".join(lines), topic
+    head = segment_prompt() if instruction is None else instruction
+    return head + "\n".join(lines), topic
 
 
-def ask(base_url, prompt, max_seconds, raw_path):
+def ask(base_url, prompt, max_seconds, raw_path, quiet=False):
     """Stream one answer. Returns (raw text, first_s, total_s, how it ended)."""
     url = urllib.parse.urlparse(base_url)
     conn = http.client.HTTPConnection(url.hostname, url.port or 80, timeout=120)
@@ -175,7 +187,7 @@ def ask(base_url, prompt, max_seconds, raw_path):
             if ended in DONE:
                 break
             now = time.monotonic()
-            if now >= next_report:
+            if now >= next_report and not quiet:
                 chars = len(unescape("".join(payloads)))
                 info(f"{mmss(now - t0)}  {chars} characters so far")
                 next_report = now + 15
@@ -185,6 +197,84 @@ def ask(base_url, prompt, max_seconds, raw_path):
 
 def unescape(text):
     return text.replace("<SP>", " ").replace("<NL>", "\n")
+
+
+# Each tried on the same topic. Short on purpose: on this 7B every addition
+# to a prompt cost content (PRD Part 2).
+VARIANTS = [
+    ("prose", True, "說話人",
+     "以下是一段會議的逐字稿。用中文寫三到五句話，總結這段在討論什麼、"
+     "做了什麼決定、誰要做什麼。不要逐句複述原文。\n\n"),
+    ("prose-notimes", False, "說話人",
+     "以下是一段會議的逐字稿。用中文寫三到五句話，總結這段在討論什麼、"
+     "做了什麼決定、誰要做什麼。不要逐句複述原文。\n\n"),
+    ("short150", False, "說話人",
+     "以下是一段會議的逐字稿。用不超過150字總結重點，不要複述原文。\n\n"),
+    ("points3", False, "說話人",
+     "以下是一段會議的逐字稿。列出這段最重要的三個重點，每點一句話，"
+     "不要引用原文。\n\n"),
+    ("simplified", False, "说话人",
+     "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、"
+     "做了什么决定、谁要做什么。不要逐句复述原文。\n\n"),
+]
+
+
+def copied_share(answer, transcript, run=10):
+    """How much of the answer is the transcript itself: the share of its
+    characters inside some run of `run` or more that occurs verbatim in the
+    transcript. Markup, timestamps and speaker labels are not in the
+    transcript, so a faithful copy scores high but not 100%."""
+    covered = [False] * len(answer)
+    for i in range(len(answer) - run + 1):
+        if answer[i : i + run] in transcript:
+            for j in range(i, i + run):
+                covered[j] = True
+    return sum(covered) / max(len(answer), 1)
+
+
+def run_variants(args, record, base_url, out_dir):
+    rows = []
+    for name, times, label, instruction in VARIANTS:
+        say(f"variant {name}")
+        prompt, topic = build_prompt(record, args.topic, instruction, times, label)
+        transcript = "\n".join(u["text"] for u in topic["utterances"])
+        raw, first, total, ended = ask(
+            base_url,
+            prompt,
+            args.variant_seconds,
+            os.path.join(out_dir, f"{name}.sse"),
+            quiet=True,
+        )
+        answer = unescape(raw)
+        with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
+            f.write(prompt + "\n\n----- answer -----\n" + answer)
+        row = {
+            "name": name,
+            "prompt": len(prompt),
+            "seconds": total,
+            "finished": ended in DONE,
+            "chars": len(answer),
+            "copied": copied_share(answer, transcript),
+            "garbled": answer.count("\ufffd"),
+            "answer": answer,
+        }
+        rows.append(row)
+        info(f"{total:.0f} s, {len(answer)} characters, "
+             f"{'finished' if row['finished'] else ended}, "
+             f"{row['copied']:.0%} copied, {row['garbled']} garbled")
+        # The daemon holds a finished session briefly; do not crowd it.
+        time.sleep(5)
+
+    say("comparison")
+    print(f"  {'variant':<15}{'prompt':>7}{'secs':>6}{'chars':>7}"
+          f"{'copied':>8}{'garbled':>9}  finished", flush=True)
+    for r in rows:
+        print(f"  {r['name']:<15}{r['prompt']:>7}{r['seconds']:>6.0f}"
+              f"{r['chars']:>7}{r['copied']:>8.0%}{r['garbled']:>9}  "
+              f"{'yes' if r['finished'] else 'no'}", flush=True)
+    for r in rows:
+        say(f"{r['name']}, first 400 characters")
+        print(r["answer"][:400], flush=True)
 
 
 def repetition(text):
@@ -238,6 +328,10 @@ def main():
     p.add_argument("--record", help="record.json (default: the last board check)")
     p.add_argument("--topic", type=int, default=1)
     p.add_argument("--max-seconds", type=float, default=900.0)
+    p.add_argument("--variants", action="store_true",
+                   help="compare the prompt variants instead")
+    p.add_argument("--variant-seconds", type=float, default=300.0,
+                   help="cap per variant")
     p.add_argument("--out", default="~/meeting_probe/summary_probe")
     args = p.parse_args()
 
@@ -249,6 +343,12 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     thinking()
+    base_url = setting("AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080")
+
+    if args.variants:
+        run_variants(args, record, base_url, out_dir)
+        print(f"\nsaved each prompt and answer in {out_dir}", flush=True)
+        return
 
     say(f"prompt: topic {args.topic} of {record}")
     prompt, topic = build_prompt(record, args.topic)
@@ -257,7 +357,6 @@ def main():
     info(f"{len(prompt)} characters, {len(topic['utterances'])} lines, "
          f"topic {mmss(topic['start_s'])}-{mmss(topic['end_s'])}")
 
-    base_url = setting("AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080")
     say(f"asking {base_url} (no limit but --max-seconds {args.max_seconds:.0f})")
     raw, first, total, ended = ask(
         base_url, prompt, args.max_seconds, os.path.join(out_dir, "raw.sse")
