@@ -6,22 +6,30 @@
 
 The daemon sends one character per SSE event. When a character's UTF-8
 bytes straddle two model tokens, it sends the character's full length
-anyway: the bytes it has, then whatever it read past them, and the real
-remaining bytes alone in the next event. Captured on an N1-655 on
-2026-10-07 (tools/ambarella/probe_meeting_summary.py --garbling):
+anyway: the bytes the token has, then as many read past them as are
+missing. The missing real bytes come after, each in an event of its own.
+Captured on an N1-655 on 2026-10-07 (tools/ambarella/probe_meeting_summary.py
+--garbling):
 
     年 e5 b9 b4   arrived as   e5 b9 6e | b4
     完 e5 ae 8c   arrived as   e5 ae e9 | 8c
+    调 e8 b0 83   arrived as   e8 9f e8 | b0 | 83
+                               e8 82 e5 | b0 | 83
 
-Nothing is lost, only displaced, and the extra byte can never be a
-continuation byte where one is expected -- that is what makes it visible.
-So: a character left short in one event, followed in that event by exactly
-as many bytes as it is short, all of them not continuation bytes, is
-completed from the next event if that event starts with the missing
-continuation bytes; the bytes in between are dropped. A character cut
-cleanly at an event boundary is joined the same way. Anything else is left
-as it came, to decode as U+FFFD: a break the rule does not recognise is
-shown, never guessed at.
+The bytes read past the token are whatever was there, and can look like
+continuation bytes (9f, 82 above), so they cannot be told apart by their
+values. What tells is what follows: a well-formed stream never starts an
+event with a continuation byte, so continuation bytes arriving on their
+own -- orphans -- are the bytes the character before them is missing, and
+their count is how many of its slot were read past the token. The
+character is then its lead byte, the real bytes after it, and the orphans;
+the rest of the slot is dropped.
+
+So every event that is one multi-byte character is held until the next
+event that is not an orphan, which costs one event of delay. A held
+character no orphans follow goes out exactly as it came, broken or not:
+nothing is ever guessed. A character cut cleanly at an event boundary --
+no bytes read past -- is joined by the same rule.
 
 Standard library only, so the probe can load this file by path.
 """
@@ -47,68 +55,43 @@ def _length(lead: int) -> Optional[int]:
 
 class Mender:
     """Fed one event's bytes at a time; gives back the bytes that are
-    settled. A character still waiting on the next event is held."""
+    settled."""
 
     def __init__(self) -> None:
-        self._held = b""  # a lead byte and the continuations it has
-        self._missing = 0  # continuations it still needs
+        self._slot = b""  # an event that is one multi-byte character
+        self._orphans = bytearray()  # continuation bytes that followed it
 
     def feed(self, event: bytes) -> bytes:
-        out = bytearray()
-        start = 0
-        if self._missing:
-            take = 0
-            while (
-                take < self._missing
-                and take < len(event)
-                and _continuation(event[take])
-            ):
-                take += 1
-            if take == self._missing:
-                out += self._held + event[:take]
-                start = take
-            else:
-                out += self._held  # not completed here: let it show
-            self._held, self._missing = b"", 0
-        out += self._scan(event, start)
-        return bytes(out)
+        i = 0
+        if self._slot:
+            while i < len(event) and _continuation(event[i]):
+                self._orphans.append(event[i])
+                i += 1
+            if event and i == len(event):
+                return b""  # only orphans: more may follow
+        out = self._settle()
+        rest = event[i:]
+        need = _length(rest[0]) if rest else None
+        if need is not None and len(rest) <= 1 + need:
+            self._slot = bytes(rest)  # one character: see what follows
+        else:
+            out += rest
+        return out
 
     def flush(self) -> bytes:
-        held, self._held, self._missing = self._held, b"", 0
-        return held
+        return self._settle()
 
-    def _scan(self, event: bytes, i: int) -> bytes:
-        out = bytearray()
-        while i < len(event):
-            need = _length(event[i])
-            if need is None:
-                out.append(event[i])
-                i += 1
-                continue
-            have = 0
-            while (
-                have < need
-                and i + 1 + have < len(event)
-                and _continuation(event[i + 1 + have])
-            ):
-                have += 1
-            if have == need:
-                out += event[i : i + 1 + need]
-                i += 1 + need
-                continue
-            short = need - have
-            after = event[i + 1 + have :]
-            if not after or (
-                len(after) == short and not any(map(_continuation, after))
-            ):
-                # Cut at the boundary, or padded to full length with bytes
-                # read past the token: wait for the rest in the next event.
-                self._held = event[i : i + 1 + have]
-                self._missing = short
-                return bytes(out)
-            out += event[i : i + 1 + have]  # unrecognised: leave it broken
-            i += 1 + have
-        return bytes(out)
+    def _settle(self) -> bytes:
+        slot, orphans = self._slot, bytes(self._orphans)
+        self._slot, self._orphans = b"", bytearray()
+        if not slot or not orphans:
+            return slot + orphans
+        need = _length(slot[0])
+        keep = need - len(orphans)
+        real = slot[1 : 1 + keep]
+        if keep >= 0 and len(real) == keep and all(map(_continuation, real)):
+            return slot[:1] + real + orphans
+        return slot + orphans  # not the daemon's pattern: leave it broken
 
 
 def mend(events: Iterable[bytes]) -> bytes:
