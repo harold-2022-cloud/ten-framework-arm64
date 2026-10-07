@@ -182,6 +182,7 @@ Python 套件（`soundfile`、`aiohttp`、`sherpa-onnx`）必須裝進 runtime �
 | `DIARIZATION_SEG_MODEL`、`DIARIZATION_EMB_MODEL`、`SENSEVOICE_MODEL_DIR`、`MEETING_VAD_MODEL` | `/home/lychee` 底下 | 板子的使用者不是 `lychee`；`install_meeting_models.sh` 最後會印出路徑 |
 | `MEETINGS_DIR` | `/tmp/meetings` | 板子的 `/tmp` 是 tmpfs——歸檔會佔記憶體、重開機就不見 |
 | `MEETING_AUTH_TOKEN` | 空，不檢查 | 設了之後，8765 的每個請求都要帶 `Authorization: Bearer <token>` |
+| `MEETING_OUTPUT_SCRIPT` | `simplified` | 上傳沒指定 `script` 時，記錄用繁體（`traditional`）還是簡體 |
 
 ### 在板子上驗證
 

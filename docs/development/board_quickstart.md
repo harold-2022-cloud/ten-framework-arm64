@@ -204,6 +204,7 @@ In `ai_agents/.env`, if they apply:
 | `DIARIZATION_SEG_MODEL`, `DIARIZATION_EMB_MODEL`, `SENSEVOICE_MODEL_DIR`, `MEETING_VAD_MODEL` | under `/home/lychee` | the board's user is not `lychee`; `install_meeting_models.sh` prints the paths |
 | `MEETINGS_DIR` | `/tmp/meetings` | `/tmp` is tmpfs on the board — archives would live in RAM and vanish on reboot |
 | `MEETING_AUTH_TOKEN` | empty, no check | every request to 8765 must then carry `Authorization: Bearer <token>` |
+| `MEETING_OUTPUT_SCRIPT` | `simplified` | the record's script when an upload does not choose one (`script=traditional` or `simplified`) |
 
 ### Check it on the board
 
