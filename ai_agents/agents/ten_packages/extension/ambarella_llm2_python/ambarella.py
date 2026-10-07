@@ -27,6 +27,8 @@ from ten_ai_base.struct import (
 )
 from ten_runtime import AsyncTenEnv
 
+from .utf8_mend import Mender
+
 # The runtime's own category for lines a human reads when something is slow.
 LOG_CATEGORY_KEY_POINT = "key_point"
 LOG_CATEGORY_VENDOR = "vendor"
@@ -53,6 +55,11 @@ _TOKENS = tuple(ESCAPES) + (CLOSE_THINK_TAG,) + SSE_DONE_TOKENS
 # headers -- the response framing is not specified anywhere, so this list is
 # a best guess. See the "Response framing" section of README.md.
 TEXT_KEYS = ("delta", "answer", "text", "content", "response", "token")
+
+
+def _lossy(text: str) -> str:
+    """Bytes kept as surrogates by the decoder, shown as U+FFFD."""
+    return text.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
 def _sse_payload(line: str) -> str:
@@ -386,7 +393,11 @@ class AmbarellaChatClient:
         # can straddle two of them. A per-chunk bytes.decode() would turn
         # every split CJK character into U+FFFD, silently: the stream is
         # decoded incrementally instead, holding partial sequences back.
-        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        # Bytes that are not UTF-8 are kept, as surrogates, rather than
+        # replaced: the daemon breaks some characters across two events in a
+        # way that can be put back (utf8_mend.py), but not once replaced.
+        decoder = codecs.getincrementaldecoder("utf-8")("surrogateescape")
+        mender = Mender()
 
         async for chunk in resp.content.iter_any():
             if not chunk:
@@ -406,7 +417,7 @@ class AmbarellaChatClient:
                 )
 
             if mode == "raw":
-                yield buffer
+                yield _lossy(buffer)
                 buffer = ""
                 continue
 
@@ -439,7 +450,13 @@ class AmbarellaChatClient:
                 sse_lines_seen += 1
                 payload = _sse_payload(line)
                 if payload.strip() in SSE_DONE_TOKENS:
+                    held = mender.flush()
+                    if held:
+                        yield held.decode("utf-8", "replace")
                     return
+                payload = mender.feed(
+                    payload.encode("utf-8", "surrogateescape")
+                ).decode("utf-8", "replace")
                 text = self._extract_text(payload)
                 if text:
                     yield text
@@ -447,10 +464,13 @@ class AmbarellaChatClient:
         buffer += decoder.decode(b"", final=True)
 
         # Whatever is left had no trailing newline to close it.
+        held = mender.flush()
+        if held:
+            yield held.decode("utf-8", "replace")
         if not buffer:
             return
         if mode == "raw":
-            yield buffer
+            yield _lossy(buffer)
             return
         tail = buffer.rstrip("\r\n")
         if not tail.startswith(SSE_PREFIX):
@@ -462,9 +482,9 @@ class AmbarellaChatClient:
                     "body has no 'data:' prefix; reading it as raw text.",
                     category=LOG_CATEGORY_VENDOR,
                 )
-                yield tail
+                yield _lossy(tail)
             return
-        payload = _sse_payload(tail)
+        payload = _lossy(_sse_payload(tail))
         if payload.strip() and payload.strip() not in SSE_DONE_TOKENS:
             text = self._extract_text(payload)
             if text:
