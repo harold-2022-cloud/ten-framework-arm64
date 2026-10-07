@@ -518,6 +518,11 @@ def run_garbling(directory):
             if v.decode("ascii", "replace") not in DONE
         ]
         replies.append((os.path.basename(path)[:-4], Reply(raw, payloads, 0, 0, "")))
+    # Probes before 2026-10-07 11:19 saved the stream decoded, so every
+    # broken byte is already U+FFFD (ef bf bd) in the file and the original
+    # bytes are gone. Nothing can mend those; they are listed, not counted.
+    # (The daemon itself has never been seen to send ef bf bd.)
+    lost = {name for name, r in replies if b"\xef\xbf\xbd" in r.raw}
     say(f"saved answers in {directory}")
     print(f"  {'answer':<22}{'events':>8}{'as read':>9}{'joined':>8}"
           f"{'mended':>8}{'events not UTF-8':>18}", flush=True)
@@ -528,17 +533,28 @@ def run_garbling(directory):
                 v.decode("utf-8")
             except UnicodeDecodeError:
                 broken += 1
+        if name in lost:
+            print(f"  {name:<22}{len(r.payloads):>8}"
+                  f"{r.as_extension_reads.count(chr(0xFFFD)):>9}"
+                  f"{'lost':>8}{'lost':>8}{broken:>18}", flush=True)
+            continue
         print(f"  {name:<22}{len(r.payloads):>8}"
               f"{r.as_extension_reads.count(chr(0xFFFD)):>9}"
               f"{r.joined_bytes.count(chr(0xFFFD)):>8}"
               f"{r.mended.count(chr(0xFFFD)):>8}{broken:>18}", flush=True)
+    if lost:
+        info(f"lost: saved as decoded text by an older probe, so the bytes "
+             f"are already U+FFFD -- not counted ({', '.join(sorted(lost))})")
     def damage(reply):
         return max(
             reply.as_extension_reads.count(chr(0xFFFD)),
             reply.joined_bytes.count(chr(0xFFFD)),
         )
 
-    worst = [nr for nr in sorted(replies, key=lambda nr: -damage(nr[1])) if damage(nr[1])]
+    worst = [
+        nr for nr in sorted(replies, key=lambda nr: -damage(nr[1]))
+        if damage(nr[1]) and nr[0] not in lost
+    ]
     if not worst:
         say("no U+FFFD in any saved answer")
     for name, r in worst[:2]:

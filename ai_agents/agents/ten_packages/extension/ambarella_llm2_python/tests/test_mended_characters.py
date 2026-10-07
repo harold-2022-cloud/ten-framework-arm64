@@ -95,6 +95,16 @@ async def test_the_second_capture_of_that_is_put_back_too():
 
 
 @pytest.mark.asyncio
+async def test_a_third_capture_from_the_38_minute_run():
+    # 召 e5 8f ac arrived as e5 8f e9 | ac.
+    events = sse(b"1", b".", b"<SP>", b"\xe5\x8f\xe9", b"\xac", "开".encode())
+
+    text = "".join(await drain(make_client(response_format="sse"), events))
+
+    assert text == "1.<SP>召开"
+
+
+@pytest.mark.asyncio
 async def test_a_character_cut_cleanly_between_events_is_joined():
     events = sse(b"\xe5", b"\xb9\xb4", b"\xe5\x85\xb3")
 

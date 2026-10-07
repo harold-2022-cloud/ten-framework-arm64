@@ -112,8 +112,11 @@ else
     out=$("$PY" "$TOOLS/probe_meeting_summary.py" --garbling "$dir" 2>&1)
     echo "$out"
     # Table rows: answer, events, as read, joined, mended, events not UTF-8.
+    # Rows saved by an older probe say "lost" -- their bytes are already
+    # U+FFFD -- and are not counted.
     read -r before after < <(echo "$out" | awk \
-      'NF == 6 && $2 ~ /^[0-9]+$/ {b += $3; a += $5} END {print b + 0, a + 0}')
+      'NF == 6 && $2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ {b += $3; a += $5}
+       END {print b + 0, a + 0}')
     before_total=$((before_total + before))
     after_total=$((after_total + after))
   done
