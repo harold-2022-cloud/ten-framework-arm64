@@ -10,6 +10,7 @@
   python3.12 tools/ambarella/probe_meeting_summary.py --record path/record.json
   python3.12 tools/ambarella/probe_meeting_summary.py --variants   # compare prompts
   python3.12 tools/ambarella/probe_meeting_summary.py --conclusions  # who does what
+  python3.12 tools/ambarella/probe_meeting_summary.py --garbling     # saved bytes
 
 On the board the meeting graph's summaries came back empty: the first
 topic's answer began 2.8 s after a 1601-character prompt went in, was
@@ -467,6 +468,66 @@ def run_conclusions(args, record, base_url, out_dir, session_id):
         print(text, flush=True)
 
 
+def run_garbling(directory):
+    """The garbling report for every answer a past run saved, from its
+    bytes -- no question is asked. The worst first."""
+    files = sorted(glob.glob(os.path.join(directory, "*.sse")))
+    if not files:
+        sys.exit(f"no saved answers (*.sse) in {directory}")
+    replies = []
+    for path in files:
+        with open(path, "rb") as f:
+            raw = f.read()
+        payloads = [
+            v for v in event_payloads(raw)
+            if v.decode("ascii", "replace") not in DONE
+        ]
+        replies.append((os.path.basename(path)[:-4], Reply(raw, payloads, 0, 0, "")))
+    say(f"saved answers in {directory}")
+    print(f"  {'answer':<22}{'events':>8}{'as read':>9}{'joined':>8}"
+          f"{'events not UTF-8':>18}", flush=True)
+    for name, r in replies:
+        broken = 0
+        for v in r.payloads:
+            try:
+                v.decode("utf-8")
+            except UnicodeDecodeError:
+                broken += 1
+        print(f"  {name:<22}{len(r.payloads):>8}"
+              f"{r.as_extension_reads.count(chr(0xFFFD)):>9}"
+              f"{r.joined_bytes.count(chr(0xFFFD)):>8}{broken:>18}", flush=True)
+    def damage(reply):
+        return max(
+            reply.as_extension_reads.count(chr(0xFFFD)),
+            reply.joined_bytes.count(chr(0xFFFD)),
+        )
+
+    worst = [nr for nr in sorted(replies, key=lambda nr: -damage(nr[1])) if damage(nr[1])]
+    if not worst:
+        say("no U+FFFD in any saved answer")
+    for name, r in worst[:2]:
+        say(f"{name}: where it breaks")
+        text = r.joined_bytes
+        if chr(0xFFFD) not in text:
+            text = r.as_extension_reads  # joined repaired it; show the break
+        at = text.find(chr(0xFFFD))
+        if at < 0:
+            info("no U+FFFD")
+            continue
+        info(f"text around the first U+FFFD: {text[max(0, at - 15):at + 15]!r}")
+        # The events that carry that stretch of text, in hex.
+        upto, start = 0, None
+        for i, v in enumerate(r.payloads):
+            upto += len(unescape(v.decode("utf-8", "replace")))
+            if upto > at - 6 and start is None:
+                start = i
+            if start is not None and i >= start + 12:
+                break
+        for i in range(start or 0, min(len(r.payloads), (start or 0) + 13)):
+            v = r.payloads[i]
+            print(f"          event {i}: {v.hex(' '):<24} {v!r}", flush=True)
+
+
 def repetition(text):
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     counts = collections.Counter(lines)
@@ -522,10 +583,18 @@ def main():
                    help="compare the prompt variants instead")
     p.add_argument("--conclusions", action="store_true",
                    help="compare the conclusion prompts instead")
+    p.add_argument("--garbling", nargs="?", const="",
+                   help="report U+FFFD from a past run's saved bytes "
+                        "(default: the latest run); asks nothing")
     p.add_argument("--variant-seconds", type=float, default=300.0,
                    help="cap per variant")
     p.add_argument("--out", default="~/meeting_probe/summary_probe")
     args = p.parse_args()
+
+    if args.garbling is not None:
+        runs = sorted(glob.glob(os.path.join(os.path.expanduser(args.out), "*")))
+        run_garbling(args.garbling or (runs[-1] if runs else args.out))
+        return
 
     record = args.record or (sorted(glob.glob(os.path.expanduser(
         "~/meeting_probe/board_check/*/record.json"))) or [None])[-1]
