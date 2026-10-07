@@ -79,6 +79,15 @@ CONTROL_CONFIG = os.path.join(
     "meeting_control_python",
     "config.py",
 )
+MENDER = os.path.join(
+    REPO,
+    "ai_agents",
+    "agents",
+    "ten_packages",
+    "extension",
+    "ambarella_llm2_python",
+    "utf8_mend.py",
+)
 GIVE_UP_S = 175.0  # the meeting graph's llm total_timeout_s
 DONE = ("<DONE>", "[DONE]")
 THINK_END = "</think>"
@@ -185,6 +194,15 @@ class Reply:
     def joined_bytes(self):
         """Each event's bytes joined first, then decoded."""
         return unescape(b"".join(self.payloads).decode("utf-8", "replace"))
+
+    @property
+    def mended(self):
+        """As ambarella_llm2_python reads it now: its own utf8_mend.py
+        puts back the characters the daemon breaks across two events."""
+        spec = importlib.util.spec_from_file_location("utf8_mend", MENDER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return unescape(module.mend(self.payloads).decode("utf-8", "replace"))
 
 
 def event_payloads(raw):
@@ -325,7 +343,7 @@ def run_variants(args, record, base_url, out_dir, session_id):
             session_id,
         )
         total, ended = reply.total, reply.ended
-        answer = reply.joined_bytes
+        answer = reply.mended
         with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
             f.write(prompt + "\n\n----- answer -----\n" + answer)
         row = {
@@ -336,25 +354,27 @@ def run_variants(args, record, base_url, out_dir, session_id):
             "chars": len(answer),
             "copied": copied_share(answer, transcript),
             "garbled": reply.as_extension_reads.count("\ufffd"),
-            "garbled_joined": answer.count("\ufffd"),
+            "garbled_joined": reply.joined_bytes.count("\ufffd"),
+            "garbled_mended": answer.count("\ufffd"),
             "answer": answer,
             "reply": reply,
         }
         rows.append(row)
         info(f"{total:.0f} s, {len(answer)} characters, "
              f"{'finished' if row['finished'] else ended}, "
-             f"{row['copied']:.0%} copied, garbled {row['garbled']} as the "
-             f"extension reads it, {row['garbled_joined']} with bytes joined")
+             f"{row['copied']:.0%} copied, U+FFFD {row['garbled']} as read "
+             f"before, {row['garbled_mended']} mended")
         # The daemon holds a finished session briefly; do not crowd it.
         time.sleep(5)
 
     say("comparison")
     print(f"  {'variant':<15}{'prompt':>7}{'secs':>6}{'chars':>7}"
-          f"{'copied':>8}{'garbled':>9}{'joined':>8}  finished", flush=True)
+          f"{'copied':>8}{'FFFD before':>13}{'mended':>8}  finished",
+          flush=True)
     for r in rows:
         print(f"  {r['name']:<15}{r['prompt']:>7}{r['seconds']:>6.0f}"
-              f"{r['chars']:>7}{r['copied']:>8.0%}{r['garbled']:>9}"
-              f"{r['garbled_joined']:>8}  "
+              f"{r['chars']:>7}{r['copied']:>8.0%}{r['garbled']:>13}"
+              f"{r['garbled_mended']:>8}  "
               f"{'yes' if r['finished'] else 'no'}", flush=True)
     for r in rows:
         if garbling(r["reply"], quiet_if_clean=True):
@@ -369,12 +389,14 @@ def garbling(reply, quiet_if_clean=False):
     Returns whether there was something to show."""
     old = reply.as_extension_reads.count("\ufffd")
     new = reply.joined_bytes.count("\ufffd")
+    fixed = reply.mended.count("\ufffd")
     broken = first_broken_event(reply.payloads)
     if quiet_if_clean and not broken:
         return False
     say("garbling")
     info(f"U+FFFD as ambarella_llm2_python reads the stream: {old}")
     info(f"U+FFFD with each event's bytes joined first:      {new}")
+    info(f"U+FFFD mended by ambarella_llm2_python/utf8_mend: {fixed}")
     if broken:
         info("first event that is not UTF-8 by itself, in hex:")
         print(broken, flush=True)
@@ -431,7 +453,7 @@ def run_conclusions(args, record, base_url, out_dir, session_id):
                 base_url, prompt, args.variant_seconds,
                 os.path.join(out_dir, f"summary-{kind}-{n}.sse"), session_id,
             )
-            text = reply.joined_bytes.strip()
+            text = reply.mended.strip()
             summaries[kind].append(text)
             info(f"{reply.total:.0f} s, {len(text)} characters, "
                  f"{text.count('说话人')} speaker numbers")
@@ -449,7 +471,7 @@ def run_conclusions(args, record, base_url, out_dir, session_id):
             base_url, prompt, args.variant_seconds,
             os.path.join(out_dir, f"{name}.sse"), session_id,
         )
-        text = reply.joined_bytes.strip()
+        text = reply.mended.strip()
         with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
             f.write(prompt + "\n\n----- answer -----\n" + text)
         rows.append((name, reply.total, len(text), people_named(text),
@@ -485,7 +507,7 @@ def run_garbling(directory):
         replies.append((os.path.basename(path)[:-4], Reply(raw, payloads, 0, 0, "")))
     say(f"saved answers in {directory}")
     print(f"  {'answer':<22}{'events':>8}{'as read':>9}{'joined':>8}"
-          f"{'events not UTF-8':>18}", flush=True)
+          f"{'mended':>8}{'events not UTF-8':>18}", flush=True)
     for name, r in replies:
         broken = 0
         for v in r.payloads:
@@ -495,7 +517,8 @@ def run_garbling(directory):
                 broken += 1
         print(f"  {name:<22}{len(r.payloads):>8}"
               f"{r.as_extension_reads.count(chr(0xFFFD)):>9}"
-              f"{r.joined_bytes.count(chr(0xFFFD)):>8}{broken:>18}", flush=True)
+              f"{r.joined_bytes.count(chr(0xFFFD)):>8}"
+              f"{r.mended.count(chr(0xFFFD)):>8}{broken:>18}", flush=True)
     def damage(reply):
         return max(
             reply.as_extension_reads.count(chr(0xFFFD)),
@@ -507,6 +530,10 @@ def run_garbling(directory):
         say("no U+FFFD in any saved answer")
     for name, r in worst[:2]:
         say(f"{name}: where it breaks")
+        mended = r.mended
+        at = mended.find(chr(0xFFFD))
+        info("mended: " + (repr(mended[max(0, at - 15) : at + 15])
+                           if at >= 0 else "no U+FFFD left"))
         text = r.joined_bytes
         if chr(0xFFFD) not in text:
             text = r.as_extension_reads  # joined repaired it; show the break
@@ -630,7 +657,7 @@ def main():
     reply = ask(
         base_url, prompt, args.max_seconds, os.path.join(out_dir, "raw.sse")
     )
-    answer = reply.joined_bytes
+    answer = reply.mended
     with open(os.path.join(out_dir, "answer.txt"), "w", encoding="utf-8") as f:
         f.write(answer)
     report(answer, reply.first, reply.total, reply.ended, len(prompt))
