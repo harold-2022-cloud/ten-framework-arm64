@@ -105,6 +105,7 @@ async def test_an_upload_lands_byte_for_byte_and_tells_the_controller(
             "title": "週會",
             "speakers": 4,
             "recorded_at": 1.5e9,
+            "script": None,
         }
     ]
     assert store.read_state(str(tmp_path / "m1"))["state"] == "received"
@@ -124,6 +125,31 @@ async def test_without_an_id_the_arrival_time_names_the_meeting(
     assert body["meeting_id"] == "at-1790663400"
     assert controller.uploaded[0]["speakers"] is None
     assert controller.uploaded[0]["title"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_chosen_script_reaches_the_controller(tmp_path):
+    controller = Controller()
+    async with client(tmp_path, controller) as c:
+        r = await c.post(
+            "/meeting/upload", data=form(meeting_id="m1", script="traditional")
+        )
+
+    assert r.status == 200
+    assert controller.uploaded[0]["script"] == "traditional"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_script_is_a_bad_request_naming_the_choices(tmp_path):
+    async with client(tmp_path) as c:
+        r = await c.post(
+            "/meeting/upload", data=form(meeting_id="m1", script="cantonese")
+        )
+        body = await r.json()
+
+    assert r.status == 400
+    assert "traditional" in body["error"] and "simplified" in body["error"]
+    assert landed(tmp_path) == []
 
 
 @pytest.mark.asyncio

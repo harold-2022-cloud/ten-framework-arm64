@@ -32,6 +32,9 @@ CHUNK = 64 * 1024
 # Multipart boundaries and the text fields ride on top of the file.
 FORM_SLACK = 64 * 1024
 
+# The record's script, as meeting_control_python's script.py knows them.
+SCRIPTS = ("simplified", "traditional")
+
 FILES = {
     "record.json": "application/json",
     "minutes.txt": "text/plain; charset=utf-8",
@@ -211,10 +214,14 @@ class Uploads:
             raise ValueError(f"speakers / recorded_at: {bad}") from bad
         if speakers is not None and speakers < 1:
             raise ValueError("speakers: at least 1")
+        script = fields.get("script") or None
+        if script is not None and script not in SCRIPTS:
+            raise ValueError(f"script: {' or '.join(SCRIPTS)}, or leave it out")
         return meeting_id, {
             "title": fields.get("title") or None,
             "speakers": speakers,
             "recorded_at": recorded_at,
+            "script": script,
         }
 
     # --- reading back ---------------------------------------------------
