@@ -20,12 +20,15 @@ class MeetingControlConfig(BaseModel):
     # 說話人" had the model copy a topic's transcript line by line, twice, in
     # 346 s; this one summarised it in 11 s (probe_meeting_summary.py).
     #
-    # People by speaker number, in both: asked "who does what" from
-    # summaries that named nobody, the conclusion gave six action items to
-    # 刘、张、李、王、赵、陈老师 -- none of them in the meeting. With the
-    # summaries saying 说话人3 and the conclusion told to use those numbers or
-    # leave the owner out, it invented no one (--conclusions, 2026-10-07).
-    # The numbers are the record's own, so the app's renaming applies.
+    # People by speaker number in the summaries, where the model has the
+    # transcript in front of it; the record's own numbers, so the app's
+    # renaming applies. The conclusion is not asked for owners at all: asked
+    # "who does what" it gave six action items to 刘、张、李、王、赵、陈老师,
+    # none of them in the meeting; told to use the summaries' speaker numbers
+    # it numbered five items' owners 负责人1 to 负责人5 instead. Asked for
+    # neither, it invented no one and wrote the fullest conclusion of three
+    # tried on the 38-minute meeting (probe_meeting_summary.py --conclusions,
+    # 2026-10-07); a summary's own 说话人N still carries into its item.
     segment_prompt: str = (
         "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、"
         "做了什么决定、谁要做什么。提到人时用逐字稿里的说话人编号。"
@@ -33,8 +36,7 @@ class MeetingControlConfig(BaseModel):
     )
     meeting_prompt: str = (
         "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
-        "二、待办事项，负责人用总结里的说话人编号，没有提到的就不写。"
-        "不要逐句复述原文。\n\n"
+        "二、待办事项。不要逐句复述原文。\n\n"
     )
 
     # Used when an upload does not say how many people were there.
