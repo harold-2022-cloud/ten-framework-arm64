@@ -178,7 +178,8 @@ file (16 kHz mono) and uploaded over HTTP once it ends. The board cuts it
 into topics, tells the speakers apart and transcribes each topic, gives
 every voice one number across the meeting, summarises each topic with its
 own LLM, and keeps the audio, `record.json` and `minutes.txt` on the board.
-An hour of meeting takes about 75 minutes.
+Processing takes about as long as the meeting: 35 minutes for the
+38-minute check meeting on the board.
 
 (The streaming example that used to be here, `examples/meeting-minutes`, is
 deleted; its code stops at `67085cfef`.)

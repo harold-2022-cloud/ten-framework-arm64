@@ -159,7 +159,7 @@ task run 2>&1 | tee /tmp/task_run.log
 並存——同一套部署，`POST /start` 帶 `graph_name` 切換場景。會議在手機上完整錄成
 一個 Ogg-Opus 檔（16 kHz 單聲道），散會後一次 HTTP 上傳。板子把它切成話題、逐話題
 分說話人並轉文字、讓同一個聲音在整場都是同一個編號、用板上的 LLM 逐話題摘要，
-最後在板子上留下原始音訊、`record.json` 和 `minutes.txt`。一小時的會約要 75 分鐘。
+最後在板子上留下原始音訊、`record.json` 和 `minutes.txt`。處理時間約和會議一樣長：板上 38 分鐘的驗證會議 35 分鐘做完。
 
 （原本這裡的串流範例 `examples/meeting-minutes` 已刪除，代碼停在 `67085cfef`。）
 
