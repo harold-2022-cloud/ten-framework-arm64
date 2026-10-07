@@ -391,6 +391,8 @@ def process(args, channel, meeting_id, upload, duration, auth, out_dir):
     fields = {"meeting_id": meeting_id, "title": "board check"}
     if args.speakers:
         fields["speakers"] = str(args.speakers)
+    if args.script:
+        fields["script"] = args.script
     body, kind = multipart(fields, upload)
     status, reply = request(
         f"{args.uploader}/meeting/upload",
@@ -540,6 +542,8 @@ def main():
     p.add_argument("--rttm", help="reference speakers, to score the record")
     p.add_argument("--speakers", type=int, help="how many people spoke")
     p.add_argument("--minutes", type=float, help="upload only the first N minutes")
+    p.add_argument("--script", choices=("traditional", "simplified"),
+                   help="the record's script (default: the board's)")
     p.add_argument(
         "--server",
         default=f"http://127.0.0.1:{setting(env, 'SERVER_PORT', '8081')}",

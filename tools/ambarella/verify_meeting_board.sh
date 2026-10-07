@@ -9,6 +9,7 @@
 #   git pull --ff-only && tools/ambarella/verify_meeting_board.sh
 #   tools/ambarella/verify_meeting_board.sh --minutes 12   # a shorter meeting
 #   tools/ambarella/verify_meeting_board.sh --no-meeting   # steps 1-3 only
+#   tools/ambarella/verify_meeting_board.sh --script traditional
 #
 #   1 checkout   the commits under test are in this tree; stops here if not,
 #                since everything after would test the old code
@@ -32,11 +33,13 @@ AUDIO="${AUDIO:-$HOME/meeting_probe/M_R003S01C01.wav}"
 RTTM="${RTTM:-$HOME/meeting_probe/M_R003S01C01.rttm}"
 SPEAKERS="${SPEAKERS:-6}"
 MINUTES=""
+SCRIPT=""
 MEETING=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --minutes) MINUTES="$2"; shift 2 ;;
+    --script) SCRIPT="$2"; shift 2 ;;
     --no-meeting) MEETING=0; shift ;;
     -h|--help) sed -n '6,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -148,6 +151,7 @@ if [[ $MEETING -eq 1 ]]; then
   step "4. meeting through the graph"
   args=(--audio "$AUDIO" --rttm "$RTTM" --speakers "$SPEAKERS")
   [[ -n "$MINUTES" ]] && args+=(--minutes "$MINUTES")
+  [[ -n "$SCRIPT" ]] && args+=(--script "$SCRIPT")
   before=$(ls -d "$CHECK_RUNS"/*/ 2>/dev/null | sort)
   "$PY" "$TOOLS/check_meeting_board.py" "${args[@]}"
   if [[ $? -eq 0 ]]; then
@@ -166,9 +170,10 @@ if [[ $MEETING -eq 1 ]]; then
     echo "  minutes: $minutes_txt"
     # The conclusion only: the transcript below it is what people said, and
     # says 老师 as often as they did.
-    conclusion=$(awk '/^結論$/ {on = 1; next} /^話題 / {exit} on' "$minutes_txt")
+    # Headings in either script: the record follows the upload's choice.
+    conclusion=$(awk '/^(結論|结论)$/ {on = 1; next} /^(話題|话题) / {exit} on' "$minutes_txt")
     owners=$(grep -cE '负责人[：: ]*[0-9]' <<<"$conclusion")
-    titles=$(grep -cE '老师|经理|主任|园长|校长|先生|女士' <<<"$conclusion")
+    titles=$(grep -cE '老师|老師|经理|經理|主任|园长|園長|校长|校長|先生|女士' <<<"$conclusion")
     broken=$(grep -c $'\xef\xbf\xbd' "$minutes_txt")
     if [[ $owners -eq 0 ]]; then
       passed "conclusion: no numbered owners (负责人N)"
