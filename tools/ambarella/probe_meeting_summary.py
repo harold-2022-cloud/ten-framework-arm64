@@ -9,6 +9,7 @@
   python3.12 tools/ambarella/probe_meeting_summary.py --topic 2
   python3.12 tools/ambarella/probe_meeting_summary.py --record path/record.json
   python3.12 tools/ambarella/probe_meeting_summary.py --variants   # compare prompts
+  python3.12 tools/ambarella/probe_meeting_summary.py --conclusions  # who does what
 
 On the board the meeting graph's summaries came back empty: the first
 topic's answer began 2.8 s after a 1601-character prompt went in, was
@@ -35,13 +36,24 @@ line by line, twice, rather than summarising it. "Mark the time and the
 speaker" reads to a 7B as "list every timestamped line". The board's model
 decodes greedily, so one run per variant is the whole answer.
 
+--conclusions asks for the meeting's conclusion three ways. With the
+summary prompt fixed, the board's first full run wrote action items owned
+by "李老师" and "张老师" -- people who are not in the meeting. The
+conclusion was asked "who does what" from summaries that name nobody.
+
+Every answer is also decoded twice, and both counts of U+FFFD reported:
+as ambarella_llm2_python reads the stream (the whole body decoded, then
+split into events) and with each event's bytes joined before decoding.
+The daemon sends one character per event; a character whose UTF-8 bytes
+arrive in two events breaks under the first and survives the second. The
+first broken event is printed in hex, so the wire itself says which.
+
 Run it with nothing else using the LLM: the daemon serves one session at a
 time and refuses a second by closing the connection. Everything is also
 saved under --out.
 """
 
 import argparse
-import codecs
 import collections
 import glob
 import http.client
@@ -110,12 +122,17 @@ def thinking():
         info(f"could not run it: {err}")
 
 
-def segment_prompt():
-    """The shipped prompt, read from the controller's own config.py."""
+def control_config():
+    """meeting_control_python's own config.py, so the prompts are the
+    shipped ones and not copies."""
     spec = importlib.util.spec_from_file_location("control_config", CONTROL_CONFIG)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.MeetingControlConfig().segment_prompt
+    return module.MeetingControlConfig()
+
+
+def segment_prompt():
+    return control_config().segment_prompt
 
 
 def build_prompt(
@@ -144,8 +161,45 @@ def new_session_id():
     return str(random.randint(100_000_000, 999_999_999))
 
 
+class Reply:
+    """One answer off the wire, kept as bytes and decoded both ways."""
+
+    def __init__(self, raw, payloads, first, total, ended):
+        self.raw, self.payloads = raw, payloads
+        self.first, self.total, self.ended = first, total, ended
+
+    @property
+    def as_extension_reads(self):
+        """ambarella_llm2_python's way: decode the body, then split it."""
+        body = self.raw.decode("utf-8", "replace")
+        values = []
+        for line in body.split("\n"):
+            line = line.rstrip("\r")
+            if line.startswith("data:"):
+                value = line[5:]
+                values.append(value[1:] if value.startswith(" ") else value)
+        return unescape("".join(v for v in values if v not in DONE))
+
+    @property
+    def joined_bytes(self):
+        """Each event's bytes joined first, then decoded."""
+        return unescape(b"".join(self.payloads).decode("utf-8", "replace"))
+
+
+def event_payloads(raw):
+    """The data: values, as bytes. Splitting on b"\\n" is safe: no byte of a
+    multi-byte UTF-8 character is 0x0A."""
+    out = []
+    for line in raw.split(b"\n"):
+        line = line.rstrip(b"\r")
+        if line.startswith(b"data:"):
+            value = line[5:]
+            out.append(value[1:] if value.startswith(b" ") else value)
+    return out
+
+
 def ask(base_url, prompt, max_seconds, raw_path, quiet=False, session_id=None):
-    """Stream one answer. Returns (raw text, first_s, total_s, how it ended)."""
+    """Stream one answer into a Reply."""
     url = urllib.parse.urlparse(base_url)
     conn = http.client.HTTPConnection(url.hostname, url.port or 80, timeout=120)
     headers = {
@@ -158,45 +212,52 @@ def ask(base_url, prompt, max_seconds, raw_path, quiet=False, session_id=None):
     t0 = time.monotonic()
     conn.request("POST", url.path or "/", prompt.encode("utf-8"), headers)
     resp = conn.getresponse()
-    info(f"HTTP {resp.status} after {time.monotonic() - t0:.1f} s")
+    if not quiet:
+        info(f"HTTP {resp.status} after {time.monotonic() - t0:.1f} s")
 
-    decoder = codecs.getincrementaldecoder("utf-8")("replace")
-    pending, payloads = "", []
+    raw = bytearray()
     first, ended, next_report = None, "connection closed", t0 + 15
-    with open(raw_path, "w", encoding="utf-8") as raw:
-        while True:
-            if time.monotonic() - t0 > max_seconds:
-                ended = f"stopped by this probe at {max_seconds:.0f} s"
-                break
-            chunk = resp.read1(4096)
-            if not chunk:
-                break
-            text = decoder.decode(chunk)
-            raw.write(text)
-            pending += text
-            *lines, pending = pending.split("\n")
-            for line in lines:
-                line = line.rstrip("\r")
-                if not line.startswith("data:"):
-                    continue
-                value = line[5:]
-                if value.startswith(" "):
-                    value = value[1:]
-                if value in DONE:
-                    ended = value
-                    break
-                if first is None:
-                    first = time.monotonic() - t0
-                payloads.append(value)
-            if ended in DONE:
-                break
-            now = time.monotonic()
-            if now >= next_report and not quiet:
-                chars = len(unescape("".join(payloads)))
-                info(f"{mmss(now - t0)}  {chars} characters so far")
-                next_report = now + 15
+    while True:
+        if time.monotonic() - t0 > max_seconds:
+            ended = f"stopped by this probe at {max_seconds:.0f} s"
+            break
+        chunk = resp.read1(4096)
+        if not chunk:
+            break
+        raw += chunk
+        payloads = event_payloads(bytes(raw))
+        if payloads and first is None:
+            first = time.monotonic() - t0
+        if payloads and payloads[-1].decode("ascii", "replace") in DONE:
+            ended = payloads[-1].decode("ascii")
+            break
+        now = time.monotonic()
+        if now >= next_report and not quiet:
+            info(f"{mmss(now - t0)}  {len(payloads)} events so far")
+            next_report = now + 15
     conn.close()
-    return "".join(payloads), first, time.monotonic() - t0, ended
+    with open(raw_path, "wb") as f:
+        f.write(raw)
+    payloads = [
+        v for v in event_payloads(bytes(raw))
+        if v.decode("ascii", "replace") not in DONE
+    ]
+    return Reply(bytes(raw), payloads, first, time.monotonic() - t0, ended)
+
+
+def first_broken_event(payloads):
+    """The first event whose bytes are not UTF-8 on their own, with three
+    events either side, in hex -- or None."""
+    for i, value in enumerate(payloads):
+        try:
+            value.decode("utf-8")
+        except UnicodeDecodeError:
+            around = payloads[max(0, i - 3) : i + 4]
+            return "\n".join(
+                f"          event {max(0, i - 3) + k}: {v.hex(' ')}  {v!r}"
+                for k, v in enumerate(around)
+            )
+    return None
 
 
 def unescape(text):
@@ -239,34 +300,31 @@ def copied_share(answer, transcript, run=10):
 def ask_patiently(base_url, prompt, max_seconds, raw_path, session_id):
     """ask(), again after a refusal. The daemon serves one session at a
     time and refuses by closing the connection with no response at all."""
-    for attempt in range(1, 4):
+    for attempt in range(1, 5):
         try:
             return ask(base_url, prompt, max_seconds, raw_path, True, session_id)
         except (http.client.RemoteDisconnected, ConnectionError) as err:
-            info(f"refused ({type(err).__name__}), attempt {attempt} of 3; "
-                 "waiting 20 s")
-            time.sleep(20)
-    return "", None, 0.0, "refused three times"
+            info(f"refused ({type(err).__name__}), attempt {attempt} of 4; "
+                 "waiting 30 s")
+            time.sleep(30)
+    return Reply(b"", [], None, 0.0, "refused four times")
 
 
-def run_variants(args, record, base_url, out_dir):
+def run_variants(args, record, base_url, out_dir, session_id):
     rows = []
-    # One session for every variant, cleared by Reset-En each time -- what
-    # probe_structured_minutes.py does, and what the graph's llm node does.
-    # A fresh Session-Id per variant was refused on the third.
-    session_id = new_session_id()
     for name, times, label, instruction in VARIANTS:
         say(f"variant {name}")
         prompt, topic = build_prompt(record, args.topic, instruction, times, label)
         transcript = "\n".join(u["text"] for u in topic["utterances"])
-        raw, first, total, ended = ask_patiently(
+        reply = ask_patiently(
             base_url,
             prompt,
             args.variant_seconds,
             os.path.join(out_dir, f"{name}.sse"),
             session_id,
         )
-        answer = unescape(raw)
+        total, ended = reply.total, reply.ended
+        answer = reply.joined_bytes
         with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
             f.write(prompt + "\n\n----- answer -----\n" + answer)
         row = {
@@ -276,26 +334,137 @@ def run_variants(args, record, base_url, out_dir):
             "finished": ended in DONE,
             "chars": len(answer),
             "copied": copied_share(answer, transcript),
-            "garbled": answer.count("\ufffd"),
+            "garbled": reply.as_extension_reads.count("\ufffd"),
+            "garbled_joined": answer.count("\ufffd"),
             "answer": answer,
+            "reply": reply,
         }
         rows.append(row)
         info(f"{total:.0f} s, {len(answer)} characters, "
              f"{'finished' if row['finished'] else ended}, "
-             f"{row['copied']:.0%} copied, {row['garbled']} garbled")
+             f"{row['copied']:.0%} copied, garbled {row['garbled']} as the "
+             f"extension reads it, {row['garbled_joined']} with bytes joined")
         # The daemon holds a finished session briefly; do not crowd it.
         time.sleep(5)
 
     say("comparison")
     print(f"  {'variant':<15}{'prompt':>7}{'secs':>6}{'chars':>7}"
-          f"{'copied':>8}{'garbled':>9}  finished", flush=True)
+          f"{'copied':>8}{'garbled':>9}{'joined':>8}  finished", flush=True)
     for r in rows:
         print(f"  {r['name']:<15}{r['prompt']:>7}{r['seconds']:>6.0f}"
-              f"{r['chars']:>7}{r['copied']:>8.0%}{r['garbled']:>9}  "
+              f"{r['chars']:>7}{r['copied']:>8.0%}{r['garbled']:>9}"
+              f"{r['garbled_joined']:>8}  "
               f"{'yes' if r['finished'] else 'no'}", flush=True)
+    for r in rows:
+        if garbling(r["reply"], quiet_if_clean=True):
+            break
     for r in rows:
         say(f"{r['name']}, first 400 characters")
         print(r["answer"][:400], flush=True)
+
+
+def garbling(reply, quiet_if_clean=False):
+    """Both decodings' U+FFFD counts and, if any, the first broken event.
+    Returns whether there was something to show."""
+    old = reply.as_extension_reads.count("\ufffd")
+    new = reply.joined_bytes.count("\ufffd")
+    broken = first_broken_event(reply.payloads)
+    if quiet_if_clean and not broken:
+        return False
+    say("garbling")
+    info(f"U+FFFD as ambarella_llm2_python reads the stream: {old}")
+    info(f"U+FFFD with each event's bytes joined first:      {new}")
+    if broken:
+        info("first event that is not UTF-8 by itself, in hex:")
+        print(broken, flush=True)
+    else:
+        info("every event is UTF-8 by itself")
+    return True
+
+
+SUMMARY_WITH_LABELS = (
+    "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、"
+    "做了什么决定、谁要做什么。提到人时用逐字稿里的说话人编号。"
+    "不要逐句复述原文。\n\n"
+)
+CONCLUSIONS = [
+    # name, conclusion prompt (None: the shipped one), which summaries
+    ("C0-shipped", None, "shipped"),
+    ("C1-no-who",
+     "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
+     "二、待办事项。不要逐句复述原文。\n\n", "shipped"),
+    ("C2-labels",
+     "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
+     "二、待办事项，负责人用总结里的说话人编号，没有提到的就不写。"
+     "不要逐句复述原文。\n\n", "labels"),
+]
+
+
+def people_named(text):
+    """Titles and owners that are not a speaker number -- invented, since
+    the record names nobody."""
+    import re  # pylint: disable=import-outside-toplevel
+
+    titled = re.findall(
+        r"[\u4e00-\u9fff]{1,2}(?:老师|经理|主任|园长|校长|先生|女士|总监|同学)",
+        text,
+    )
+    owners = [
+        o for o in re.findall(r"由([^\s，。、：]{1,6}?)负责", text)
+        if not o.startswith(("说话人", "說話人"))
+    ]
+    return sorted({n[1:] if n.startswith("由") else n for n in titled + owners})
+
+
+def run_conclusions(args, record, base_url, out_dir, session_id):
+    with open(record, encoding="utf-8") as f:
+        topics = [t for t in json.load(f)["topics"] if not t.get("error")]
+    summaries = {"shipped": [], "labels": []}
+    for kind, instruction in (("shipped", None), ("labels", SUMMARY_WITH_LABELS)):
+        for n in range(1, len(topics) + 1):
+            say(f"summary of topic {n}, {kind} prompt")
+            prompt, _ = build_prompt(
+                record, n, instruction or segment_prompt(), False, "说话人"
+            )
+            reply = ask_patiently(
+                base_url, prompt, args.variant_seconds,
+                os.path.join(out_dir, f"summary-{kind}-{n}.sse"), session_id,
+            )
+            text = reply.joined_bytes.strip()
+            summaries[kind].append(text)
+            info(f"{reply.total:.0f} s, {len(text)} characters, "
+                 f"{text.count('说话人')} speaker numbers")
+            print(text, flush=True)
+            time.sleep(5)
+
+    rows = []
+    for name, instruction, kind in CONCLUSIONS:
+        say(f"conclusion {name}")
+        body = "\n\n".join(
+            f"第{n}段：{s}" for n, s in enumerate(summaries[kind], 1) if s
+        )
+        prompt = (instruction or control_config().meeting_prompt) + body
+        reply = ask_patiently(
+            base_url, prompt, args.variant_seconds,
+            os.path.join(out_dir, f"{name}.sse"), session_id,
+        )
+        text = reply.joined_bytes.strip()
+        with open(os.path.join(out_dir, f"{name}.txt"), "w", encoding="utf-8") as f:
+            f.write(prompt + "\n\n----- answer -----\n" + text)
+        rows.append((name, reply.total, len(text), people_named(text),
+                     text.count("说话人"), text))
+        info(f"{reply.total:.0f} s, {len(text)} characters")
+        time.sleep(5)
+
+    say("comparison")
+    print(f"  {'conclusion':<12}{'secs':>6}{'chars':>7}{'speaker no.':>13}"
+          "  people named (none are in the meeting)", flush=True)
+    for name, secs, chars, people, numbers, _ in rows:
+        print(f"  {name:<12}{secs:>6.0f}{chars:>7}{numbers:>13}  "
+              f"{'、'.join(people) or '-'}", flush=True)
+    for name, _, _, _, _, text in rows:
+        say(f"{name}, in full")
+        print(text, flush=True)
 
 
 def repetition(text):
@@ -351,6 +520,8 @@ def main():
     p.add_argument("--max-seconds", type=float, default=900.0)
     p.add_argument("--variants", action="store_true",
                    help="compare the prompt variants instead")
+    p.add_argument("--conclusions", action="store_true",
+                   help="compare the conclusion prompts instead")
     p.add_argument("--variant-seconds", type=float, default=300.0,
                    help="cap per variant")
     p.add_argument("--out", default="~/meeting_probe/summary_probe")
@@ -366,8 +537,16 @@ def main():
     thinking()
     base_url = setting("AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080")
 
-    if args.variants:
-        run_variants(args, record, base_url, out_dir)
+    if args.variants or args.conclusions:
+        # One session for the whole run, cleared by Reset-En each time --
+        # what probe_structured_minutes.py does, and what the graph's llm
+        # node does. A fresh Session-Id per question was refused by the
+        # daemon on the third.
+        session_id = new_session_id()
+        if args.variants:
+            run_variants(args, record, base_url, out_dir, session_id)
+        if args.conclusions:
+            run_conclusions(args, record, base_url, out_dir, session_id)
         print(f"\nsaved each prompt and answer in {out_dir}", flush=True)
         return
 
@@ -379,13 +558,14 @@ def main():
          f"topic {mmss(topic['start_s'])}-{mmss(topic['end_s'])}")
 
     say(f"asking {base_url} (no limit but --max-seconds {args.max_seconds:.0f})")
-    raw, first, total, ended = ask(
+    reply = ask(
         base_url, prompt, args.max_seconds, os.path.join(out_dir, "raw.sse")
     )
-    answer = unescape(raw)
+    answer = reply.joined_bytes
     with open(os.path.join(out_dir, "answer.txt"), "w", encoding="utf-8") as f:
         f.write(answer)
-    report(answer, first, total, ended, len(prompt))
+    report(answer, reply.first, reply.total, reply.ended, len(prompt))
+    garbling(reply)
     print(f"\nsaved prompt.txt, raw.sse, answer.txt in {out_dir}", flush=True)
 
 
