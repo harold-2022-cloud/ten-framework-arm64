@@ -2631,7 +2631,8 @@
               "name": "main_control",
               "addon": "meeting_control_python",
               "property": {
-                "summary_timeout_s": 180.0
+                "summary_timeout_s": 180.0,
+                "output_script": "${env:MEETING_OUTPUT_SCRIPT|simplified}"
               }
             },
             {
