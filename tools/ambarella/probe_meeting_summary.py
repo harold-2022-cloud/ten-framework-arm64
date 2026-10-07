@@ -405,21 +405,16 @@ def garbling(reply, quiet_if_clean=False):
     return True
 
 
-SUMMARY_WITH_LABELS = (
-    "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、"
-    "做了什么决定、谁要做什么。提到人时用逐字稿里的说话人编号。"
-    "不要逐句复述原文。\n\n"
-)
 CONCLUSIONS = [
-    # name, conclusion prompt (None: the shipped one), which summaries
-    ("C0-shipped", None, "shipped"),
-    ("C1-no-who",
+    # name, conclusion prompt (None: the one meeting_control_python ships)
+    ("shipped", None),
+    ("no-owner",
      "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
-     "二、待办事项。不要逐句复述原文。\n\n", "shipped"),
-    ("C2-labels",
+     "二、待办事项。不要逐句复述原文。\n\n"),
+    ("copy-numbers",
      "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；"
-     "二、待办事项，负责人用总结里的说话人编号，没有提到的就不写。"
-     "不要逐句复述原文。\n\n", "labels"),
+     "二、待办事项。总结里写了是哪位说话人的，照写那个编号；"
+     "没写的，不写负责人。不要逐句复述原文。\n\n"),
 ]
 
 
@@ -436,35 +431,38 @@ def people_named(text):
         o for o in re.findall(r"由([^\s，。、：]{1,6}?)负责", text)
         if not o.startswith(("说话人", "說話人"))
     ]
-    return sorted({n[1:] if n.startswith("由") else n for n in titled + owners})
+    # "负责人1", "负责人2", ...: numbered owners that are no speaker. On the
+    # 38-minute run the conclusion numbered its five items' owners 1 to 5.
+    placeholders = re.findall(r"负责人\s*[：:]?\s*\d+", text)
+    found = {n[1:] if n.startswith("由") else n for n in titled + owners}
+    return sorted(found | {re.sub(r"\s|[：:]", "", p) for p in placeholders})
 
 
 def run_conclusions(args, record, base_url, out_dir, session_id):
+    """The shipped summaries of every topic, then the meeting's conclusion
+    asked each way in CONCLUSIONS."""
     with open(record, encoding="utf-8") as f:
         topics = [t for t in json.load(f)["topics"] if not t.get("error")]
-    summaries = {"shipped": [], "labels": []}
-    for kind, instruction in (("shipped", None), ("labels", SUMMARY_WITH_LABELS)):
-        for n in range(1, len(topics) + 1):
-            say(f"summary of topic {n}, {kind} prompt")
-            prompt, _ = build_prompt(
-                record, n, instruction or segment_prompt(), False, "说话人"
-            )
-            reply = ask_patiently(
-                base_url, prompt, args.variant_seconds,
-                os.path.join(out_dir, f"summary-{kind}-{n}.sse"), session_id,
-            )
-            text = reply.mended.strip()
-            summaries[kind].append(text)
-            info(f"{reply.total:.0f} s, {len(text)} characters, "
-                 f"{text.count('说话人')} speaker numbers")
-            print(text, flush=True)
-            time.sleep(5)
+    summaries = []
+    for n in range(1, len(topics) + 1):
+        say(f"summary of topic {n}")
+        prompt, _ = build_prompt(record, n, segment_prompt(), False, "说话人")
+        reply = ask_patiently(
+            base_url, prompt, args.variant_seconds,
+            os.path.join(out_dir, f"summary-{n}.sse"), session_id,
+        )
+        text = reply.mended.strip()
+        summaries.append(text)
+        info(f"{reply.total:.0f} s, {len(text)} characters, "
+             f"{text.count('说话人')} speaker numbers")
+        print(text, flush=True)
+        time.sleep(5)
 
     rows = []
-    for name, instruction, kind in CONCLUSIONS:
+    for name, instruction in CONCLUSIONS:
         say(f"conclusion {name}")
         body = "\n\n".join(
-            f"第{n}段：{s}" for n, s in enumerate(summaries[kind], 1) if s
+            f"第{n}段：{s}" for n, s in enumerate(summaries, 1) if s
         )
         prompt = (instruction or control_config().meeting_prompt) + body
         reply = ask_patiently(
@@ -480,14 +478,29 @@ def run_conclusions(args, record, base_url, out_dir, session_id):
         time.sleep(5)
 
     say("comparison")
-    print(f"  {'conclusion':<12}{'secs':>6}{'chars':>7}{'speaker no.':>13}"
-          "  people named (none are in the meeting)", flush=True)
+    print(f"  {'conclusion':<14}{'secs':>6}{'chars':>7}{'speaker no.':>13}"
+          "  invented owners (none are in the meeting)", flush=True)
     for name, secs, chars, people, numbers, _ in rows:
-        print(f"  {name:<12}{secs:>6.0f}{chars:>7}{numbers:>13}  "
+        print(f"  {name:<14}{secs:>6.0f}{chars:>7}{numbers:>13}  "
               f"{'、'.join(people) or '-'}", flush=True)
     for name, _, _, _, _, text in rows:
         say(f"{name}, in full")
         print(text, flush=True)
+
+
+def unmended_event(payloads):
+    """The first event after which the mended output stops being UTF-8,
+    or None. Mended output can trail its event by one, so look around."""
+    spec = importlib.util.spec_from_file_location("utf8_mend", MENDER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    mender = module.Mender()
+    for i, value in enumerate(payloads):
+        try:
+            mender.feed(value).decode("utf-8")
+        except UnicodeDecodeError:
+            return i
+    return None
 
 
 def run_garbling(directory):
@@ -534,6 +547,15 @@ def run_garbling(directory):
         at = mended.find(chr(0xFFFD))
         info("mended: " + (repr(mended[max(0, at - 15) : at + 15])
                            if at >= 0 else "no U+FFFD left"))
+        left = unmended_event(r.payloads)
+        if left is not None:
+            info("first break the mender leaves, in hex:")
+            for i in range(max(0, left - 4), min(len(r.payloads), left + 4)):
+                v = r.payloads[i]
+                mark = "  <-" if i == left else ""
+                print(f"          event {i}: {v.hex(' '):<24} {v!r}{mark}",
+                      flush=True)
+            continue  # the hex below is for breaks the mender repaired
         text = r.joined_bytes
         if chr(0xFFFD) not in text:
             text = r.as_extension_reads  # joined repaired it; show the break
