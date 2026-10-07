@@ -75,14 +75,17 @@ def meeting(tmp_path):
     return folder
 
 
-def upload(folder, speakers=2):
-    return {
+def upload(folder, speakers=2, script=None):
+    payload = {
         "meeting_id": "m1",
         "ogg_path": str(folder / "audio.ogg"),
         "work_dir": str(folder / "work"),
         "title": "週會",
         "speakers": speakers,
     }
+    if script:
+        payload["script"] = script
+    return payload
 
 
 def topics_ready(folder, *spans):
@@ -109,9 +112,11 @@ def flow(board):
     return MeetingFlow(MeetingControlConfig(), board)
 
 
-async def run_two_topics(folder, board):
+async def run_two_topics(folder, board, script="traditional"):
+    # Traditional, so the record reads as these fixtures are written; the
+    # script itself is test_script.py's and the two tests that choose it.
     f = flow(board)
-    await f.start(upload(folder))
+    await f.start(upload(folder, script=script))
     await f.on_segments_ready(
         topics_ready(folder, (0.0, 300.0), (300.0, 600.0))
     )
@@ -206,6 +211,62 @@ async def test_the_meeting_ends_archived_with_record_and_minutes(meeting):
 
 
 @pytest.mark.asyncio
+async def test_the_record_is_written_in_the_script_the_upload_chose(meeting):
+    board = Board(answers=["一的重点", "二的重点", "下周出版本。"])
+    f = flow(board)
+    chosen = upload(meeting)
+    chosen["script"] = "traditional"
+    await f.start(chosen)
+    await f.on_segments_ready(
+        topics_ready(meeting, (0.0, 300.0), (300.0, 600.0))
+    )
+    await f.on_transcribed(transcribed("t01", said(1, 5, 0, "我先说。", A)))
+    await f.on_transcribed(transcribed("t02", said(1, 5, 0, "这样吧。", B)))
+
+    record = json.loads((meeting / "record.json").read_text(encoding="utf-8"))
+    minutes = (meeting / "minutes.txt").read_text(encoding="utf-8")
+    assert record["topics"][0]["utterances"][0]["text"] == "我先說。"
+    assert record["topics"][0]["summary"] == "一的重點"
+    assert record["summary"] == "下週出版本。"
+    assert "結論" in minutes and "說話人1：我先說。" in minutes
+    # The prompts stay Simplified: that is what the board's 7B was measured on.
+    assert "说话人1：我先说。" in board.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_without_a_choice_the_boards_default_applies(meeting):
+    board = Board(answers=["一的重点", "二的重点", "结论"])
+
+    await run_two_topics(meeting, board, script=None)
+
+    minutes = (meeting / "minutes.txt").read_text(encoding="utf-8")
+    assert "结论" in minutes and "说话人1：我先说。" in minutes
+    assert "結論" not in minutes and "說話人" not in minutes
+
+
+@pytest.mark.asyncio
+async def test_a_broken_board_default_falls_back_to_simplified(meeting):
+    # The default comes from ${env:MEETING_OUTPUT_SCRIPT|simplified} in the
+    # graph; a typo there must not leave every meeting stuck at "decoding".
+    board = Board(answers=["一的重点", "二的重点", "结论"])
+    f = MeetingFlow(MeetingControlConfig(output_script="Traditional "), board)
+    logged = []
+    board.log = logged.append
+    await f.start(upload(meeting))
+    await f.on_segments_ready(
+        topics_ready(meeting, (0.0, 300.0), (300.0, 600.0))
+    )
+    await f.on_transcribed(transcribed("t01", said(1, 5, 0, "我先说。", A)))
+    await f.on_transcribed(transcribed("t02", said(1, 5, 0, "这样吧。", B)))
+
+    assert state(meeting / "work")["state"] == "archived"
+    assert "说话人1：我先说。" in (meeting / "minutes.txt").read_text(
+        encoding="utf-8"
+    )
+    assert any("Traditional " in line for line in logged)
+
+
+@pytest.mark.asyncio
 async def test_progress_restarts_from_zero_for_the_summaries(meeting):
     board = Board(work_dir=meeting / "work")
 
@@ -223,7 +284,7 @@ async def test_progress_restarts_from_zero_for_the_summaries(meeting):
 async def test_a_topic_that_failed_does_not_stop_the_meeting(meeting):
     board = Board(answers=["二的重點", "結論"])
     f = flow(board)
-    await f.start(upload(meeting))
+    await f.start(upload(meeting, script="traditional"))
     await f.on_segments_ready(
         topics_ready(meeting, (0.0, 300.0), (300.0, 600.0))
     )

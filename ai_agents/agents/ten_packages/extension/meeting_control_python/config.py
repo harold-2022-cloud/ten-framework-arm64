@@ -39,6 +39,11 @@ class MeetingControlConfig(BaseModel):
         "二、待办事项。不要逐句复述原文。\n\n"
     )
 
+    # The record's script when an upload does not choose one: "simplified"
+    # or "traditional" (script.py). The graph sets it from
+    # MEETING_OUTPUT_SCRIPT.
+    output_script: str = "simplified"
+
     # Used when an upload does not say how many people were there.
     speakers: int = -1
 

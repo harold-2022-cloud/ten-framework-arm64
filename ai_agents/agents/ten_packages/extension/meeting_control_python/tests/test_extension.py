@@ -58,6 +58,7 @@ class GraphTester(AsyncExtensionTester):
                     "work_dir": self.work,
                     "title": "週會",
                     "speakers": 2,
+                    "script": "traditional",
                 }
             ),
         )

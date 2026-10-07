@@ -24,11 +24,12 @@ archived.
 
 import json
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 from .actions import parse_actions
 from .config import MeetingControlConfig
 from .minutes import render_minutes
+from .script import convert_record, converter
 from .record import MeetingRecord
 from .speakers import link
 from .state import write_state
@@ -44,6 +45,7 @@ class MeetingFlow:
         self.folder = ""
         self.pcm_path = ""
         self.speakers = config.speakers
+        self._convert: Callable[[str], str] = str  # set per meeting in start()
         self._busy_with: Optional[str] = None
         self._topics: list = []
         self._cursor = 0
@@ -72,6 +74,7 @@ class MeetingFlow:
         self.work_dir = payload["work_dir"]
         self.folder = os.path.dirname(self.ogg_path)
         self.speakers = payload.get("speakers") or self.config.speakers
+        self._convert = self._script(payload.get("script"))
         self.record = MeetingRecord(
             meeting_id,
             title=payload.get("title"),
@@ -207,7 +210,9 @@ class MeetingFlow:
         self._persist(error=error)
         self._write(
             "minutes.txt",
-            render_minutes(self.record, self._summary, self._actions),
+            self._convert(
+                render_minutes(self.record, self._summary, self._actions)
+            ),
         )
         if state == "archived":
             pcm = os.path.join(self.work_dir, "audio.pcm")
@@ -218,15 +223,33 @@ class MeetingFlow:
         self._busy_with = None
 
     def _persist(self, error: Optional[str] = None) -> None:
-        payload = self.record.to_json(
-            summary=self._summary,
-            actions=self._actions,
-            actions_error=self._actions_error,
-            error=error,
+        payload = convert_record(
+            self.record.to_json(
+                summary=self._summary,
+                actions=self._actions,
+                actions_error=self._actions_error,
+                error=error,
+            ),
+            self._convert,
         )
         self._write(
             "record.json", json.dumps(payload, ensure_ascii=False, indent=2)
         )
+
+    def _script(self, chosen: Optional[str]) -> Callable[[str], str]:
+        """The upload's choice of script, else the board's default, else
+        Simplified. The uploader refuses an unknown choice and the default
+        comes from the graph's environment; either can still be wrong by
+        the time it gets here, and that is logged, never fatal: a typo in
+        .env must not leave every meeting stuck."""
+        for script in (chosen, self.config.output_script):
+            if not script:
+                continue
+            try:
+                return converter(script)
+            except ValueError as err:
+                self.io.log(f"{err}; ignored")
+        return converter("simplified")
 
     def _write(self, name: str, text: str) -> None:
         path = os.path.join(self.folder, name)

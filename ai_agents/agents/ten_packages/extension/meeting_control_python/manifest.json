@@ -32,7 +32,8 @@
         "speakers": { "type": "int64" },
         "link_over_factor": { "type": "int64" },
         "link_threshold": { "type": "float64" },
-        "link_same_voice": { "type": "float64" }
+        "link_same_voice": { "type": "float64" },
+        "output_script": { "type": "string" }
       }
     },
     "cmd_in": [{ "name": "meeting_uploaded" }],
