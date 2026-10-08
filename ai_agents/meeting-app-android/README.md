@@ -53,8 +53,9 @@ it about ten minutes after its last meeting ends. If you open a meeting
 later than that, the app starts the worker again to read the record. Once
 fetched, the record lives on the phone and reads offline.
 
-For how the code is laid out and the rules it keeps, see `DEVELOPMENT.md`
-(Traditional Chinese).
+For how the code is laid out and the rules it keeps, see
+[DEVELOPMENT.md](DEVELOPMENT.md) (Traditional Chinese:
+[DEVELOPMENT.zh-TW.md](DEVELOPMENT.zh-TW.md)).
 
 ## Prototype limits
 
