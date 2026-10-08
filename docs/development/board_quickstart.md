@@ -277,8 +277,9 @@ curl -s -O http://$BOARD:8765/meeting/<meeting_id>/minutes.txt
 
 The client can go offline after the upload: while a meeting is being
 processed the worker pings the server for itself, so `timeout` only has to
-cover the upload and fetching the result. One meeting at a time — a second
-upload while one is processing gets 409.
+cover the upload and fetching the result. One meeting at a time: a second
+upload while one is processing is queued (`"status": "queued"`, with `ahead`
+and `wait_s`) and processed when the first ends.
 
 Use the channel `meeting-room`, as the Android app does, and there is only
 ever one meeting worker: a second `/start` answers code `10003` (already

@@ -20,12 +20,15 @@ Takes about the --minutes of audio, plus two minutes. In order:
             channel. Its uploader cannot get 8765 and must leave A alone:
             before the fix, A read "failed" the moment it started. The
             intruder is this check's own, and is stopped again
-  busy      a second upload while A is processed gets 409 naming A
-  finish    A ends archived
-  reaped    nobody pings once A is done: the worker is gone within its
+  queue     meeting B, a minute long, sent while A is processed, is queued
+            behind A rather than turned away
+  finish    A ends archived, and B stays queued until it does
+  in turn   B is handed on by itself once A ends, and ends archived
+  reaped    nobody pings once both are done: the worker is gone within its
             60 s timeout
-  revive    /start meeting-room again; A still reads archived, with its
-            record -- how the app reads a meeting after its worker went
+  revive    /start meeting-room again; A and B still read archived, with
+            their records -- how the app reads a meeting after its worker
+            went
 
 It never stops meeting-room, as the app never does: the revived worker is
 reaped a minute after the check ends. Exits non-zero if any check failed.
@@ -115,6 +118,42 @@ def upload(args, meeting_id, path, auth):
         timeout=120,
     )
     return status, reply.decode(errors="replace")
+
+
+def cut(src, seconds, path):
+    """The first seconds of a recording, as the 16 kHz mono Ogg-Opus the
+    uploader takes."""
+    import soundfile as sf  # pylint: disable=import-outside-toplevel
+
+    samples, _ = sf.read(src, dtype="int16", frames=int(seconds * 16000))
+    sf.write(path, samples, 16000, format="OGG", subtype="OPUS")
+    return path
+
+
+def follow(args, meeting_id, auth, t0, deadline, before=None, judge=None):
+    """A meeting's state until it is final, its changes printed; None if
+    the worker stops answering or the deadline passes. At every look,
+    before() is read first, then the meeting, and judge(seen, state) gets
+    both -- in that order, so what before() saw happened before the state."""
+    last = None
+    while time.monotonic() < deadline:
+        seen = before() if before is not None else None
+        state = state_of(args, meeting_id, auth)
+        if state is None:
+            return None
+        if judge is not None:
+            judge(seen, state)
+        progress = state.get("progress") or {}
+        now = (state.get("state"), progress.get("topics_done"))
+        if now != last:
+            print(f"  {mmss(time.monotonic() - t0)}  {meeting_id[-1]}  "
+                  f"{state.get('state'):<13}{progress.get('topics_done')}/"
+                  f"{progress.get('topics_total')}", flush=True)
+            last = now
+        if state.get("state") in FINAL:
+            return state
+        time.sleep(5)
+    return None
 
 
 def log_count(needle):
@@ -293,54 +332,70 @@ def run(args, env):
     else:
         warn(f"/stop {intruder} answered {status} code {code}")
 
-    say(f"busy: meeting B ({b_id}) while A is processed")
+    say(f"queue: meeting B ({b_id}), a minute long, while A is processed")
     state = state_of(args, a_id, auth) or {}
     if state.get("state") in FINAL:
-        warn("A had already ended; the 409 was not tested. Use a longer --minutes")
-    else:
-        status, reply = upload(args, b_id, audio, auth)
-        if status == 409 and a_id in reply:
-            ok(f"409 {reply}")
-        else:
-            fail(f"a second upload answered {status} {reply[:200]}, "
-                 f"not 409 naming {a_id}")
-
-    say("finish")
-    deadline = t_upload + args.max_minutes * 60
-    last = None
-    while time.monotonic() < deadline:
-        state = state_of(args, a_id, auth)
-        if state is None:
-            fail("the worker stopped answering while A was processed")
-            return
-        progress = state.get("progress") or {}
-        now = (state.get("state"), progress.get("topics_done"))
-        if now != last:
-            print(f"  {mmss(time.monotonic() - t_upload)}  "
-                  f"{state.get('state'):<13}{progress.get('topics_done')}/"
-                  f"{progress.get('topics_total')}", flush=True)
-            last = now
-        if state.get("state") in FINAL:
-            break
-        time.sleep(10)
-    else:
-        fail(f"A not finished after {args.max_minutes} minutes")
+        fail("A had already ended; the queue was not tested. Use a longer --minutes")
         return
-    t_done = time.monotonic()
+    short = cut(audio, 60, os.path.join(out_dir, "upload-b.ogg"))
+    status, reply = upload(args, b_id, short, auth)
+    body = json.loads(reply) if status == 200 else {}
+    if body.get("status") == "queued" and body.get("ahead", 0) >= 1:
+        ok(f"queued behind A: {reply}")
+    else:
+        fail(f"B answered {status} {reply[:200]}, not queued behind A")
+        return
+    queue = (state_of(args, b_id, auth) or {}).get("queue") or {}
+    if queue.get("ahead", 0) >= 1:
+        ok(f"B's status: {queue['ahead']} ahead, about {queue.get('wait_s')} s to wait")
+    else:
+        fail(f"B's status has no place in the queue: {queue}")
+
+    say("finish: A, with B waiting")
+    deadline = t_upload + args.max_minutes * 60
+    jumped = []
+
+    def b_state():
+        return (state_of(args, b_id, auth) or {}).get("state")
+
+    def b_waits(b, a):
+        # B read first: B out of the queue while A, read after, still goes.
+        if b != "queued" and a.get("state") not in FINAL and not jumped:
+            jumped.append(b)
+
+    state = follow(args, a_id, auth, t_upload, deadline, before=b_state, judge=b_waits)
+    if state is None:
+        fail(f"A did not finish within {args.max_minutes:g} minutes, or the worker went")
+        return
     if state.get("state") == "archived":
         ok(f"A archived, {len((state.get('record') or {}).get('topics') or [])} topics")
     else:
         fail(f"A ended {state.get('state')}: {state.get('error')}")
+    if jumped:
+        fail(f"B left the queue ({jumped[0]}) before A ended")
+    else:
+        ok("B stayed queued while A was processed")
+
+    say("in turn: B, handed on by the uploader itself")
+    state = follow(args, b_id, auth, t_upload, deadline)
+    if state is None:
+        fail(f"B did not finish within {args.max_minutes:g} minutes, or the worker went")
+        return
+    t_done = time.monotonic()
+    if state.get("state") == "archived":
+        ok("B archived after A, with nobody asking for it")
+    else:
+        fail(f"B ended {state.get('state')}: {state.get('error')}")
         return
 
     say(f"reaped: nobody pings, timeout {args.timeout} s")
     while request(f"{args.uploader}/meetings", headers=auth, timeout=3)[0] != GONE:
         if time.monotonic() - t_done > args.timeout + 90:
             fail(f"the worker still answers {time.monotonic() - t_done:.0f} s "
-                 f"after A ended; is something else pinging {CHANNEL}?")
+                 f"after B ended; is something else pinging {CHANNEL}?")
             return
         time.sleep(5)
-    ok(f"the worker went {time.monotonic() - t_done:.0f} s after A ended")
+    ok(f"the worker went {time.monotonic() - t_done:.0f} s after B ended")
 
     say("revive: read A from a fresh worker")
     status, code = start(args, CHANNEL)
@@ -352,13 +407,15 @@ def run(args, env):
         fail(f"{args.uploader} did not answer within 90 s of /start")
         return
     ok(f"a fresh worker answered {took:.0f} s after /start")
-    state = state_of(args, a_id, auth) or {}
-    record = state.get("record") or {}
-    if state.get("state") == "archived" and record.get("topics") is not None:
-        ok(f"A still archived, record with {len(record['topics'])} topics")
-    else:
-        fail(f"A reads {state.get('state')} with record "
-             f"{'present' if record else 'missing'} from a fresh worker")
+    for meeting_id in (a_id, b_id):
+        state = state_of(args, meeting_id, auth) or {}
+        record = state.get("record") or {}
+        name = meeting_id[-1].upper()
+        if state.get("state") == "archived" and record.get("topics") is not None:
+            ok(f"{name} still archived, record with {len(record['topics'])} topics")
+        else:
+            fail(f"{name} reads {state.get('state')} with record "
+                 f"{'present' if record else 'missing'} from a fresh worker")
     status, body = request(
         f"{args.uploader}/meeting/{a_id}/record.json", headers=auth
     )

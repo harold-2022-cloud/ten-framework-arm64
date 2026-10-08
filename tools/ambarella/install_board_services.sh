@@ -7,6 +7,7 @@
 # systemd services, enabled and started. Run once.
 #
 #   tools/ambarella/install_board_services.sh              install, enable, start
+#   git pull --ff-only && tools/ambarella/install_board_services.sh   update
 #   tools/ambarella/install_board_services.sh --status     is each one up
 #   tools/ambarella/install_board_services.sh --print      the unit files; nothing changes
 #   tools/ambarella/install_board_services.sh --uninstall  stop, disable, remove
@@ -30,6 +31,11 @@
 # examples/voice-assistant brings it back. An LLM daemon already running is
 # left as it is; the service takes it over at the next boot.
 #
+# Run it again after every git pull: when the API server's Go code changed,
+# server/bin/api is built again and ten-api restarted -- but not while a
+# meeting worker is up, so a meeting being processed is not cut short; it
+# then says to run this again later.
+#
 # Run it as the user who runs `task run`, not with sudo: sudo asks for your
 # password for systemctl and /etc/systemd/system. The LLM daemon's options
 # follow board_quickstart.md and can be changed through the environment:
@@ -49,6 +55,7 @@ esac
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
+SERVER_DIR="$REPO_ROOT/ai_agents/server"
 ENV_FILE="$REPO_ROOT/ai_agents/.env"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 LLM_DIR="${LLM_DIR:-/usr/share/ambarella/llm_demo}"
@@ -159,7 +166,7 @@ if [[ $MODE == uninstall ]]; then
 fi
 
 [[ -n "$TASK" && -x "$TASK" ]] || fail "task is not on PATH"
-[[ -x "$EXAMPLE/../../../server/bin/api" ]] ||
+[[ -x "$SERVER_DIR/bin/api" ]] ||
   fail "no server/bin/api: run ai_agents/agents/scripts/install_board_arm64.sh first"
 [[ -x "$LLM_DIR/run_llm_demo.sh" ]] || fail "no $LLM_DIR/run_llm_demo.sh: is the vendor's LLM demo installed?"
 [[ -d "$LLM_MODEL_PATH" ]] || fail "no model at $LLM_MODEL_PATH (LLM_MODEL_PATH=... picks another)"
@@ -203,6 +210,28 @@ else
 fi
 
 echo "== API server"
+# Its Go code newer than the binary: a pull brought a change.
+newer=$(find "$SERVER_DIR" -name '*.go' -newer "$SERVER_DIR/bin/api" -not -name '*_test.go' | head -3)
+[[ "$SERVER_DIR/go.mod" -nt "$SERVER_DIR/bin/api" ]] && newer+=" go.mod"
+if [[ -n "${newer// /}" ]]; then
+  echo "  server code changed since bin/api was built: $(echo $newer | sed "s|$SERVER_DIR/||g")"
+  command -v go >/dev/null || fail "go is not on PATH; it is needed to build server/bin/api"
+  (cd "$SERVER_DIR" && go build -o bin/api.new main.go && mv bin/api.new bin/api) ||
+    fail "go build failed; bin/api is the old one"
+  ok "server/bin/api built again"
+fi
+# The service started before bin/api was last built: it runs an older build.
+if systemctl is-active --quiet ten-api; then
+  since=$(date -d "$(systemctl show ten-api -p ActiveEnterTimestamp --value)" +%s 2>/dev/null || echo 0)
+  if (( $(stat -c %Y "$SERVER_DIR/bin/api") > since )); then
+    if answers "http://127.0.0.1:8765/meetings"; then
+      note "a meeting worker is up: ten-api keeps its older build for now; run this again when it is idle"
+    else
+      sudo systemctl restart ten-api || fail "ten-api did not restart: journalctl -u ten-api"
+      ok "ten-api restarted on the new build"
+    fi
+  fi
+fi
 if ! systemctl is-active --quiet ten-api; then
   hand=$(pids_of 'bin/api -tenapp_dir')
   if [[ -n "$hand" ]]; then

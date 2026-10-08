@@ -246,7 +246,8 @@ curl -s -O http://$BOARD:8765/meeting/<meeting_id>/minutes.txt
 ```
 
 上傳完客戶端就可以離線：處理期間 worker 自己 ping server，所以 `timeout` 只要
-涵蓋上傳和取回結果。一次只處理一場——處理中再上傳會回 409。
+涵蓋上傳和取回結果。一次只處理一場：處理中再上傳會排隊（`"status": "queued"`，附
+`ahead`、`wait_s`），前一場做完就接著處理。
 
 channel 一律用 `meeting-room`（Android App 也是），板子上就永遠只有一個會議
 worker：再打一次 `/start` 會回 code `10003`（已經在跑），照樣上傳就好。不要
