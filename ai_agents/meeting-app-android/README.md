@@ -10,7 +10,7 @@ curl walk-through in `docs/development/board_quickstart.md` uses:
 
 | Port | What | The app uses it for |
 | --- | --- | --- |
-| 8081 | Go API server | `/start` and `/stop` of the meeting worker, channel `meeting-<meeting_id>` |
+| 8081 | Go API server | `/start` of the meeting worker, always channel `meeting-room`; `/ping` when it is already running |
 | 8765 | uploader, inside that worker | upload, state and progress, `record.json` |
 
 ## Build
@@ -43,10 +43,14 @@ Android 10 or later.
    time + the recording's length + 2 minutes, and processing measured 0.93× the
    recording's length on the board. Tapping the notification opens the meeting.
 
-The board's worker is reaped about ten minutes after a meeting ends. If you
-open the meeting later than that, the app starts a worker again to read the
-record, then stops it. Once fetched, the record lives on the phone and reads
-offline.
+Every meeting goes to the board's one meeting worker, and the app never
+stops it: it may be in the middle of someone else's meeting. The board reaps
+it about ten minutes after its last meeting ends. If you open a meeting
+later than that, the app starts the worker again to read the record. Once
+fetched, the record lives on the phone and reads offline.
+
+For how the code is laid out and the rules it keeps, see `DEVELOPMENT.md`
+(Traditional Chinese).
 
 ## Prototype limits
 

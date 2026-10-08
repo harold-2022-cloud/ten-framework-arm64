@@ -206,7 +206,7 @@ worker 記憶體，並對照標註算出「說話時間算錯人」的比例。�
 ```bash
 BOARD=192.168.1.50
 curl -s -X POST http://$BOARD:8081/start -H 'Content-Type: application/json' \
-  -d '{"request_id":"1","channel_name":"meeting-1","graph_name":"meeting_minutes","timeout":600}'
+  -d '{"request_id":"1","channel_name":"meeting-room","graph_name":"meeting_minutes","timeout":600}'
 until curl -sf http://$BOARD:8765/meetings > /dev/null; do sleep 1; done
 curl -s -X POST http://$BOARD:8765/meeting/upload \
   -F 'file=@meeting.ogg' -F 'speakers=6' -F 'title=週會'
@@ -216,6 +216,10 @@ curl -s -O http://$BOARD:8765/meeting/<meeting_id>/minutes.txt
 
 上傳完客戶端就可以離線：處理期間 worker 自己 ping server，所以 `timeout` 只要
 涵蓋上傳和取回結果。一次只處理一場——處理中再上傳會回 409。
+
+channel 一律用 `meeting-room`（Android App 也是），板子上就永遠只有一個會議
+worker：再打一次 `/start` 會回 code `10003`（已經在跑），照樣上傳就好。不要
+`/stop` 它，它可能正在處理別人的會議；最後一場結束 10 分鐘後板子會自己收掉。
 
 ### 已經量過的
 

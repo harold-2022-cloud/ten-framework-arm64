@@ -1,6 +1,7 @@
 package io.ten.meetingminutes
 
 import io.ten.meetingminutes.board.BoardApi
+import io.ten.meetingminutes.domain.Ids
 import io.ten.meetingminutes.domain.Work
 import io.ten.meetingminutes.store.Meeting
 import io.ten.meetingminutes.store.MeetingStore
@@ -9,6 +10,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,15 +24,17 @@ import java.net.ServerSocket
 import java.nio.file.Files
 
 /**
- * When the app starts and stops the meeting's worker on the board. The
- * worker is the only thing that can answer about a meeting, and it is
- * reaped ten minutes after the meeting ends without anyone asking.
+ * How the app uses the board's meeting worker. There is one, on one
+ * channel, for every meeting: the uploader inside it is the only thing that
+ * answers about a meeting, and the board reaps it ten minutes after its last
+ * meeting ends. The app starts it when it is not there and never stops it --
+ * stopping it could kill someone else's meeting halfway.
  */
 class WorkTest {
     private val server = MockWebServer()
 
-    // The uploader runs inside the meeting's worker: a reaped worker is a
-    // port that refuses connections, until /start brings a new one up.
+    // The uploader runs inside the worker: a reaped worker is a port that
+    // refuses connections, until /start brings a new one up.
     private val uploaderPort = ServerSocket(0).use { it.localPort }
     @Volatile private var uploader: MockWebServer? = null
     private val dir: File = Files.createTempDirectory("work").toFile()
@@ -38,7 +42,8 @@ class WorkTest {
 
     @Volatile private var state = "archived"
     @Volatile private var recordStatus = 200
-    @Volatile private var starts = 0
+    private val starts = mutableListOf<String>()
+    @Volatile private var pings = 0
     @Volatile private var stops = 0
     private val cancelled = mutableListOf<String>()
 
@@ -55,11 +60,24 @@ class WorkTest {
     fun up() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
-                when (request.path) {
-                    "/start" -> { starts++; if (uploader == null) workerUp() }
-                    "/stop" -> stops++
+                val ok = json(200, """{"code": "0", "msg": "success", "data": null}""")
+                return when (request.path) {
+                    "/start" -> {
+                        synchronized(starts) {
+                            starts += JSONObject(request.body.readUtf8()).getString("channel_name")
+                        }
+                        if (uploader != null) {
+                            // What the Go server says of a channel already running.
+                            json(400, """{"code": "10003", "msg": "channel existed", "data": null}""")
+                        } else {
+                            workerUp()
+                            ok
+                        }
+                    }
+                    "/ping" -> { pings++; ok }
+                    "/stop" -> { stops++; ok }
+                    else -> ok
                 }
-                return json(200, """{"code": "0", "msg": "success", "data": null}""")
             }
         }
         server.start()
@@ -112,49 +130,52 @@ class WorkTest {
         Work.refresh(api, store, m, cancel = { cancelled += it })
     }
 
+    private fun send(m: Meeting) = runBlocking {
+        Work.upload(api, store, m, schedule = { _, _ -> })
+    }
+
+    private fun recording() =
+        File(dir, "a.ogg").apply { writeBytes(byteArrayOf(79, 103, 103, 83, 0)) }
+
     @Test
-    fun aFinishedMeetingIsKeptOnThePhoneAndItsWorkerLetGoOnce() {
+    fun aFinishedMeetingIsKeptOnThePhoneAndTheWorkerLeftToTheBoard() {
         val after = refresh(meeting)
 
         assertEquals("archived", after.state)
-        assertTrue(after.stopped)
+        assertTrue(after.settled)
         assertNotNull(store.record("m1"))
-        assertEquals(1, stops)
         assertEquals(listOf("m1"), cancelled)
-
-        refresh(after)
-        assertEquals(1, stops)
+        assertEquals(0, stops)
     }
 
     @Test
-    fun aMeetingWhoseWorkerWasReapedIsReadByStartingOneAgain() {
+    fun aMeetingWhoseWorkerWasReapedIsReadByStartingTheWorkerAgain() {
         reaped()
 
         val after = refresh(meeting)
 
-        assertEquals(1, starts)
+        assertEquals(listOf(Ids.CHANNEL), starts)
         assertEquals("archived", after.state)
         assertNull(after.error)
         assertNotNull(store.record("m1"))
-        assertTrue("the worker started to read it is stopped again", after.stopped)
-        assertEquals(1, stops)
+        assertTrue(after.settled)
+        assertEquals(0, stops)
     }
 
     @Test
-    fun anArchivedMeetingWhoseRecordDidNotArriveKeepsItsWorker() {
+    fun anArchivedMeetingWhoseRecordDidNotArriveIsAskedAgain() {
         recordStatus = 500
 
         val after = refresh(meeting)
 
         assertEquals("archived", after.state)
-        assertFalse(after.stopped)
+        assertFalse(after.settled)
         assertNull(store.record("m1"))
-        assertEquals(0, stops)
         assertTrue(cancelled.isEmpty())
     }
 
     @Test
-    fun aFailureWithoutARecordStillLetsTheWorkerGo() {
+    fun aFailureWithoutARecordIsSettled() {
         // The uploader's own failures (an interrupted run) write no record.
         state = "failed"
         recordStatus = 404
@@ -162,8 +183,7 @@ class WorkTest {
         val after = refresh(meeting)
 
         assertEquals("failed", after.state)
-        assertTrue(after.stopped)
-        assertEquals(1, stops)
+        assertTrue(after.settled)
     }
 
     @Test
@@ -173,15 +193,36 @@ class WorkTest {
         val after = refresh(meeting.copy(state = "transcribing"))
 
         assertEquals("summarising", after.state)
-        assertEquals(0, starts)
+        assertFalse(after.settled)
+        assertTrue(starts.isEmpty())
+    }
+
+    @Test
+    fun everyMeetingGoesToTheOneWorkerAndNoneIsStopped() {
+        reaped()
+        val file = recording()
+
+        send(meeting.copy(id = "m1", file = file.path, state = "local", uploadedAtMs = 0))
+        send(meeting.copy(id = "m2", file = file.path, state = "local", uploadedAtMs = 0))
+
+        assertEquals(listOf(Ids.CHANNEL, Ids.CHANNEL), starts)
         assertEquals(0, stops)
     }
 
     @Test
+    fun aWorkerAlreadyRunningIsKeptAliveAndUsed() {
+        // It may be minutes from being reaped: the ping restarts its clock.
+        val after = send(meeting.copy(file = recording().path, state = "local", uploadedAtMs = 0))
+
+        assertEquals("received", after.state)
+        assertEquals(1, starts.size)
+        assertEquals(1, pings)
+    }
+
+    @Test
     fun sendingAMeetingAgainStartsItOver() {
-        val file = File(dir, "a.ogg").apply { writeBytes(byteArrayOf(79, 103, 103, 83, 0)) }
         store.saveRecord("m1", RecordTest.SAMPLE)
-        val failed = meeting.copy(file = file.path, state = "failed", stopped = true, error = "x")
+        val failed = meeting.copy(file = recording().path, state = "failed", settled = true, error = "x")
         var due = 0L
 
         val after = runBlocking {
@@ -189,7 +230,7 @@ class WorkTest {
         }
 
         assertEquals("received", after.state)
-        assertFalse("the new run's worker must be stopped when it ends", after.stopped)
+        assertFalse("the new run is read until it ends", after.settled)
         assertNull(after.error)
         assertNull("the last run's record is gone", store.record("m1"))
         assertTrue(after.uploadedAtMs > failed.uploadedAtMs)

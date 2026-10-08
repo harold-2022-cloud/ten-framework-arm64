@@ -53,9 +53,10 @@ class BoardApi(
         )
     }
 
-    fun stop(channel: String) {
+    /** Restart a running worker's idle clock. */
+    fun ping(channel: String) {
         serverCall(
-            "/stop",
+            "/ping",
             JSONObject()
                 .put("request_id", UUID.randomUUID().toString())
                 .put("channel_name", channel),

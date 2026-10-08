@@ -17,8 +17,6 @@ class SmallLogicTest {
 
         assertTrue(id, valid.matches(id))
         assertTrue(id, id.contains("a1b2"))
-        assertTrue(Ids.channel(id).startsWith("meeting-"))
-        assertTrue(valid.matches(Ids.channel(id)))
     }
 
     @Test

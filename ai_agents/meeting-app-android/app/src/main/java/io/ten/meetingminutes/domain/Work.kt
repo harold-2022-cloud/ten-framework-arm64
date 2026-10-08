@@ -55,11 +55,11 @@ object Work {
         schedule: (Meeting, Long) -> Unit,
     ): Meeting =
         withContext(Dispatchers.IO) {
-            val m = m0.copy(uploadedAtMs = 0, done = 0, total = 0, error = null, stopped = false)
+            val m = m0.copy(uploadedAtMs = 0, done = 0, total = 0, error = null, settled = false)
             store.dropRecord(m.id)
             try {
                 store.put(m.copy(state = "starting"))
-                begin(api, m.id)
+                begin(api)
                 store.put(m.copy(state = "uploading"))
                 api.upload(
                     File(m.file), m.id, m.speakers, m.title,
@@ -75,40 +75,33 @@ object Work {
         }
 
     /** The board's state; once it is final, the record is kept on the
-     *  phone and then the worker stopped. A meeting that ended without
-     *  a record (the uploader's own failures write none) is stopped too. */
+     *  phone and the meeting settled. A meeting that ended without a
+     *  record (the uploader's own failures write none) is settled too. */
     suspend fun refresh(context: Context, settings: Settings, store: MeetingStore, m: Meeting): Meeting =
         refresh(api(settings), store, m) { Due.cancel(context, it) }
 
     suspend fun refresh(api: BoardApi, store: MeetingStore, m: Meeting, cancel: (String) -> Unit): Meeting =
         withContext(Dispatchers.IO) {
             try {
-                var stopped = m.stopped
                 val s = try {
                     api.status(m.id)
                 } catch (e: ApiError) {
-                    // The worker that held the meeting is reaped ten minutes
-                    // after it ends, but the meeting stays on the board's
-                    // disk. Start one to read it (a fresh uploader leaves a
-                    // finished meeting as it is), and stop it again below.
+                    // The worker is reaped ten minutes after its last meeting
+                    // ends, but the meeting stays on the board's disk. Start
+                    // it to read it: a fresh uploader leaves a finished
+                    // meeting as it is.
                     if (e.status != 0) throw e
-                    begin(api, m.id)
-                    stopped = false
+                    begin(api)
                     api.status(m.id)
                 }
-                var now = m.copy(
-                    state = s.state, done = s.topicsDone, total = s.topicsTotal,
-                    error = s.error, stopped = stopped,
-                )
+                var now = m.copy(state = s.state, done = s.topicsDone, total = s.topicsTotal, error = s.error)
                 if (now.finished) {
                     val kept = runCatching { store.saveRecord(m.id, recordJson(api, m.id)) }.isSuccess
-                    // An archived meeting without its record on the phone
-                    // keeps its worker, so the next look can fetch it.
-                    if (!kept && now.state == "archived") return@withContext now.also(store::put)
-                    cancel(m.id)
-                    if (!now.stopped) {
-                        runCatching { api.stop(Ids.channel(m.id)) }
-                        now = now.copy(stopped = true)
+                    // An archived meeting whose record did not arrive is
+                    // asked again next time.
+                    if (kept || now.state != "archived") {
+                        cancel(m.id)
+                        now = now.copy(settled = true)
                     }
                 }
                 now.also(store::put)
@@ -119,14 +112,16 @@ object Work {
             }
         }
 
-    /** A worker for the meeting's channel, with its uploader answering. */
-    private fun begin(api: BoardApi, id: String) {
+    /** The meeting worker, with its uploader answering. */
+    private fun begin(api: BoardApi) {
         try {
-            api.start(Ids.channel(id))
+            api.start(Ids.CHANNEL)
         } catch (e: ApiError) {
-            // 10003: this meeting's worker is already running -- an
-            // earlier attempt got that far. Carry on with it.
+            // 10003: the worker is already running -- another meeting's,
+            // or an earlier attempt's. Use it, and restart its idle clock:
+            // it may be a minute from being reaped.
             if (!e.reason.contains("10003")) throw e
+            runCatching { api.ping(Ids.CHANNEL) }
         }
         if (!api.waitReady()) {
             throw ApiError(0, "板子的會議服務 30 秒內沒有回應")

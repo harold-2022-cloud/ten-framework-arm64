@@ -39,7 +39,9 @@ data class Meeting(
     val done: Int = 0,
     val total: Int = 0,
     val error: String? = null,
-    val stopped: Boolean = false,
+    /** The phone has all the board will give: a final state, and the
+     *  record if there is one. Nothing more to ask. */
+    val settled: Boolean = false,
     val names: Map<Int, String> = emptyMap(),
 ) {
     val finished get() = state in setOf("archived", "empty", "failed")
@@ -50,7 +52,7 @@ data class Meeting(
         .put("durationS", durationS).put("file", file)
         .put("uploadedAtMs", uploadedAtMs).put("state", state)
         .put("done", done).put("total", total).put("error", error ?: JSONObject.NULL)
-        .put("stopped", stopped)
+        .put("settled", settled)
         .put("names", JSONObject(names.mapKeys { it.key.toString() }))
 
     companion object {
@@ -69,7 +71,7 @@ data class Meeting(
                 done = j.optInt("done"),
                 total = j.optInt("total"),
                 error = if (j.isNull("error")) null else j.optString("error"),
-                stopped = j.optBoolean("stopped"),
+                settled = j.optBoolean("settled"),
                 names = names.keys().asSequence().associate { it.toInt() to names.getString(it) },
             )
         }

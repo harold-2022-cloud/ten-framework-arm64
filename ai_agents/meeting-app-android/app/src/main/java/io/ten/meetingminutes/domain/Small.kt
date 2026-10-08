@@ -10,8 +10,12 @@ object Ids {
     fun meetingId(nowMs: Long, random: String = UUID.randomUUID().toString().take(4)): String =
         SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(nowMs)) + "-" + random
 
-    /** The Go server's name for this meeting's worker. */
-    fun channel(meetingId: String) = "meeting-$meetingId"
+    /** The one channel every meeting's worker runs on. One worker, so one
+     *  uploader: a second worker could not get the port, and stopping a
+     *  per-meeting one could kill whichever meeting the uploader was on.
+     *  The board reaps it ten minutes after its last meeting; nothing here
+     *  stops it. */
+    const val CHANNEL = "meeting-room"
 }
 
 object Estimate {

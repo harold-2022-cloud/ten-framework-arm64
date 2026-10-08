@@ -335,7 +335,7 @@ private fun DetailsScreen(id: String, settings: Settings, store: MeetingStore, o
         }
     }
     val meeting = m ?: run { Text("找不到這場會議。"); return }
-    val record = remember(meeting.state, meeting.uploadedAtMs, meeting.stopped) {
+    val record = remember(meeting.state, meeting.uploadedAtMs, meeting.settled) {
         store.record(id)?.let { runCatching { MeetingRecord.parse(it) }.getOrNull() }
     }
 
@@ -384,8 +384,8 @@ private fun DetailsScreen(id: String, settings: Settings, store: MeetingStore, o
 }
 
 /** Whether the board knows more about the meeting than the phone: it was
- *  sent, and is not both finished and let go. */
-private fun askBoard(m: Meeting) = m.uploadedAtMs > 0 && !(m.finished && m.stopped)
+ *  sent and is not settled. */
+private fun askBoard(m: Meeting) = m.uploadedAtMs > 0 && !m.settled
 
 @Composable
 private fun RecordView(record: MeetingRecord, meeting: Meeting, store: MeetingStore, onChange: (Meeting) -> Unit) {

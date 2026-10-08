@@ -231,7 +231,7 @@ end proves it kept itself alive. Results go to `~/meeting_probe/board_check`.
 ```bash
 BOARD=192.168.1.50
 curl -s -X POST http://$BOARD:8081/start -H 'Content-Type: application/json' \
-  -d '{"request_id":"1","channel_name":"meeting-1","graph_name":"meeting_minutes","timeout":600}'
+  -d '{"request_id":"1","channel_name":"meeting-room","graph_name":"meeting_minutes","timeout":600}'
 until curl -sf http://$BOARD:8765/meetings > /dev/null; do sleep 1; done
 curl -s -X POST http://$BOARD:8765/meeting/upload \
   -F 'file=@meeting.ogg' -F 'speakers=6' -F 'title=weekly'
@@ -243,6 +243,12 @@ The client can go offline after the upload: while a meeting is being
 processed the worker pings the server for itself, so `timeout` only has to
 cover the upload and fetching the result. One meeting at a time — a second
 upload while one is processing gets 409.
+
+Use the channel `meeting-room`, as the Android app does, and there is only
+ever one meeting worker: a second `/start` answers code `10003` (already
+running), which is fine — upload to it. Don't `/stop` it, since it may be
+in the middle of someone else's meeting. The board reaps it ten minutes
+after its last meeting.
 
 ### Already measured
 
