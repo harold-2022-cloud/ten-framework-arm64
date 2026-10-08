@@ -236,6 +236,10 @@ of the audio it uploads (4 minutes) plus two:
 python3.12 tools/ambarella/check_meeting_worker.py
 ```
 
+If an earlier run got stuck, `tools/ambarella/rerun_meeting_worker_check.sh`
+clears what it left (a check still running, meeting workers), installs any
+package the meeting extensions cannot import, and then runs the check.
+
 ### Use it
 
 ```bash

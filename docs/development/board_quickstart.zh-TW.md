@@ -210,6 +210,9 @@ worker 記憶體，並對照標註算出「說話時間算錯人」的比例。�
 python3.12 tools/ambarella/check_meeting_worker.py
 ```
 
+之前跑到一半卡住的話，用 `tools/ambarella/rerun_meeting_worker_check.sh`：它會先清掉
+留下來的東西（還在跑的檢查、會議 worker），補裝會議 extension 缺的套件，再跑檢查。
+
 ### 使用
 
 ```bash

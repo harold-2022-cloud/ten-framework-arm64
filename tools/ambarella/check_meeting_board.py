@@ -227,7 +227,8 @@ def preflight(args, env):
             fail(
                 f"import {name}: {err}",
                 "re-run ai_agents/agents/scripts/install_board_arm64.sh "
-                "voice-assistant: it installs every extension's "
+                "(no arguments; voice-assistant is its default): "
+                "it installs every extension's "
                 "requirements.txt for the runtime's interpreter",
             )
 
