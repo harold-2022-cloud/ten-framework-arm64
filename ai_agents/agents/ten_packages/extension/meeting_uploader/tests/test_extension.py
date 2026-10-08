@@ -199,3 +199,32 @@ def test_a_meeting_left_half_done_by_the_last_worker_is_marked_failed(
     state = store.read_state(str(folder))
     assert state["state"] == "failed"
     assert state["topics_done"] == 2
+
+
+class Idle(Client):
+    """Starts the extension and lets it be: nothing to ask on a port the
+    extension may not hold."""
+
+    async def _drive(self, ten_env: AsyncTenEnvTester) -> None:
+        await asyncio.sleep(1.0)
+        ten_env.stop_test()
+
+
+def test_a_worker_that_cannot_get_the_port_leaves_the_meetings_alone(
+    tmp_path,
+):
+    # Another worker holds the port and is in the middle of this meeting.
+    # The one that cannot listen must not call it interrupted: the meeting
+    # would read "failed" while it is being processed, and a client seeing
+    # that stops the worker doing it.
+    folder = tmp_path / "busy"
+    (folder / "work").mkdir(parents=True)
+    store.write_state(str(folder), state="transcribing", topics_done=2)
+    port = free_port()
+
+    with socket.socket() as holder:
+        holder.bind(("0.0.0.0", port))
+        holder.listen()
+        run(Idle(port), listen_port=port, meetings_dir=str(tmp_path))
+
+    assert store.read_state(str(folder))["state"] == "transcribing"

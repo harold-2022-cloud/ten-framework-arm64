@@ -46,10 +46,6 @@ class MeetingUploaderExtension(AsyncExtension):
 
     async def _start(self, ten_env: AsyncTenEnv) -> None:
         config = self.config
-        stopped = store.fail_interrupted(config.meetings_dir)
-        if stopped:
-            ten_env.log_warn(f"left unfinished by the last worker: {stopped}")
-
         app = make_app(config, self._emit, log=ten_env.log_info)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
@@ -65,6 +61,11 @@ class MeetingUploaderExtension(AsyncExtension):
                 "is another meeting worker running?"
             )
             return
+        # Only the worker that holds the port may say a meeting was left
+        # half done: until then another worker may be in the middle of it.
+        stopped = store.fail_interrupted(config.meetings_dir)
+        if stopped:
+            ten_env.log_warn(f"left unfinished by the last worker: {stopped}")
         ten_env.log_info(
             f"meeting uploads on :{config.listen_port} into "
             f"{config.meetings_dir}"

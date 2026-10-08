@@ -183,9 +183,10 @@ def list_meetings(meetings_dir: str) -> List[dict]:
 
 
 def fail_interrupted(meetings_dir: str) -> List[str]:
-    """At start-up, a meeting not left in a final state has no worker on
-    it any more: only one meeting worker can hold the port. Say so on disk,
-    rather than let its state read "transcribing" forever."""
+    """At start-up, once this worker holds the port, a meeting not left in
+    a final state has no worker on it any more: only the one holding the
+    port takes meetings. Say so on disk, rather than let its state read
+    "transcribing" forever. Never called before the port is held."""
     stopped = []
     for name, folder, state in _meetings(meetings_dir):
         if state.get("state") not in TERMINAL:
