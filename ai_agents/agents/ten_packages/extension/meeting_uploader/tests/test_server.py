@@ -56,13 +56,24 @@ def form(data=AUDIO, **fields):
     return f
 
 
-def client(tmp_path, controller=None, free=10_000.0, **settings):
+class Clock:
+    """A second later at every look, so arrivals have an order."""
+
+    def __init__(self):
+        self.t = 1790663400.0
+
+    def __call__(self):
+        self.t += 1.0
+        return self.t
+
+
+def client(tmp_path, controller=None, free=10_000.0, now=None, **settings):
     config = MeetingUploaderConfig(meetings_dir=str(tmp_path), **settings)
     app = make_app(
         config,
         controller or Controller(),
         free_mb=lambda _: free,
-        now=lambda: 1790663400.0,
+        now=now or (lambda: 1790663400.0),
     )
     return TestClient(TestServer(app))
 
@@ -95,6 +106,8 @@ async def test_an_upload_lands_byte_for_byte_and_tells_the_controller(
         "meeting_id": "m1",
         "bytes": len(AUDIO),
         "status": "accepted",
+        "ahead": 0,
+        "wait_s": 0,
     }
     assert (tmp_path / "m1" / "audio.ogg").read_bytes() == AUDIO
     assert controller.uploaded == [
@@ -213,22 +226,129 @@ async def test_a_field_that_does_not_parse_is_a_bad_request(tmp_path, field):
 
 
 @pytest.mark.asyncio
-async def test_a_second_meeting_waits_until_the_first_is_done(tmp_path):
+async def test_a_meeting_sent_while_another_is_processed_is_queued(tmp_path):
+    # Any phone, any time: the board's LLM serves one meeting at a time, so
+    # the second waits its turn instead of being turned away.
     controller = Controller()
     async with client(tmp_path, controller) as c:
         await c.post("/meeting/upload", data=form(meeting_id="m1"))
         r = await c.post("/meeting/upload", data=form(meeting_id="m2"))
         body = await r.json()
-
-        assert r.status == 409
-        assert "m1" in body["error"]
-        assert landed(tmp_path) == ["m1"]
-
-        store.write_state(str(tmp_path / "m1"), state="archived")
-        r = await c.post("/meeting/upload", data=form(meeting_id="m2"))
+        status = await (await c.get("/meeting/m2")).json()
 
     assert r.status == 200
-    assert [p["meeting_id"] for p in controller.uploaded] == ["m1", "m2"]
+    assert body["status"] == "queued"
+    assert body["ahead"] == 1
+    assert body["wait_s"] > 0
+    assert status["state"] == "queued"
+    assert status["queue"]["ahead"] == 1
+    assert landed(tmp_path) == ["m1", "m2"]
+    assert [p["meeting_id"] for p in controller.uploaded] == ["m1"]
+
+
+@pytest.mark.asyncio
+async def test_the_queue_moves_in_the_order_meetings_arrived(tmp_path):
+    controller = Controller()
+    async with client(tmp_path, controller, now=Clock()) as c:
+        uploads = c.server.app[UPLOADS]
+        for meeting_id in ("m1", "m3", "m2"):
+            await c.post("/meeting/upload", data=form(meeting_id=meeting_id))
+        before = (await (await c.get("/meeting/m2")).json())["queue"]
+
+        assert await uploads.dispatch_next() is None  # m1 is still going
+        store.write_state(str(tmp_path / "m1"), state="archived")
+        assert await uploads.dispatch_next() == "m3"
+        then = (await (await c.get("/meeting/m2")).json())["queue"]
+        store.write_state(str(tmp_path / "m3"), state="empty")
+        assert await uploads.dispatch_next() == "m2"
+        assert await uploads.dispatch_next() is None
+
+    assert before["ahead"] == 2
+    assert then["ahead"] == 1
+    assert then["wait_s"] < before["wait_s"]
+    assert [p["meeting_id"] for p in controller.uploaded] == ["m1", "m3", "m2"]
+
+
+@pytest.mark.asyncio
+async def test_a_queued_meeting_reaches_the_controller_as_it_was_sent(
+    tmp_path,
+):
+    controller = Controller()
+    async with client(tmp_path, controller) as c:
+        uploads = c.server.app[UPLOADS]
+        await c.post("/meeting/upload", data=form(meeting_id="m1"))
+        await c.post(
+            "/meeting/upload",
+            data=form(
+                meeting_id="m2",
+                speakers=4,
+                title="週會",
+                recorded_at=1790660000,
+                script="traditional",
+            ),
+        )
+        store.write_state(str(tmp_path / "m1"), state="archived")
+        await uploads.dispatch_next()
+        status = await (await c.get("/meeting/m2")).json()
+
+    sent = controller.uploaded[1]
+    assert sent["meeting_id"] == "m2"
+    assert sent["ogg_path"] == str(tmp_path / "m2" / "audio.ogg")
+    assert sent["work_dir"] == str(tmp_path / "m2" / "work")
+    assert (
+        sent["speakers"],
+        sent["title"],
+        sent["recorded_at"],
+        sent["script"],
+    ) == (4, "週會", 1790660000.0, "traditional")
+    assert status["state"] == "received"
+    assert status.get("queue") is None
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_being_processed_cannot_be_replaced(tmp_path):
+    async with client(tmp_path) as c:
+        await c.post("/meeting/upload", data=form(meeting_id="m1"))
+        r = await c.post("/meeting/upload", data=form(meeting_id="m1"))
+        body = await r.json()
+
+    assert r.status == 409
+    assert "m1" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_queued_meeting_sent_again_still_waits(tmp_path):
+    controller = Controller()
+    async with client(tmp_path, controller) as c:
+        await c.post("/meeting/upload", data=form(meeting_id="m1"))
+        await c.post("/meeting/upload", data=form(meeting_id="m2"))
+        r = await c.post("/meeting/upload", data=form(meeting_id="m2"))
+        body = await r.json()
+
+    assert r.status == 200
+    assert body["status"] == "queued"
+    assert landed(tmp_path) == ["m1", "m2"]
+    assert [p["meeting_id"] for p in controller.uploaded] == ["m1"]
+
+
+@pytest.mark.asyncio
+async def test_a_queued_meeting_the_controller_cannot_take_fails_alone(
+    tmp_path,
+):
+    controller = Controller()
+    async with client(tmp_path, controller, now=Clock()) as c:
+        uploads = c.server.app[UPLOADS]
+        for meeting_id in ("m1", "m2", "m3"):
+            await c.post("/meeting/upload", data=form(meeting_id=meeting_id))
+        store.write_state(str(tmp_path / "m1"), state="archived")
+        controller.error = "no route"
+        assert await uploads.dispatch_next() == "m2"
+        controller.error = None
+        assert await uploads.dispatch_next() == "m3"
+
+    state = store.read_state(str(tmp_path / "m2"))
+    assert state["state"] == "failed"
+    assert "no route" in state["error"]
 
 
 @pytest.mark.asyncio
@@ -348,7 +468,13 @@ async def test_busy_is_what_keeps_the_worker_alive(tmp_path):
 
     async with TestClient(TestServer(app)) as c:
         assert uploads.busy_with() is None
+        assert not uploads.busy()
         await c.post("/meeting/upload", data=form(meeting_id="m1"))
         assert uploads.busy_with() == "m1"
+        await c.post("/meeting/upload", data=form(meeting_id="m2"))
         store.write_state(str(tmp_path / "m1"), state="empty")
         assert uploads.busy_with() is None
+        assert uploads.busy()  # m2 is still waiting its turn
+        await uploads.dispatch_next()
+        store.write_state(str(tmp_path / "m2"), state="archived")
+        assert not uploads.busy()

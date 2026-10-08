@@ -30,6 +30,7 @@ class MeetingUploaderExtension(AsyncExtension):
         self.config = MeetingUploaderConfig()
         self.runner: Optional[web.AppRunner] = None
         self.keepalive: Optional[asyncio.Task] = None
+        self.queue: Optional[asyncio.Task] = None
 
     async def on_init(self, ten_env: AsyncTenEnv) -> None:
         self.ten_env = ten_env
@@ -80,11 +81,16 @@ class MeetingUploaderExtension(AsyncExtension):
             log=ten_env.log_warn,
         )
         self.keepalive = asyncio.create_task(keepalive.run())
+        # Meetings left queued by an earlier worker are taken in turn too.
+        self.queue = asyncio.create_task(
+            app[UPLOADS].run_queue(config.queue_poll_s)
+        )
 
     async def on_stop(self, ten_env: AsyncTenEnv) -> None:
-        if self.keepalive is not None:
-            self.keepalive.cancel()
-            await asyncio.gather(self.keepalive, return_exceptions=True)
+        for task in (self.keepalive, self.queue):
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         if self.runner is not None:
             await self.runner.cleanup()
             ten_env.log_info(f"stopped listening on {self.config.listen_port}")

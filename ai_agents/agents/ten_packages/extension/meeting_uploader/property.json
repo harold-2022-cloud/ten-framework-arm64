@@ -4,5 +4,6 @@
   "max_upload_mb": 64.0,
   "min_free_mb": 250.0,
   "auth_token": "",
-  "keepalive_s": 20.0
+  "keepalive_s": 20.0,
+  "queue_poll_s": 2.0
 }

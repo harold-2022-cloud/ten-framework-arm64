@@ -6,6 +6,7 @@
 
     <meetings_dir>/<meeting_id>/
         audio.ogg       the upload, byte for byte
+        upload.json     what came with it, kept for its turn in the queue
         record.json     written by the controller when it ends
         minutes.txt     likewise
         work/state.json how far processing got; GET /meeting/{id} reads it
@@ -23,9 +24,14 @@ from typing import List, Optional, Tuple
 
 import soundfile as sf
 
-# States the controller leaves a meeting in for good. Anything else means
-# a worker is still on it -- or was, until it was stopped.
+# States the controller leaves a meeting in for good. Anything else but
+# QUEUED means a worker is still on it -- or was, until it was stopped.
 TERMINAL = ("archived", "empty", "failed")
+
+# Landed whole and waiting its turn: the board's LLM serves one meeting at a
+# time, so a meeting sent while another is processed waits rather than being
+# turned away.
+QUEUED = "queued"
 
 INTERRUPTED = (
     "processing stopped before it finished (the worker was stopped or "
@@ -108,24 +114,56 @@ def _write(folder: str, state: dict) -> None:
     os.replace(tmp, _state_path(folder))
 
 
-def write_received(
+def write_queued(
     folder: str,
     meeting_id: str,
-    title: Optional[str],
+    details: dict,
     received_at: float,
+    duration_s: float,
 ) -> None:
+    """A landed meeting, waiting its turn: its state, and what came with it
+    (title, speakers, recorded_at, script) for when it is handed on."""
+    with open(os.path.join(folder, "upload.json"), "w", encoding="utf-8") as f:
+        json.dump({**details, "duration_s": duration_s}, f, ensure_ascii=False)
     _write(
         folder,
         {
             "meeting_id": meeting_id,
-            "state": "received",
-            "title": title,
+            "state": QUEUED,
+            "title": details.get("title"),
             "received_at": received_at,
             "topics_done": 0,
             "topics_total": 0,
             "error": None,
         },
     )
+
+
+def read_upload(folder: str) -> dict:
+    try:
+        with open(os.path.join(folder, "upload.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def duration_s(path: str) -> float:
+    return float(sf.info(path).duration)
+
+
+def estimate_s(seconds: float) -> float:
+    """About how long the board takes over a meeting this long: measured at
+    0.93 to 1.1 times the recording, and the conclusion on top."""
+    return seconds * 1.1 + 60.0
+
+
+def queued(meetings_dir: str) -> List[Tuple[str, str, dict]]:
+    """The meetings waiting their turn, first come first."""
+    waiting = [
+        m for m in _meetings(meetings_dir) if m[2].get("state") == QUEUED
+    ]
+    waiting.sort(key=lambda m: (m[2].get("received_at") or 0, m[0]))
+    return waiting
 
 
 def write_state(folder: str, **fields) -> None:
@@ -186,10 +224,12 @@ def fail_interrupted(meetings_dir: str) -> List[str]:
     """At start-up, once this worker holds the port, a meeting not left in
     a final state has no worker on it any more: only the one holding the
     port takes meetings. Say so on disk, rather than let its state read
-    "transcribing" forever. Never called before the port is held."""
+    "transcribing" forever. Never called before the port is held. A queued
+    meeting is left to wait: its upload is whole, and this worker will take
+    it in turn."""
     stopped = []
     for name, folder, state in _meetings(meetings_dir):
-        if state.get("state") not in TERMINAL:
+        if state.get("state") not in TERMINAL + (QUEUED,):
             write_state(folder, state="failed", error=INTERRUPTED)
             stopped.append(name)
     return stopped

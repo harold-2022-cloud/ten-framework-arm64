@@ -193,15 +193,26 @@ def test_a_meeting_cut_off_by_a_restart_is_marked_failed(tmp_path):
     assert store.read_state(str(tmp_path / "done"))["state"] == "archived"
 
 
-def test_received_is_written_fresh_with_what_the_upload_said(tmp_path):
+def test_a_landed_meeting_is_written_fresh_with_what_the_upload_said(
+    tmp_path,
+):
     folder = tmp_path / "m1"
     (folder / "work").mkdir(parents=True)
+    details = {
+        "title": "週會",
+        "speakers": 6,
+        "recorded_at": None,
+        "script": None,
+    }
 
-    store.write_received(str(folder), "m1", title="週會", received_at=100.0)
+    store.write_queued(
+        str(folder), "m1", details, received_at=100.0, duration_s=61.5
+    )
 
+    assert store.read_upload(str(folder)) == {**details, "duration_s": 61.5}
     assert store.read_state(str(folder)) == {
         "meeting_id": "m1",
-        "state": "received",
+        "state": "queued",
         "title": "週會",
         "received_at": 100.0,
         "topics_done": 0,
@@ -209,3 +220,17 @@ def test_received_is_written_fresh_with_what_the_upload_said(tmp_path):
         "error": None,
         "updated_at": store.read_state(str(folder))["updated_at"],
     }
+
+
+def test_a_meeting_waiting_in_the_queue_is_not_marked_interrupted(tmp_path):
+    # Its upload is whole on disk: the next worker takes it in turn.
+    waiting = tmp_path / "waiting"
+    going = tmp_path / "going"
+    for folder, state in ((waiting, "queued"), (going, "transcribing")):
+        (folder / "work").mkdir(parents=True)
+        store.write_state(str(folder), state=state)
+
+    stopped = store.fail_interrupted(str(tmp_path))
+
+    assert stopped == ["going"]
+    assert store.read_state(str(waiting))["state"] == "queued"

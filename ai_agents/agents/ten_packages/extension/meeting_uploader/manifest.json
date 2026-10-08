@@ -28,7 +28,8 @@
         "auth_token": { "type": "string" },
         "channel": { "type": "string" },
         "ping_url": { "type": "string" },
-        "keepalive_s": { "type": "float64" }
+        "keepalive_s": { "type": "float64" },
+        "queue_poll_s": { "type": "float64" }
       }
     },
     "cmd_out": [{ "name": "meeting_uploaded" }]

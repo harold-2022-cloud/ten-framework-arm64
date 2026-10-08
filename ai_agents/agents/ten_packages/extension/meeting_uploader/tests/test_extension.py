@@ -228,3 +228,53 @@ def test_a_worker_that_cannot_get_the_port_leaves_the_meetings_alone(
         run(Idle(port), listen_port=port, meetings_dir=str(tmp_path))
 
     assert store.read_state(str(folder))["state"] == "transcribing"
+
+
+class Queued(Client):
+    """Sends two meetings, ends the first on disk as the controller would,
+    and waits for the second to be handed on by the uploader itself."""
+
+    def __init__(self, port: int, folder) -> None:
+        super().__init__(port)
+        self.folder = folder
+        self.handed = []
+        self.replies = []
+
+    async def on_cmd(self, ten_env: AsyncTenEnvTester, cmd: Cmd) -> None:
+        if cmd.get_name() == "meeting_uploaded":
+            payload, _ = cmd.get_property_to_json(None)
+            self.handed.append(json.loads(payload)["meeting_id"])
+        await ten_env.return_result(CmdResult.create(StatusCode.OK, cmd))
+
+    async def _drive(self, ten_env: AsyncTenEnvTester) -> None:
+        try:
+            async with aiohttp.ClientSession() as session:
+                await self._wait_until_listening(session)
+                for meeting_id in ("m1", "m2"):
+                    form = aiohttp.FormData()
+                    form.add_field("meeting_id", meeting_id)
+                    form.add_field("file", AUDIO, filename="meeting.ogg")
+                    async with session.post(
+                        f"{self.base}/meeting/upload", data=form
+                    ) as r:
+                        self.replies.append((await r.json())["status"])
+                store.write_state(str(self.folder / "m1"), state="archived")
+                for _ in range(100):
+                    if "m2" in self.handed:
+                        break
+                    await asyncio.sleep(0.05)
+        finally:
+            ten_env.stop_test()
+
+
+def test_a_queued_meeting_is_handed_on_when_the_one_before_it_ends(tmp_path):
+    port = free_port()
+    tester = run(
+        Queued(port, tmp_path),
+        listen_port=port,
+        meetings_dir=str(tmp_path),
+        queue_poll_s=0.05,
+    )
+
+    assert tester.replies == ["accepted", "queued"]
+    assert tester.handed == ["m1", "m2"]

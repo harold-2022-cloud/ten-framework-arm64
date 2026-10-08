@@ -30,3 +30,7 @@ class MeetingUploaderConfig(BaseModel):
     channel: str = ""
     ping_url: str = ""
     keepalive_s: float = 20.0
+
+    # How often a meeting waiting its turn is looked at, to be handed on
+    # once the one before it ends.
+    queue_poll_s: float = 2.0
