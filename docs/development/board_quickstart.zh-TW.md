@@ -138,6 +138,22 @@ task run 2>&1 | tee /tmp/task_run.log
 打開 3000 port 的 playground，選一個 graph。不透過 playground 直接呼叫的話，
 見 [`agent_api.zh-TW.md`](agent_api.zh-TW.md)。
 
+### 或是：開機就常駐
+
+會議記錄 App 要求板子隨時都能回應手機。用平常跑 `task run` 的帳號執行一次
+（sudo 會要你的密碼）：
+
+```bash
+tools/ambarella/install_board_services.sh
+```
+
+它會裝兩個 systemd 服務，設成開機啟動並立刻啟動：`ambarella-llm`（上面那個原廠
+daemon，參數相同，log 一樣寫到 `/tmp/log.txt`）和 `ten-api`（`task run-api-server`，
+掛掉會自動重起，log 寫到 `/tmp/task_run.log`）。之後重開機什麼都不用做：手機一發起
+請求，server 就會起會議 worker。原本手動起的 server 會被停掉、改由服務接手；要用
+playground 的話，在 `ai_agents/agents/examples/voice-assistant` 跑 `task run-frontend`。
+`--status` 看各自有沒有起來，`--uninstall` 移除兩個服務。
+
 ## 選哪個 graph
 
 | Graph | ASR | TTS | LLM | 需要 |

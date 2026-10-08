@@ -56,9 +56,14 @@ fi
 
 if ! answers "$SERVER/graphs"; then
   echo "  FAIL  the Go server does not answer at $SERVER"
-  echo "        -> in the terminal running task run: Ctrl-C, then"
-  echo "           cd $REPO_ROOT/ai_agents/agents/examples/voice-assistant && task run 2>&1 | tee /tmp/task_run.log"
-  echo "           and run this again"
+  if systemctl is-enabled --quiet ten-api 2>/dev/null; then
+    echo "        -> it runs as the ten-api service: sudo systemctl restart ten-api"
+    echo "           (why it stopped: tail /tmp/task_run.log), and run this again"
+  else
+    echo "        -> in the terminal running task run: Ctrl-C, then"
+    echo "           cd $REPO_ROOT/ai_agents/agents/examples/voice-assistant && task run 2>&1 | tee /tmp/task_run.log"
+    echo "           and run this again"
+  fi
   exit 1
 fi
 

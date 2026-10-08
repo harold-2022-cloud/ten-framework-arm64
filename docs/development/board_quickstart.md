@@ -153,6 +153,24 @@ task run 2>&1 | tee /tmp/task_run.log
 Open the playground on port 3000 and pick a graph. Driving it without the
 playground is [`agent_api.md`](agent_api.md).
 
+### Or keep it running from power-on
+
+For the meeting-minutes app, the board has to answer whenever a phone asks.
+Once, as the user who runs `task run` (sudo asks for your password):
+
+```bash
+tools/ambarella/install_board_services.sh
+```
+
+It installs two systemd services, enables them at boot and starts them:
+`ambarella-llm` (the vendor's daemon above, same options, still logging to
+`/tmp/log.txt`) and `ten-api` (`task run-api-server`, restarted if it dies,
+logging to `/tmp/task_run.log`). Nothing else is needed after a reboot: the
+server starts the meeting worker when a phone asks. A server already started
+by hand is stopped so the service can take over; for the playground, run
+`task run-frontend` in `ai_agents/agents/examples/voice-assistant`.
+`--status` says what is up, `--uninstall` removes both.
+
 ## Which graph
 
 | Graph | ASR | TTS | LLM | Needs |
