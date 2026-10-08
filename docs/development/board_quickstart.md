@@ -226,6 +226,16 @@ these 12 minutes in the dev container). It starts the graph with `timeout` 60 on
 processing takes far longer, so a worker that is still answering at the
 end proves it kept itself alive. Results go to `~/meeting_probe/board_check`.
 
+Whether meetings can share the one worker, as the Android app needs — a
+second `/start` on `meeting-room` answers `10003`, a second meeting worker
+started while a meeting is processed leaves that meeting alone, the idle
+worker is reaped, and a fresh one still reads the meeting. About the length
+of the audio it uploads (4 minutes) plus two:
+
+```bash
+python3.12 tools/ambarella/check_meeting_worker.py
+```
+
 ### Use it
 
 ```bash

@@ -201,6 +201,15 @@ worker 記憶體，並對照標註算出「說話時間算錯人」的比例。�
 啟動**：處理遠超過 60 秒，worker 撐到最後還在回應，就證明它自己保活成功。
 結果存在 `~/meeting_probe/board_check`。
 
+多場會議能不能共用同一個 worker（Android App 靠的就是這個）：對 `meeting-room`
+第二次 `/start` 會回 `10003`；一場會議處理中時另一個會議 worker 起來，不會動到
+那場；閒置的 worker 會被回收；重新起一個還讀得到那場會議。花的時間約是上傳的
+錄音長度（4 分鐘）再加兩分鐘：
+
+```bash
+python3.12 tools/ambarella/check_meeting_worker.py
+```
+
 ### 使用
 
 ```bash

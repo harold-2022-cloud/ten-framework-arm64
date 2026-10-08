@@ -259,6 +259,8 @@ stateDiagram-v2
 ## 7. 在手機上對真的板子測
 
 1. 板子照 `docs/development/board_quickstart.zh-TW.md` 啟動，Go server 在 8081。
+   App 依賴的板子端行為（共用一個 worker、10003、回收後重開）可以先不用手機，在板子上跑
+   `python3.12 tools/ambarella/check_meeting_worker.py` 驗證。
 2. 手機連上跟板子同一個網路，然後 `adb install -r app/build/outputs/apk/debug/app-debug.apk`。
 3. 到 App 的「設定」填板子的 IP；板子有設 `MEETING_AUTH_TOKEN` 的話，權杖也要填。
 
