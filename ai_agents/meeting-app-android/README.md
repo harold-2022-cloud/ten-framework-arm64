@@ -33,7 +33,8 @@ Android 10 or later.
    Fill in the token only if the board sets `MEETING_AUTH_TOKEN`. Pick
    Traditional or Simplified as the default for the record.
 2. **Start recording**: the whole meeting goes into one Ogg-Opus file
-   (16 kHz mono), the only format the board takes. It keeps recording with the
+   (16 kHz mono), the only format the board takes. The app writes the file
+   itself, so its header says exactly that on any phone. It keeps recording with the
    screen off or the app in the background.
 3. **Stop**, then fill in the form. A title is optional. The number of
    attendees is required; err high, because too low merges two people into
@@ -42,6 +43,9 @@ Android 10 or later.
    every 30 s. Nothing polls in the background. A notification fires at upload
    time + the recording's length + 2 minutes, and processing measured 0.93× the
    recording's length on the board. Tapping the notification opens the meeting.
+
+A meeting can be deleted from its page: the recording and the record go
+from the phone; the board keeps its copy.
 
 Every meeting goes to the board's one meeting worker, and the app never
 stops it: it may be in the middle of someone else's meeting. The board reaps

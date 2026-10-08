@@ -3,6 +3,7 @@ package io.ten.meetingminutes
 import io.ten.meetingminutes.board.BoardApi
 import io.ten.meetingminutes.domain.Ids
 import io.ten.meetingminutes.domain.Work
+import io.ten.meetingminutes.recording.LeftBehind
 import io.ten.meetingminutes.store.Meeting
 import io.ten.meetingminutes.store.MeetingStore
 import kotlinx.coroutines.runBlocking
@@ -236,5 +237,37 @@ class WorkTest {
         assertTrue(after.uploadedAtMs > failed.uploadedAtMs)
         assertEquals(after.uploadedAtMs + (600 + 120) * 1000L, due)
         assertEquals(after, store.get("m1"))
+    }
+
+    @Test
+    fun deletingAMeetingTakesItsRecordingAndRecordOffThePhone() {
+        // Named as the app names recordings, so a file left behind would be
+        // offered again at the next launch.
+        val file = File(dir, "1790663400000.ogg").apply { writeBytes(byteArrayOf(79, 103, 103, 83, 0)) }
+        store.put(meeting.copy(file = file.path, state = "upload_failed"))
+        store.saveRecord("m1", RecordTest.SAMPLE)
+
+        assertTrue(Work.delete(store, store.get("m1")!!, cancel = { cancelled += it }))
+
+        assertFalse(file.exists())
+        assertNull(store.get("m1"))
+        assertNull(store.record("m1"))
+        assertEquals(listOf("m1"), cancelled)
+        assertNull(LeftBehind.find(dir, emptySet()))
+    }
+
+    @Test
+    fun aMeetingBeingSentIsNotDeleted() {
+        val file = recording()
+        store.put(meeting.copy(file = file.path, state = "uploading"))
+        Work.uploading.value = setOf("m1")
+        try {
+            assertFalse(Work.delete(store, store.get("m1")!!, cancel = { cancelled += it }))
+        } finally {
+            Work.uploading.value = emptySet()
+        }
+
+        assertTrue(file.exists())
+        assertNotNull(store.get("m1"))
     }
 }

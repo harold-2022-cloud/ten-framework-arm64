@@ -15,7 +15,7 @@
 | Gradle | 8.10.2 | 用 repo 裡的 `./gradlew`，不用另外裝 |
 | Android Gradle Plugin / Kotlin | 8.7.2 / 2.0.21 | |
 | Compose BOM | 2024.10.01 | Material 3 |
-| minSdk / targetSdk | 29 / 35 | Android 10 起 `MediaRecorder` 才能錄 Ogg-Opus |
+| minSdk / targetSdk | 29 / 35 | Android 10 起才有內建的 Opus 編碼器（`MediaCodec`） |
 
 ```bash
 cd ai_agents/meeting-app-android
@@ -126,7 +126,10 @@ app/src/main/java/io/ten/meetingminutes/
 │   ├── Minutes.kt             顯示和分享用的文字：說話人編號 +1、時間
 │   └── Small.kt               Ids、Estimate（通知時間）、Texts（狀態與錯誤的中文）
 ├── store/Store.kt             Settings、Meeting、MeetingStore
-├── recording/RecorderService.kt   前景服務錄音；Recording（目前狀態）；LeftBehind（救回錄音）
+├── recording/
+│   ├── RecorderService.kt     前景服務；Recording（目前狀態、開始失敗的原因）；LeftBehind（救回錄音）
+│   ├── OpusRecorder.kt        AudioRecord 16 kHz 單聲道 → Android 的 Opus 編碼器 → 寫檔
+│   └── OggOpus.kt             OggOpusWriter（自己寫 Ogg 檔頭和分頁）、Opus（封包長度、pre-skip）
 ├── notify/DueReceiver.kt      Due：排程並發出「會議記錄應該好了」通知
 └── ui/App.kt                  所有 Compose 畫面
 ```
@@ -228,8 +231,14 @@ stateDiagram-v2
     請一律走 `BoardApi.parse`。
 11. **`meetings.json` 只有一把鎖。** `MeetingStore` 的鎖是所有實例共用的（companion 的
     `LOCK`），因為背景上傳和畫面可能各自拿著不同的實例。寫入一律透過 `put`。
-12. **錄音格式不能隨便改。** `MediaRecorder` 設成 OGG / OPUS、16 kHz、單聲道、24 kbps，這是
-    板子唯一接受的格式，其他格式會回 415。要改就得兩邊一起改。
+12. **錄音檔由 App 自己寫，不要改回 `MediaRecorder`。** 板子只收 16 kHz 單聲道的 Ogg-Opus，
+    其他一律回 415。`MediaRecorder` 的 Ogg 輸出雖然設得了 16 kHz、單聲道，檔頭卻由 Android
+    自己寫，實際在手機上就被板子以 415 拒收過。所以現在是 `AudioRecord` 錄 16 kHz 單聲道、
+    Android 的 Opus 編碼器（`MediaCodec`）壓縮、`OggOpusWriter` 自己寫 Ogg：OpusHead 的取樣率
+    和聲道數由 App 決定，封包長度從 TOC 算，一頁約一秒，App 中途被殺也只少最後一秒。
+13. **刪除只刪手機上的。** `Work.delete` 刪掉錄音檔、取回的記錄、清單上那一筆和還沒發的
+    通知；板子上的記錄不動。正在上傳的會議不能刪。錄音檔一定要跟著刪，不然下次啟動
+    `LeftBehind` 會把它當成遺失的錄音叫回來。
 
 ## 6. 測試
 
@@ -238,11 +247,19 @@ stateDiagram-v2
 | 檔案 | 測什麼 | 數量 |
 | --- | --- | --- |
 | `BoardApiTest` | 每個端點送什麼、怎麼解讀回應和錯誤 | 10 |
-| `WorkTest` | worker 的規則：一個 channel、不 `/stop`、10003 時 ping、回收後重開、settled | 8 |
+| `WorkTest` | worker 的規則：一個 channel、不 `/stop`、10003 時 ping、回收後重開、settled；刪除 | 10 |
 | `RecordTest` | `record.json` 解析 | 3 |
 | `MinutesTest` | 說話人編號、時間、分享文字 | 4 |
 | `SmallLogicTest` | meeting_id、通知時間、狀態和錯誤的中文 | 4 |
 | `LeftBehindTest` | 救回錄音 | 5 |
+| `OggOpusTest` | 錄音檔：OpusHead、分頁、CRC、granule、封包長度、pre-skip | 8 |
+
+`OggOpusTest` 用的是真的 Opus 封包（`src/test/resources/opus_packets_16k_mono.bin`：
+libsndfile 把一段合成的三秒訊號編成 16 kHz 單聲道，取出的 151 個封包）。JVM 沒有 Opus
+解碼器，所以測試另外把寫出的檔案存到 `app/build/test-output/oggopus-16k-mono.ogg`。
+動到 `OggOpus.kt` 時，要用板子的讀法（`soundfile`，在 dev container 裡）確認一次：
+`sf.info` 要是 OGG / OPUS、16000 Hz、單聲道，上傳端的 `store.check_audio` 要放行，
+解出來的聲音要對得上原始訊號。
 
 寫測試的慣例：
 
@@ -254,7 +271,8 @@ stateDiagram-v2
 - 單元測試裡的 Android 類別都是空殼（`unitTests.isReturnDefaultValues = true`）；
   `org.json` 則另外加了真的實作當測試依賴。
 - 新的行為先寫一個會失敗的測試。改 `Work` 裡的規則時，也要確認拿掉那條規則後測試真的會失敗。
-- **單元測試沒有涵蓋**：Compose 畫面、`RecorderService`、`Due` 和通知。這些要在手機上測（第 7 節）。
+- **單元測試沒有涵蓋**：Compose 畫面、`RecorderService` 和 `OpusRecorder`（JVM 沒有麥克風和
+  編碼器）、`Due` 和通知。這些要在手機上測（第 7 節）。
 
 ## 7. 在手機上對真的板子測
 
@@ -285,10 +303,8 @@ stateDiagram-v2
 
 ## 8. 已知限制與待辦
 
-- **錄音檔不會被刪掉。** 只有按「捨棄」會刪，會議完成後錄音還是留在 App 的私有空間，
-  會一直累積下去。
-- **開始錄音時麥克風被佔用會閃退。** 例如正在講電話：`RecorderService.begin` 裡的
-  `MediaRecorder.prepare()` / `start()` 丟出的例外沒有被接住。
+- **完成的會議不會自動刪錄音。** 要在詳細頁按「刪除」才會刪，否則錄音會一直留在 App 的
+  私有空間。
 - App 沒有 log。
 - 畫面上的文字直接寫在程式裡（`strings.xml` 只有 `app_name`），沒有做多語系。
 - 設定頁不檢查 IP 的格式。

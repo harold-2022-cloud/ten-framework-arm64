@@ -8,8 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.media.MediaRecorder
-import android.os.Build
 import android.os.IBinder
 import io.ten.meetingminutes.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +20,9 @@ object Recording {
 
     val active = MutableStateFlow<Active?>(null)
     val finished = MutableStateFlow<Finished?>(null)
+
+    /** Why the last try to record did not start, for the home screen. */
+    val problem = MutableStateFlow<String?>(null)
 
     /** Where recordings go, each named for when it started: <ms>.ogg. */
     fun folder(context: Context) = File(context.filesDir, "recordings")
@@ -46,11 +47,11 @@ object LeftBehind {
 
 /**
  * Records the whole meeting into one Ogg-Opus file, 16 kHz mono -- the only
- * format the board takes. A foreground service, so the screen going off or
- * the app going to the background does not stop it.
+ * format the board takes (OpusRecorder). A foreground service, so the screen
+ * going off or the app going to the background does not stop it.
  */
 class RecorderService : Service() {
-    private var recorder: MediaRecorder? = null
+    private var recorder: OpusRecorder? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -68,26 +69,25 @@ class RecorderService : Service() {
             NOTIFICATION_ID, notification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
         )
-        @Suppress("DEPRECATION")
-        val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else MediaRecorder()
-        r.setAudioSource(MediaRecorder.AudioSource.MIC)
-        r.setOutputFormat(MediaRecorder.OutputFormat.OGG)
-        r.setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
-        r.setAudioChannels(1)
-        r.setAudioSamplingRate(16_000)
-        r.setAudioEncodingBitRate(24_000)
-        r.setOutputFile(file.path)
-        r.prepare()
-        r.start()
+        val r = OpusRecorder(file)
+        try {
+            r.start()
+        } catch (e: Exception) {
+            file.delete()
+            Recording.problem.value = "無法開始錄音：${e.message ?: e.javaClass.simpleName}"
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         recorder = r
+        Recording.problem.value = null
         Recording.finished.value = null
         Recording.active.value = Recording.Active(file, System.currentTimeMillis())
     }
 
     private fun end() {
         val active = Recording.active.value
-        recorder?.runCatching { stop() }
-        recorder?.release()
+        recorder?.stop()
         recorder = null
         if (active != null) {
             val durationS = (System.currentTimeMillis() - active.startedAtMs) / 1000.0

@@ -108,6 +108,17 @@ class MeetingStore(dir: File) {
 
     fun record(id: String): String? = File(records, "$id.json").takeIf { it.exists() }?.readText()
 
+    /** The meeting gone from the list, and its record with it. */
+    fun remove(id: String): Unit = synchronized(LOCK) {
+        val rest = all().filterNot { it.id == id }
+        val arr = JSONArray()
+        rest.forEach { arr.put(it.toJson()) }
+        val tmp = File(file.path + ".tmp")
+        tmp.writeText(arr.toString())
+        tmp.renameTo(file)
+        dropRecord(id)
+    }
+
     /** An earlier run's record, gone before the meeting is sent again. */
     fun dropRecord(id: String) {
         File(records, "$id.json").delete()

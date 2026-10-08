@@ -148,6 +148,11 @@ private fun HomeScreen(
         TextButton(onClick = onSetup) { Text("設定") }
     }
     Spacer(Modifier.height(12.dp))
+    val problem by Recording.problem.collectAsState()
+    problem?.let {
+        Text(it, color = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.height(12.dp))
+    }
     if (settings.host.isBlank()) {
         Text("請先到「設定」填入會議室板子的位址。", color = MaterialTheme.colorScheme.error)
         Spacer(Modifier.height(12.dp))
@@ -339,7 +344,35 @@ private fun DetailsScreen(id: String, settings: Settings, store: MeetingStore, o
         store.record(id)?.let { runCatching { MeetingRecord.parse(it) }.getOrNull() }
     }
 
-    TextButton(onClick = onBack) { Text("‹ 會議") }
+    var deleting by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = onBack) { Text("‹ 會議") }
+        Spacer(Modifier.weight(1f))
+        if (id !in sending) {
+            TextButton(onClick = { deleting = true }) {
+                Text("刪除", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("刪除這場會議？") },
+            text = {
+                Text(
+                    if (meeting.uploadedAtMs > 0) "錄音和手機上的記錄都會刪除，無法復原。板子上的記錄不受影響。"
+                    else "錄音檔會從手機刪除，無法復原。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = false
+                    if (Work.delete(context, store, meeting)) onBack()
+                }) { Text("刪除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("保留") } },
+        )
+    }
     Text(meeting.title.ifBlank { "（未命名的會議）" }, fontSize = 22.sp, fontWeight = FontWeight.Bold)
     Text(
         "${when_(meeting.recordedAtMs)} · ${minutes(meeting.durationS)} · ${meeting.speakers} 人",

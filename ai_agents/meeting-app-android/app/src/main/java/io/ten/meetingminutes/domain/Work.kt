@@ -112,6 +112,20 @@ object Work {
             }
         }
 
+    /** The meeting off the phone: its recording, its record, its entry and
+     *  a notification still due. Not while it is being sent. The board keeps
+     *  its own copy of a meeting that reached it. */
+    fun delete(context: Context, store: MeetingStore, m: Meeting): Boolean =
+        delete(store, m) { Due.cancel(context, it) }
+
+    fun delete(store: MeetingStore, m: Meeting, cancel: (String) -> Unit): Boolean {
+        if (m.id in uploading.value) return false
+        if (m.file.isNotEmpty()) File(m.file).delete()
+        cancel(m.id)
+        store.remove(m.id)
+        return true
+    }
+
     /** The meeting worker, with its uploader answering. */
     private fun begin(api: BoardApi) {
         try {
