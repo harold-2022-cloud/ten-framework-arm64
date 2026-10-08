@@ -141,9 +141,13 @@ class MeetingControlExtension(AsyncExtension):
             try:
                 await handler(json.loads(payload_json))
             except Exception as failure:  # pylint: disable=broad-except
-                self.ten_env.log_error(
-                    f"meeting flow failed in {handler.__name__}: {failure}"
-                )
+                why = f"{handler.__name__}: {type(failure).__name__}: {failure}"
+                self.ten_env.log_error(f"meeting flow failed in {why}")
+                # Logging alone left the meeting running for good.
+                try:
+                    await self.flow.abandon(why)
+                except Exception as err:  # pylint: disable=broad-except
+                    self.ten_env.log_error(f"could not abandon it: {err!r}")
 
         task = asyncio.create_task(guarded())
         self.tasks.add(task)

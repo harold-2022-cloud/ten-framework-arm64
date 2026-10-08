@@ -387,3 +387,63 @@ async def test_a_second_upload_while_one_is_running_is_turned_away(
     assert "m1" in turned_away["error"]
     assert state(meeting / "work")["state"] == "decoding"
     assert len(board.segment_requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_cannot_set_up_ends_failed_and_takes_the_next(
+    meeting, tmp_path, monkeypatch
+):
+    # A package the board lacks (opencc, before install_board_arm64.sh)
+    # once left the meeting at "received" for good: the controller stayed
+    # busy, the uploader answered 409 and pinged forever, and the worker
+    # was never reaped.
+    def missing(_script):
+        raise ModuleNotFoundError("No module named 'opencc'")
+
+    monkeypatch.setattr("meeting_control_python.flow.converter", missing)
+    board = Board()
+    f = flow(board)
+    await f.start(upload(meeting))
+
+    failed = state(meeting / "work")
+    assert failed["state"] == "failed"
+    assert "opencc" in failed["error"]
+    assert board.segment_requests == []
+
+    monkeypatch.undo()
+    other = tmp_path / "m2"
+    (other / "work").mkdir(parents=True)
+    (other / "audio.ogg").write_bytes(b"ogg")
+    second = upload(other)
+    second["meeting_id"] = "m2"
+    await f.start(second)
+    assert state(other / "work")["state"] == "decoding"
+
+
+@pytest.mark.asyncio
+async def test_whatever_raises_later_ends_the_meeting_failed(meeting, tmp_path):
+    board = Board()
+    f = flow(board)
+    await f.start(upload(meeting))
+
+    await f.abandon("on_segments_ready: KeyError: 'pcm_path'")
+
+    failed = state(meeting / "work")
+    assert failed["state"] == "failed"
+    assert "pcm_path" in failed["error"]
+    assert (meeting / "record.json").exists()
+
+    other = tmp_path / "m2"
+    (other / "work").mkdir(parents=True)
+    (other / "audio.ogg").write_bytes(b"ogg")
+    second = upload(other)
+    second["meeting_id"] = "m2"
+    await f.start(second)
+    assert state(other / "work")["state"] == "decoding"
+
+
+@pytest.mark.asyncio
+async def test_abandoning_with_nothing_in_hand_does_nothing(meeting):
+    await flow(Board()).abandon("late")
+
+    assert not (meeting / "work" / "state.json").exists()

@@ -70,20 +70,35 @@ class MeetingFlow:
             )
             return
         self._busy_with = meeting_id
-        self.ogg_path = payload["ogg_path"]
-        self.work_dir = payload["work_dir"]
-        self.folder = os.path.dirname(self.ogg_path)
-        self.speakers = payload.get("speakers") or self.config.speakers
-        self._convert = self._script(payload.get("script"))
-        self.record = MeetingRecord(
-            meeting_id,
-            title=payload.get("title"),
-            recorded_at=payload.get("recorded_at"),
-            audio=os.path.basename(self.ogg_path),
-        )
-        self._topics, self._cursor = [], 0
-        self._summary, self._actions, self._actions_error = "", [], None
-        write_state(self.work_dir, "decoding", error=None)
+        try:
+            self.ogg_path = payload["ogg_path"]
+            self.work_dir = payload["work_dir"]
+            self.folder = os.path.dirname(self.ogg_path)
+            self.speakers = payload.get("speakers") or self.config.speakers
+            self._convert = self._script(payload.get("script"))
+            self.record = MeetingRecord(
+                meeting_id,
+                title=payload.get("title"),
+                recorded_at=payload.get("recorded_at"),
+                audio=os.path.basename(self.ogg_path),
+            )
+            self._topics, self._cursor = [], 0
+            self._summary, self._actions, self._actions_error = "", [], None
+            write_state(self.work_dir, "decoding", error=None)
+        except Exception as err:  # pylint: disable=broad-except
+            # Nothing has started and the meeting has no record yet: say
+            # why on disk and be free for the next one. A package the board
+            # lacked once left a meeting at "received" for good -- the
+            # uploader refusing and pinging, the worker never reaped.
+            self._busy_with = None
+            self.io.log(f"{meeting_id} could not start: {err!r}")
+            if payload.get("work_dir"):
+                write_state(
+                    payload["work_dir"],
+                    "failed",
+                    error=f"{type(err).__name__}: {err}",
+                )
+            return
         await self.io.segment_audio(self.ogg_path, self.work_dir)
 
     async def on_segments_ready(self, payload: dict) -> None:
@@ -205,6 +220,19 @@ class MeetingFlow:
             return ""
 
     # --- the end, whichever it is ---------------------------------------
+
+    async def abandon(self, error: str) -> None:
+        """Something raised past the flow's own handling: the meeting in hand
+        ends failed with why, so the uploader stops refusing and pinging and
+        the next meeting can come."""
+        if self._busy_with is None:
+            return
+        try:
+            await self._end("failed", error=error)
+        except Exception as err:  # pylint: disable=broad-except
+            self._busy_with = None
+            self.io.log(f"could not end the meeting cleanly: {err!r}")
+            write_state(self.work_dir, "failed", error=error)
 
     async def _end(self, state: str, error: Optional[str] = None) -> None:
         self._persist(error=error)
