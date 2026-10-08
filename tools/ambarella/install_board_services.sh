@@ -124,11 +124,12 @@ User=$RUN_USER
 WorkingDirectory=$EXAMPLE
 Environment=$(q "HOME=$HOME")
 Environment=$(q "PATH=$PATH")
-ExecStart=$(q "$TASK") run-api-server
+# The shell, running as $RUN_USER, opens the log -- not systemd: with
+# fs.protected_regular, root may not open another user's file in /tmp for
+# append, and the service died before it ran (status 209/STDOUT).
+ExecStart=/bin/sh -c $(q "exec '$TASK' run-api-server >> /tmp/task_run.log 2>&1")
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/tmp/task_run.log
-StandardError=append:/tmp/task_run.log
 
 [Install]
 WantedBy=multi-user.target
@@ -182,6 +183,18 @@ fi
 
 [[ $(id -u) -ne 0 ]] || fail "run this as the user who runs task run, not with sudo"
 
+# The service appends to /tmp/task_run.log as $RUN_USER.
+if [[ -e /tmp/task_run.log && ! -w /tmp/task_run.log ]]; then
+  sudo chown "$RUN_USER" /tmp/task_run.log || fail "/tmp/task_run.log is not $RUN_USER's to write"
+fi
+
+why_not() {
+  echo "  -- systemctl status $1"
+  systemctl status "$1" --no-pager -n 0 2>&1 | sed 's/^/     /'
+  echo "  -- journalctl -u $1"
+  sudo journalctl -u "$1" -n 15 --no-pager 2>&1 | sed 's/^/     /'
+}
+
 echo "== units"
 tmp=$(mktemp -d)
 llm_unit > "$tmp/ambarella-llm.service"
@@ -197,7 +210,7 @@ echo "== LLM daemon"
 if pgrep -x 'test_llm|test_llm_client' >/dev/null; then
   note "already running, started by hand: left as it is; the service runs it from the next boot"
 else
-  sudo systemctl start ambarella-llm || fail "ambarella-llm did not start: journalctl -u ambarella-llm"
+  sudo systemctl start ambarella-llm || { why_not ambarella-llm; fail "ambarella-llm did not start"; }
   for _ in $(seq 150); do
     grep -q "Device ENABLE" /tmp/log.txt 2>/dev/null && break
     sleep 1
@@ -227,7 +240,7 @@ if systemctl is-active --quiet ten-api; then
     if answers "http://127.0.0.1:8765/meetings"; then
       note "a meeting worker is up: ten-api keeps its older build for now; run this again when it is idle"
     else
-      sudo systemctl restart ten-api || fail "ten-api did not restart: journalctl -u ten-api"
+      sudo systemctl restart ten-api || { why_not ten-api; fail "ten-api did not restart"; }
       ok "ten-api restarted on the new build"
     fi
   fi
@@ -242,13 +255,20 @@ if ! systemctl is-active --quiet ten-api; then
     workers=$(pids_of '/tmp/ten_agent/property-')
     [[ -n "$workers" ]] && kill $workers 2>/dev/null && sleep 2
   fi
-  sudo systemctl start ten-api || fail "ten-api did not start: journalctl -u ten-api"
+  # An earlier unit that kept failing may have hit systemd's start limit.
+  sudo systemctl reset-failed ten-api 2>/dev/null
+  sudo systemctl start ten-api || { why_not ten-api; fail "ten-api did not start"; }
 fi
 for _ in $(seq 30); do
   answers "$SERVER/graphs" && break
   sleep 1
 done
-answers "$SERVER/graphs" || fail "the service runs but $SERVER does not answer: tail /tmp/task_run.log"
+if ! answers "$SERVER/graphs"; then
+  why_not ten-api
+  echo "  -- tail /tmp/task_run.log"
+  tail -5 /tmp/task_run.log 2>&1 | sed 's/^/     /'
+  fail "ten-api is installed but $SERVER does not answer"
+fi
 ok "API server answers at $SERVER, run by the ten-api service"
 
 echo
