@@ -156,6 +156,18 @@ def follow(args, meeting_id, auth, t0, deadline, before=None, judge=None):
     return None
 
 
+def log_tail(lines):
+    """The server log's last lines: a worker that died says why there, and
+    its first lines are prefixed "-", not its channel."""
+    if not os.path.isfile(SERVER_LOG):
+        info(f"no {SERVER_LOG} to show")
+        return
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as f:
+        tail = f.readlines()[-lines:]
+    for line in tail:
+        print(f"        | {line.rstrip()[:220]}", flush=True)
+
+
 def log_count(needle):
     """How many lines of the server's log carry needle; None without it."""
     if not os.path.isfile(SERVER_LOG):
@@ -249,7 +261,8 @@ def run(args, env):
     took = wait_ready(args, auth)
     if took is None:
         fail(f"{args.uploader} did not answer within 90 s of /start",
-             f"look for meeting_uploader in {SERVER_LOG}")
+             f"the worker's own words, from {SERVER_LOG}, are below")
+        log_tail(30)
         return
     ok(f"uploader answered {took:.0f} s after /start")
 

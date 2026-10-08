@@ -18,7 +18,9 @@
 #                  what its processes run as anyway
 #   ten-api        the Go API server on SERVER_PORT (8081): `task
 #                  run-api-server` in examples/voice-assistant, as you, with
-#                  your PATH -- the same .env and environment as a run by hand;
+#                  this terminal's environment (written to /etc/ten-api.env,
+#                  readable by root only) -- the same .env and environment as
+#                  a run by hand;
 #                  restarted if it dies; its output appended to
 #                  /tmp/task_run.log, where the checks look
 #
@@ -58,6 +60,7 @@ EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
 SERVER_DIR="$REPO_ROOT/ai_agents/server"
 ENV_FILE="$REPO_ROOT/ai_agents/.env"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
+ENV_OUT="${ENV_OUT:-/etc/ten-api.env}"
 LLM_DIR="${LLM_DIR:-/usr/share/ambarella/llm_demo}"
 LLM_MODEL_TYPE="${LLM_MODEL_TYPE:-9}"
 LLM_MODEL_PATH="${LLM_MODEL_PATH:-$HOME/demo_resources/llm_demo}"
@@ -88,6 +91,31 @@ q() {
   v=${v//\"/\\\"}
   v=${v//%/%%}
   printf '"%s"' "$v"
+}
+
+# This terminal's environment as an EnvironmentFile, but for what belongs to
+# the login session. A worker started by the service with PATH and HOME
+# alone died in the tenapp's start script (exit code None), while the same
+# start by hand, with everything the shell had sourced, ran.
+environment() {
+  env -0 | while IFS= read -r -d '' kv; do
+    key=${kv%%=*}
+    value=${kv#*=}
+    case "$key" in
+      PWD|OLDPWD|SHLVL|_|TERM|COLORTERM|LS_COLORS|PS1|PS2|PS4|PROMPT_COMMAND|\
+      MAIL|MOTD_SHOWN|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|\
+      XDG_RUNTIME_DIR|XDG_SESSION_*|XDG_SEAT|XDG_VTNR|SSH_*|SUDO_*|HIST*|\
+      BASH_FUNC_*|TMUX*|STY|WINDOW|LESSOPEN|LESSCLOSE|ENV_OUT|UNIT_DIR) continue ;;
+    esac
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    [[ "$value" == *$'\n'* ]] && continue
+    # Inside double quotes systemd takes \\ \" \$ for \ " $, and expands
+    # nothing else -- checked on systemd 249.
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//\$/\\\$}
+    printf '%s="%s"\n' "$key" "$value"
+  done
 }
 
 llm_unit() {
@@ -124,6 +152,7 @@ User=$RUN_USER
 WorkingDirectory=$EXAMPLE
 Environment=$(q "HOME=$HOME")
 Environment=$(q "PATH=$PATH")
+EnvironmentFile=$ENV_OUT
 # The shell, running as $RUN_USER, opens the log -- not systemd: with
 # fs.protected_regular, root may not open another user's file in /tmp for
 # append, and the service died before it ran (status 209/STDOUT).
@@ -173,6 +202,10 @@ fi
 [[ -d "$LLM_MODEL_PATH" ]] || fail "no model at $LLM_MODEL_PATH (LLM_MODEL_PATH=... picks another)"
 
 if [[ $MODE == print ]]; then
+  echo "# $ENV_OUT (variable names; values are written only on install)"
+  environment | cut -d= -f1 | tr '\n' ' '
+  echo
+  echo
   echo "# $UNIT_DIR/ambarella-llm.service"
   llm_unit
   echo
@@ -199,12 +232,17 @@ echo "== units"
 tmp=$(mktemp -d)
 llm_unit > "$tmp/ambarella-llm.service"
 api_unit > "$tmp/ten-api.service"
+environment > "$tmp/ten-api.env"
+nvars=$(grep -c . "$tmp/ten-api.env")
+sudo install -m 600 -o root -g root "$tmp/ten-api.env" "$ENV_OUT" ||
+  fail "could not write $ENV_OUT"
 sudo install -m 644 "$tmp/ambarella-llm.service" "$tmp/ten-api.service" "$UNIT_DIR/" ||
   fail "could not write $UNIT_DIR"
 rm -rf "$tmp"
 sudo systemctl daemon-reload
 sudo systemctl enable ambarella-llm ten-api >/dev/null 2>&1 || fail "systemctl enable failed"
 ok "ambarella-llm and ten-api installed in $UNIT_DIR and enabled at boot"
+ok "ten-api runs with this terminal's environment: $nvars variables in $ENV_OUT"
 
 echo "== LLM daemon"
 if pgrep -x 'test_llm|test_llm_client' >/dev/null; then
