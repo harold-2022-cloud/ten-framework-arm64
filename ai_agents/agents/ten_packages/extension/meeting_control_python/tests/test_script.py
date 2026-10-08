@@ -21,6 +21,18 @@ def test_traditional_gives_the_models_text_in_taiwan_characters():
     )
 
 
+def test_and_before_a_verb_starting_with_fa_stays_and():
+    # OpenCC takes 并发 for one word, "concurrent" (併發), wherever it
+    # starts: on the board, 制定并发布 came out 制定併發佈. The models write
+    # 并 for "and" all the time.
+    traditional = converter("traditional")
+
+    assert traditional("制定并发布防疫宣传指南") == "制定並發佈防疫宣傳指南"
+    assert traditional("并发放礼品") == "並發放禮品"
+    assert traditional("讨论并发现问题") == "討論並發現問題"
+    assert "\u2060" not in traditional("并发布")
+
+
 def test_simplified_turns_the_records_own_labels_simplified_too():
     assert converter("simplified")("說話人1：結論") == "说话人1：结论"
 

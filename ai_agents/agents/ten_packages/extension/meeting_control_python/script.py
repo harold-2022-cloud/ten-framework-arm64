@@ -25,6 +25,13 @@ SCRIPTS = {"traditional": "s2tw", "simplified": "t2s"}
 # Values that name things rather than say them, left as they are.
 IDENTIFIERS = {"meeting_id", "id", "audio", "error", "actions_error"}
 
+# Words OpenCC takes whole where the models mean two: 并发, "concurrent"
+# (併發), swallows the "and" of 并发布 and 并发放 -- on the board, 制定并发布
+# came out 制定併發佈. A word joiner, in no OpenCC phrase, keeps the two
+# characters apart while converting and is taken out after.
+APART = {"traditional": ("并发",)}
+JOINER = "\u2060"
+
 _converters: Dict[str, Callable[[str], str]] = {}
 
 
@@ -37,8 +44,22 @@ def converter(script: str) -> Callable[[str], str]:
     if script not in _converters:
         from opencc import OpenCC  # pylint: disable=import-outside-toplevel
 
-        _converters[script] = OpenCC(SCRIPTS[script]).convert
+        _converters[script] = _kept_apart(
+            OpenCC(SCRIPTS[script]).convert, APART.get(script, ())
+        )
     return _converters[script]
+
+
+def _kept_apart(convert: Callable[[str], str], words) -> Callable[[str], str]:
+    if not words:
+        return convert
+
+    def converted(text: str) -> str:
+        for word in words:
+            text = text.replace(word, word[0] + JOINER + word[1:])
+        return convert(text).replace(JOINER, "")
+
+    return converted
 
 
 def convert_record(value, convert: Callable[[str], str]):
