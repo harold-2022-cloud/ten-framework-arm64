@@ -229,6 +229,8 @@ why_not() {
 }
 
 echo "== units"
+# What ten-api runs with now, to tell whether it must restart to pick up a change.
+was=$(sudo cat "$UNIT_DIR/ten-api.service" "$ENV_OUT" 2>/dev/null | md5sum)
 tmp=$(mktemp -d)
 llm_unit > "$tmp/ambarella-llm.service"
 api_unit > "$tmp/ten-api.service"
@@ -243,6 +245,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable ambarella-llm ten-api >/dev/null 2>&1 || fail "systemctl enable failed"
 ok "ambarella-llm and ten-api installed in $UNIT_DIR and enabled at boot"
 ok "ten-api runs with this terminal's environment: $nvars variables in $ENV_OUT"
+changed=0
+[[ "$(sudo cat "$UNIT_DIR/ten-api.service" "$ENV_OUT" 2>/dev/null | md5sum)" != "$was" ]] && changed=1
 
 echo "== LLM daemon"
 if pgrep -x 'test_llm|test_llm_client' >/dev/null; then
@@ -271,15 +275,16 @@ if [[ -n "${newer// /}" ]]; then
     fail "go build failed; bin/api is the old one"
   ok "server/bin/api built again"
 fi
-# The service started before bin/api was last built: it runs an older build.
+# The service started before bin/api was last built, or before its unit or
+# environment changed: it runs on the old ones.
 if systemctl is-active --quiet ten-api; then
   since=$(date -d "$(systemctl show ten-api -p ActiveEnterTimestamp --value)" +%s 2>/dev/null || echo 0)
-  if (( $(stat -c %Y "$SERVER_DIR/bin/api") > since )); then
+  if (( changed )) || (( $(stat -c %Y "$SERVER_DIR/bin/api") > since )); then
     if answers "http://127.0.0.1:8765/meetings"; then
-      note "a meeting worker is up: ten-api keeps its older build for now; run this again when it is idle"
+      note "a meeting worker is up: ten-api keeps the old build and environment for now; run this again when it is idle"
     else
       sudo systemctl restart ten-api || { why_not ten-api; fail "ten-api did not restart"; }
-      ok "ten-api restarted on the new build"
+      ok "ten-api restarted on the new build and environment"
     fi
   fi
 fi
