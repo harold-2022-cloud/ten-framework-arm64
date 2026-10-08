@@ -383,7 +383,8 @@ private fun DetailsScreen(id: String, settings: Settings, store: MeetingStore, o
     if (meeting.state != "archived" || record == null) {
         Text(stateText(meeting), fontSize = 18.sp)
         if (meeting.uploadedAtMs > 0 && !meeting.finished) {
-            val eta = meeting.uploadedAtMs + ((meeting.durationS + 120) * 1000).toLong()
+            val eta = meeting.dueAtMs.takeIf { it > 0 }
+                ?: (meeting.uploadedAtMs + ((meeting.durationS + 120) * 1000).toLong())
             Text(
                 "預計 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(eta))} 左右完成；可以先離開，到時會通知。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -523,7 +524,7 @@ private fun stateText(m: Meeting): String = when (m.state) {
     "starting" -> "連線到板子…"
     "uploading" -> "上傳中…"
     "upload_failed" -> "上傳失敗"
-    else -> Texts.state(m.state, m.done, m.total, m.error)
+    else -> Texts.state(m.state, m.done, m.total, m.error, m.ahead)
 }
 
 private fun when_(ms: Long) = SimpleDateFormat("M/d HH:mm", Locale.getDefault()).format(Date(ms))

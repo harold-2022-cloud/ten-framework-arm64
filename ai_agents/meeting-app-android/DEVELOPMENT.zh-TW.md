@@ -68,7 +68,12 @@ sequenceDiagram
         A->>W: GET /meetings
     end
     A->>W: POST /meeting/upload（multipart）
-    Note over A: 排一個本機通知：上傳時間 + 錄音長度 + 2 分鐘
+    alt 板子正在處理另一場
+        W-->>A: 200 queued（ahead、wait_s）；前一場做完才輪到
+    else
+        W-->>A: 200 accepted
+    end
+    Note over A: 排一個本機通知：上傳時間 + 排隊等待 + 錄音長度 + 2 分鐘
     Note over W: 處理期間每 20 秒自己 /ping，worker 不會被回收
     loop 詳細頁開著時，每 30 秒
         A->>W: GET /meeting/{id}
@@ -90,7 +95,11 @@ sequenceDiagram
 - 如果打開一場會議時 8765 連不上（worker 已經被回收），`Work.refresh` 會再 `/start` 一次，
   把記錄讀回來。這樣做是安全的：新起來的上傳端要先拿到 port，才會把「沒走到最終狀態」的
   會議標成中斷失敗（`meeting_uploader/extension.py` 的 `_start`），已經結束的會議不會被動到。
-- 一次只處理一場。處理中再上傳會回 409，畫面會顯示是哪一場還在處理。
+- 一次只處理一場，其他的排隊。板子上的大模型一次只服務一個人，所以一場還在處理時
+  送來的會議會先收下、排隊等候（`queued`），前一場做完，上傳端就照先來後到把它交給
+  處理端。隊伍記在板子的磁碟上，worker 重開也不會不見。上傳的回應和會議的狀態都會
+  說前面還有幾場、大約多久後開始（`ahead`、`wait_s`）；App 顯示「排隊中，前面還有
+  N 場」，通知時間也會把等待算進去。409 現在只代表：同一場會議正在處理中，不能覆蓋。
 
 不要改回「每場會議一個 channel」：第二個 worker 拿不到 port，而 App 停掉「自己的」
 worker 時，可能剛好殺掉正在處理別人會議的那個。
@@ -108,6 +117,8 @@ worker 時，可能剛好殺掉正在處理別人會議的那個。
 | `script` | `traditional` 或 `simplified` | 其他值回 400 |
 | `file` | 整場錄音，Ogg-Opus 16 kHz 單聲道 | 格式不對回 415，太大回 413 |
 
+回應裡有 `status`（`accepted`，或排在別場後面的 `queued`）、`ahead` 和 `wait_s`。
+
 權杖（板子的 `MEETING_AUTH_TOKEN`）只用 `Authorization: Bearer` 送給 8765，不送給 8081。
 
 ### 2.3 板子端的程式在哪
@@ -118,7 +129,7 @@ API 規格以板子端的程式為準，有疑問就讀這幾個地方：
 | --- | --- |
 | `/start`、`/ping`，以及錯誤碼 10003 | `ai_agents/server/internal/http_server.go`、`code.go` |
 | worker 怎麼被回收 | `ai_agents/server/internal/worker_common.go` 的 `timeoutWorkers` |
-| 上傳端的端點、409、各種錯誤 | `ai_agents/agents/ten_packages/extension/meeting_uploader/server.py` |
+| 上傳端的端點、排隊（`dispatch_next`、`run_queue`、`queue_of`）、各種錯誤 | `ai_agents/agents/ten_packages/extension/meeting_uploader/server.py` |
 | 狀態檔、`record.json`、中斷標記 | `meeting_uploader/store.py` |
 | 處理期間的保活 | `meeting_uploader/keepalive.py` |
 | 處理流程和每個狀態 | `ai_agents/agents/ten_packages/extension/meeting_control_python/flow.py` |
@@ -177,6 +188,8 @@ debug 版可以直接看：`adb shell run-as io.ten.meetingminutes cat files/mee
 | `error` | 要給使用者看的錯誤，已經轉成中文 |
 | `settled` | 板子已經沒有新東西可給：狀態是最終的，而且記錄（如果有的話）已經存在手機上 |
 | `names` | 使用者幫說話人取的名字，只存在手機上 |
+| `ahead` | 排隊中時，前面還有幾場 |
+| `dueAtMs` | 「應該好了」通知預定的時間 |
 | `file`、`script`、`speakers`、`title` | 錄音檔路徑，以及上傳時送出的欄位 |
 
 | 狀態 | 誰設的 | 意思 |
@@ -185,6 +198,7 @@ debug 版可以直接看：`adb shell run-as io.ten.meetingminutes cat files/mee
 | `starting` | App | 正在 `/start`，等 8765 回應 |
 | `uploading` | App | 正在上傳 |
 | `upload_failed` | App | 沒傳成功，`error` 寫了原因 |
+| `queued` | 板子 | 已經收下，等前一場做完 |
 | `received`、`decoding`、`transcribing`、`linking`、`summarising`、`concluding` | 板子 | 處理中 |
 | `archived` | 板子 | 完成 |
 | `empty` | 板子 | 錄音裡沒有人說話 |
@@ -196,6 +210,8 @@ stateDiagram-v2
     local --> starting: Work.startUpload
     starting --> uploading: worker 起來、8765 回應
     uploading --> received: 上傳成功，排通知
+    uploading --> queued: 板子正在處理另一場
+    queued --> received: 前一場做完
     starting --> upload_failed
     uploading --> upload_failed
     upload_failed --> starting: 重新上傳
@@ -225,7 +241,8 @@ stateDiagram-v2
 4. **只在詳細頁開著時查詢。** `DetailsScreen` 每 2 秒重讀手機上的資料（才看得到上傳的進度），
    每 30 秒問一次板子，而且只在 `askBoard` 成立時問（已經上傳、還沒 settled）。
    不在背景輪詢：Android 的背景工作最快 15 分鐘一次，iOS 則不允許，所以改成在估計的完成時間發通知。
-5. **通知時間是估的。** `Estimate.notifyAtMs` = 上傳時間 + 錄音長度 + 2 分鐘。板子上實測的
+5. **通知時間是估的。** `Estimate.notifyAtMs` = 上傳時間 + 排在前面的會議要等的時間（`wait_s`）
+   + 錄音長度 + 2 分鐘。詳細頁看到排隊中的會議開始處理時，會從那一刻重新排通知。板子上實測的
    處理時間是錄音長度的 0.93 倍（38 分鐘）、1.02 倍（12 分鐘）、1.1 倍（4 分鐘），
    多加的 2 分鐘都還來得及。`Due` 用 `setAndAllowWhileIdle`，是不精確的鬧鐘，Doze 時可能延後。
    Android 13 以上要有通知權限；沒給權限的話只是收不到通知，其他功能照常。
@@ -263,11 +280,11 @@ stateDiagram-v2
 
 | 檔案 | 測什麼 | 數量 |
 | --- | --- | --- |
-| `BoardApiTest` | 每個端點送什麼、怎麼解讀回應和錯誤 | 10 |
-| `WorkTest` | worker 的規則：一個 channel、不 `/stop`、10003 時 ping、回收後重開、settled；刪除 | 10 |
+| `BoardApiTest` | 每個端點送什麼、怎麼解讀回應和錯誤；排隊的欄位 | 13 |
+| `WorkTest` | worker 的規則：一個 channel、不 `/stop`、10003 時 ping、回收後重開、settled；刪除；排隊 | 13 |
 | `RecordTest` | `record.json` 解析 | 3 |
 | `MinutesTest` | 說話人編號、時間、分享文字 | 4 |
-| `SmallLogicTest` | meeting_id、通知時間、狀態和錯誤的中文 | 4 |
+| `SmallLogicTest` | meeting_id、通知時間、狀態和錯誤的中文 | 6 |
 | `LeftBehindTest` | 救回錄音 | 5 |
 | `OggOpusTest` | 錄音檔：OpusHead、分頁、CRC、granule、封包長度、pre-skip | 8 |
 
@@ -313,7 +330,7 @@ libsndfile 把一段合成的三秒訊號編成 16 kHz 單聲道，取出的 151
 | --- | --- |
 | 正常走到「完成」 | 錄 1–2 分鐘、兩個人以上輪流說話 |
 | 錄音裡沒有說話（`empty`） | 錄一段沒人說話的 |
-| 板子忙碌（409） | 一場還在處理時，用另一支手機或 curl 再上傳一場 |
+| 排隊 | 一場還在處理時，用另一支手機再上傳一場：顯示「排隊中」，前一場做完後接著處理；板子端由 `check_meeting_worker.py` 檢查 |
 | 權杖錯誤（401） | 板子設了 `MEETING_AUTH_TOKEN`，App 不填權杖 |
 | 連不上板子 | 設定填錯 IP，或手機離開那個網路 |
 | worker 被回收後讀取 | 會議處理完超過 10 分鐘才打開它 |
@@ -337,7 +354,7 @@ libsndfile 把一段合成的三秒訊號編成 16 kHz 單聲道，取出的 151
 - 設定頁不檢查 IP 的格式。
 - 走明碼 HTTP，唯一的保護是權杖（`network_security_config.xml` 允許明碼）。
 - 只有 debug 簽章。
-- 板子一次只處理一場會議。
+- 板子一次只處理一場會議，其他的排隊，所以同時送來好幾場時，最後一場要等比較久。
 - iOS 還沒開始做。
 
 ## 9. 提交

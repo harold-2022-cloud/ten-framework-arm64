@@ -19,16 +19,18 @@ object Ids {
 }
 
 object Estimate {
-    /** When to tell the user the minutes should be ready. Measured on the
-     *  board, processing takes about 0.93 x the recording; two minutes on
+    /** When to tell the user the minutes should be ready: the wait for the
+     *  meetings queued before it, then the meeting itself. Measured on the
+     *  board, processing takes 0.93 to 1.1 x the recording; two minutes on
      *  top covers the start and the summaries. */
-    fun notifyAtMs(uploadedAtMs: Long, durationS: Double): Long =
-        uploadedAtMs + ((durationS + 120.0) * 1000).toLong()
+    fun notifyAtMs(fromMs: Long, durationS: Double, waitS: Double = 0.0): Long =
+        fromMs + ((waitS + durationS + 120.0) * 1000).toLong()
 }
 
 /** The board's states and errors in plain words (app requirements Part 3, 5). */
 object Texts {
-    fun state(state: String, done: Int, total: Int, error: String?): String = when (state) {
+    fun state(state: String, done: Int, total: Int, error: String?, ahead: Int = 0): String = when (state) {
+        "queued" -> if (ahead > 0) "排隊中，前面還有 $ahead 場" else "排隊中，下一個就輪到"
         "received", "decoding" -> "準備中"
         "transcribing" -> "轉成文字 $done / $total"
         "linking" -> "整理說話人"
@@ -44,7 +46,7 @@ object Texts {
         0 -> "連不上板子：請確認手機和板子在同一個網路、位址正確，而且板子已開機"
         400 -> "上傳的資料有誤：$reason"
         401 -> "板子要求權杖：請到設定填入正確的權杖"
-        409 -> "板子正在處理另一場會議（$reason），請稍後再傳"
+        409 -> "板子正在處理這場會議（$reason），等它處理完再傳"
         413 -> "錄音檔太大（上限 64 MB）"
         415 -> "錄音格式不對（$reason）：這是 APP 錄音設定的問題，請回報"
         503 -> "板子收下了檔案，但處理端沒有接上（$reason），請回報管理者"

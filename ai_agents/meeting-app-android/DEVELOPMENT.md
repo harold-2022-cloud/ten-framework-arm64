@@ -77,7 +77,12 @@ sequenceDiagram
         A->>W: GET /meetings
     end
     A->>W: POST /meeting/upload (multipart)
-    Note over A: schedule a local notification: upload time + recording length + 2 min
+    alt another meeting is being processed
+        W-->>A: 200 queued (ahead, wait_s), handed on when the one before it ends
+    else
+        W-->>A: 200 accepted
+    end
+    Note over A: schedule a local notification: upload time + wait + recording length + 2 min
     Note over W: pings every 20 s while processing, so the worker is not reaped
     loop while the details screen is open, every 30 s
         A->>W: GET /meeting/{id}
@@ -103,8 +108,14 @@ Every meeting uses one channel: `meeting-room` (`Ids.CHANNEL` in
   a fresh uploader marks meetings left half done as interrupted only once it
   holds the port (`_start` in `meeting_uploader/extension.py`), so a finished
   meeting is left as it is.
-- One meeting at a time. An upload while another is processed gets 409, and
-  the screen says which meeting is still in progress.
+- One meeting at a time; the rest wait. The board's LLM serves one user, so
+  a meeting sent while another is processed lands and waits its turn
+  (`queued`), and the uploader hands it on when the one before it ends, first
+  come first. The queue is on the board's disk, so it outlives a worker. The
+  upload's reply and the meeting's status say how many go first and about how
+  long until it starts (`ahead`, `wait_s`); the app shows 排隊中，前面還有 N 場
+  and sets the notification after the wait. 409 now means only that this
+  same meeting is being processed and cannot be replaced.
 
 Do not go back to a channel per meeting: a second worker cannot get the port,
 and an app stopping "its own" worker could kill the one processing someone
@@ -123,6 +134,9 @@ else's meeting.
 | `script` | `traditional` or `simplified` | anything else is 400 |
 | `file` | the whole meeting, Ogg-Opus 16 kHz mono | wrong format 415, too large 413 |
 
+The reply is `status` (`accepted`, or `queued` behind another meeting),
+`ahead` and `wait_s`.
+
 The token (the board's `MEETING_AUTH_TOKEN`) goes as `Authorization: Bearer`
 to 8765 only, never to 8081.
 
@@ -134,7 +148,7 @@ The board's code is the specification; when in doubt, read:
 | --- | --- |
 | `/start`, `/ping`, and error code 10003 | `ai_agents/server/internal/http_server.go`, `code.go` |
 | how a worker is reaped | `timeoutWorkers` in `ai_agents/server/internal/worker_common.go` |
-| the uploader's endpoints, 409, the other errors | `ai_agents/agents/ten_packages/extension/meeting_uploader/server.py` |
+| the uploader's endpoints, the queue (`dispatch_next`, `run_queue`, `queue_of`), the errors | `ai_agents/agents/ten_packages/extension/meeting_uploader/server.py` |
 | state file, `record.json`, the interrupted mark | `meeting_uploader/store.py` |
 | keeping alive while processing | `meeting_uploader/keepalive.py` |
 | the processing flow and each state | `ai_agents/agents/ten_packages/extension/meeting_control_python/flow.py` |
@@ -197,6 +211,8 @@ On a debug build: `adb shell run-as io.ten.meetingminutes cat files/meetings.jso
 | `error` | an error for the user, already in Chinese |
 | `settled` | the board has nothing more to give: the state is final and the record, if any, is on the phone |
 | `names` | names the user gave the speakers; on the phone only |
+| `ahead` | while queued: how many meetings go first |
+| `dueAtMs` | when the "should be ready" notification is set for |
 | `file`, `script`, `speakers`, `title` | the recording's path, and the fields sent with the upload |
 
 | State | Set by | Meaning |
@@ -205,6 +221,7 @@ On a debug build: `adb shell run-as io.ten.meetingminutes cat files/meetings.jso
 | `starting` | app | calling `/start`, waiting for 8765 |
 | `uploading` | app | uploading |
 | `upload_failed` | app | the upload failed; `error` says why |
+| `queued` | board | landed, waiting for the meeting before it to end |
 | `received`, `decoding`, `transcribing`, `linking`, `summarising`, `concluding` | board | being processed |
 | `archived` | board | done |
 | `empty` | board | nobody spoke in the recording |
@@ -216,6 +233,8 @@ stateDiagram-v2
     local --> starting: Work.startUpload
     starting --> uploading: worker up, 8765 answers
     uploading --> received: uploaded, notification scheduled
+    uploading --> queued: another meeting is being processed
+    queued --> received: the one before it ended
     starting --> upload_failed
     uploading --> upload_failed
     upload_failed --> starting: upload again
@@ -254,7 +273,9 @@ never write one.
    polling: Android's background work runs at most every 15 minutes and iOS
    does not allow it, so a notification fires at the estimated finish instead.
 5. **The notification time is an estimate.** `Estimate.notifyAtMs` = upload
-   time + recording length + 2 minutes. Measured on the board, processing
+   time + the wait for the meetings queued before it (`wait_s`) + recording
+   length + 2 minutes. When the details screen sees a queued meeting start,
+   the notification is set again from then. Measured on the board, processing
    takes 0.93 × the recording (38 minutes), 1.02 × (12 minutes) and 1.1 ×
    (4 minutes); the 2 extra minutes covered each. `Due` uses
    `setAndAllowWhileIdle`, an inexact alarm that Doze may delay. Android 13+
@@ -308,11 +329,11 @@ All JVM unit tests (`app/src/test`): no Robolectric, no on-device tests.
 
 | Class | What | Count |
 | --- | --- | --- |
-| `BoardApiTest` | what each endpoint sends, how replies and errors are read | 10 |
-| `WorkTest` | the worker rules: one channel, no `/stop`, ping on 10003, restart after reaping, settled; delete | 10 |
+| `BoardApiTest` | what each endpoint sends, how replies and errors are read; the queue fields | 13 |
+| `WorkTest` | the worker rules: one channel, no `/stop`, ping on 10003, restart after reaping, settled; delete; the queue | 13 |
 | `RecordTest` | parsing `record.json` | 3 |
 | `MinutesTest` | speaker numbers, times, shared text | 4 |
-| `SmallLogicTest` | meeting_id, notification time, states and errors in Chinese | 4 |
+| `SmallLogicTest` | meeting_id, notification time, states and errors in Chinese | 6 |
 | `LeftBehindTest` | recovering a recording | 5 |
 | `OggOpusTest` | the recording file: OpusHead, pages, CRC, granule, packet length, pre-skip | 8 |
 
@@ -371,7 +392,7 @@ Conventions:
 | --- | --- |
 | all the way to "done" | record 1–2 minutes of two or more people taking turns |
 | nobody spoke (`empty`) | record silence |
-| the board busy (409) | while one meeting is processed, upload another from a second phone or curl |
+| the queue | while one meeting is processed, upload another from a second phone: it reads 排隊中 and is processed after; `check_meeting_worker.py` checks the board's side |
 | wrong token (401) | the board sets `MEETING_AUTH_TOKEN`, the app has none |
 | the board unreachable | a wrong IP in settings, or the phone off that network |
 | reading after the worker was reaped | open a meeting more than 10 minutes after it finished |
@@ -397,7 +418,8 @@ Debugging:
 - Plain HTTP; the token is the only protection (`network_security_config.xml`
   allows cleartext).
 - Debug signing only.
-- The board processes one meeting at a time.
+- The board processes one meeting at a time; the others wait in the queue, so
+  the last of several meetings sent together is ready that much later.
 - iOS has not been started.
 
 ## 9. Committing

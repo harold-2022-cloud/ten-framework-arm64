@@ -15,13 +15,24 @@ import java.util.UUID
 class ApiError(val status: Int, val reason: String) :
     Exception(if (status == 0) reason else "$status $reason")
 
-data class UploadResult(val meetingId: String, val bytes: Long)
+/** queued: the board took the meeting but is processing another; ahead
+ *  meetings go first, and it should start in about waitS seconds. */
+data class UploadResult(
+    val meetingId: String,
+    val bytes: Long,
+    val queued: Boolean = false,
+    val ahead: Int = 0,
+    val waitS: Double = 0.0,
+)
 
 data class MeetingStatus(
     val state: String,
     val topicsDone: Int,
     val topicsTotal: Int,
     val error: String?,
+    /** While queued: how many go first, and about how long until it starts. */
+    val ahead: Int? = null,
+    val waitS: Double? = null,
 )
 
 /**
@@ -114,17 +125,26 @@ class BoardApi(
         }
         if (status != 200) throw ApiError(status, reason(text))
         val json = parse(status, text)
-        return UploadResult(json.optString("meeting_id", meetingId), json.optLong("bytes"))
+        return UploadResult(
+            meetingId = json.optString("meeting_id", meetingId),
+            bytes = json.optLong("bytes"),
+            queued = json.optString("status") == "queued",
+            ahead = json.optInt("ahead"),
+            waitS = json.optDouble("wait_s", 0.0),
+        )
     }
 
     fun status(meetingId: String): MeetingStatus {
         val json = parse(200, get("$uploader/meeting/$meetingId"))
         val progress = json.optJSONObject("progress") ?: JSONObject()
+        val queue = json.optJSONObject("queue")
         return MeetingStatus(
             state = json.optString("state"),
             topicsDone = progress.optInt("topics_done"),
             topicsTotal = progress.optInt("topics_total"),
             error = if (json.isNull("error")) null else json.optString("error"),
+            ahead = queue?.optInt("ahead"),
+            waitS = queue?.optDouble("wait_s"),
         )
     }
 

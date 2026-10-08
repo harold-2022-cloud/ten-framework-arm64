@@ -42,11 +42,14 @@ class WorkTest {
     private val store = MeetingStore(dir)
 
     @Volatile private var state = "archived"
+    @Volatile private var uploadReply = """{"meeting_id": "m1", "bytes": 5, "status": "accepted", "ahead": 0, "wait_s": 0}"""
+    @Volatile private var queue = "null"
     @Volatile private var recordStatus = 200
     private val starts = mutableListOf<String>()
     @Volatile private var pings = 0
     @Volatile private var stops = 0
     private val cancelled = mutableListOf<String>()
+    private val scheduled = mutableListOf<Long>()
 
     private val meeting = Meeting(
         id = "m1", title = "週會", speakers = 6, script = "traditional",
@@ -101,7 +104,7 @@ class WorkTest {
         override fun dispatch(request: RecordedRequest): MockResponse =
             when (request.path) {
                 "/meetings" -> json(200, """{"meetings": []}""")
-                "/meeting/upload" -> json(200, """{"meeting_id": "m1", "bytes": 5}""")
+                "/meeting/upload" -> json(200, uploadReply)
                 "/meeting/m1/record.json" ->
                     if (recordStatus == 200) json(200, RecordTest.SAMPLE)
                     else json(recordStatus, """{"error": "no record"}""")
@@ -109,7 +112,7 @@ class WorkTest {
                     200,
                     """{"meeting_id": "m1", "state": "$state",
                        "progress": {"topics_done": 2, "topics_total": 2},
-                       "record": null, "error": null}""",
+                       "queue": $queue, "record": null, "error": null}""",
                 )
                 else -> json(404, """{"error": "no such thing"}""")
             }
@@ -128,7 +131,7 @@ class WorkTest {
     )
 
     private fun refresh(m: Meeting) = runBlocking {
-        Work.refresh(api, store, m, cancel = { cancelled += it })
+        Work.refresh(api, store, m, cancel = { cancelled += it }, schedule = { _, at -> scheduled += at })
     }
 
     private fun send(m: Meeting) = runBlocking {
@@ -269,5 +272,48 @@ class WorkTest {
 
         assertTrue(file.exists())
         assertNotNull(store.get("m1"))
+    }
+
+    @Test
+    fun aMeetingTheBoardQueuesWaitsAndItsNotificationAllowsForTheWait() {
+        uploadReply = """{"meeting_id": "m1", "bytes": 5, "status": "queued", "ahead": 1, "wait_s": 600}"""
+        var due = 0L
+
+        val after = runBlocking {
+            Work.upload(api, store, meeting.copy(file = recording().path, state = "local", uploadedAtMs = 0),
+                schedule = { _, at -> due = at })
+        }
+
+        assertEquals("queued", after.state)
+        assertEquals(1, after.ahead)
+        // The wait, then the meeting itself (600 s), then two minutes.
+        assertEquals(after.uploadedAtMs + (600 + 600 + 120) * 1000L, due)
+        assertEquals(due, after.dueAtMs)
+    }
+
+    @Test
+    fun whenAQueuedMeetingStartsItsNotificationIsSetFromThen() {
+        state = "transcribing"
+        val queued = meeting.copy(state = "queued", ahead = 1, dueAtMs = 1L)
+        val before = System.currentTimeMillis()
+
+        val after = refresh(queued)
+
+        assertEquals("transcribing", after.state)
+        assertEquals(1, scheduled.size)
+        assertTrue(scheduled[0] >= before + (600 + 120) * 1000L)
+        assertEquals(scheduled[0], after.dueAtMs)
+    }
+
+    @Test
+    fun aMeetingStillQueuedKeepsItsPlaceUpToDate() {
+        state = "queued"
+        queue = """{"ahead": 2, "wait_s": 300}"""
+
+        val after = refresh(meeting.copy(state = "queued", ahead = 3))
+
+        assertEquals("queued", after.state)
+        assertEquals(2, after.ahead)
+        assertFalse(after.settled)
     }
 }

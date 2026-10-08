@@ -43,6 +43,10 @@ data class Meeting(
      *  record if there is one. Nothing more to ask. */
     val settled: Boolean = false,
     val names: Map<Int, String> = emptyMap(),
+    /** While queued on the board: how many meetings go first. */
+    val ahead: Int = 0,
+    /** When the "should be ready" notification is set for. */
+    val dueAtMs: Long = 0,
 ) {
     val finished get() = state in setOf("archived", "empty", "failed")
 
@@ -54,6 +58,7 @@ data class Meeting(
         .put("done", done).put("total", total).put("error", error ?: JSONObject.NULL)
         .put("settled", settled)
         .put("names", JSONObject(names.mapKeys { it.key.toString() }))
+        .put("ahead", ahead).put("dueAtMs", dueAtMs)
 
     companion object {
         fun fromJson(j: JSONObject): Meeting {
@@ -73,6 +78,8 @@ data class Meeting(
                 error = if (j.isNull("error")) null else j.optString("error"),
                 settled = j.optBoolean("settled"),
                 names = names.keys().asSequence().associate { it.toInt() to names.getString(it) },
+                ahead = j.optInt("ahead"),
+                dueAtMs = j.optLong("dueAtMs"),
             )
         }
     }

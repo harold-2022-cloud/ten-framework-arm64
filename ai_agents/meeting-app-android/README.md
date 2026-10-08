@@ -59,8 +59,8 @@ For how the code is laid out and the rules it keeps, see
 
 ## Prototype limits
 
-- One meeting at a time on the board: an upload while another meeting is
-  still being processed is refused (409), and the app says so.
+- One meeting at a time on the board: a meeting sent while another is
+  processed waits in the queue, and the app shows how many go first.
 - A recording the app was killed away from is offered again on the next
   launch. Its length is read off the file, so the length shown can be a few
   seconds out.

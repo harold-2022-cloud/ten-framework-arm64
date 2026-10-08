@@ -47,6 +47,13 @@ class BoardApiTest {
                     if (meetingsReady) json(200, """{"meetings": []}""") else json(503, "{}")
                 "/meeting/upload" -> json(uploadStatus, uploadBody)
                 "/meeting/m1/record.json" -> json(200, RecordTest.SAMPLE)
+                "/meeting/q1" -> json(
+                    200,
+                    """{"meeting_id": "q1", "state": "queued",
+                       "progress": {"topics_done": 0, "topics_total": 0},
+                       "queue": {"ahead": 1, "wait_s": 420},
+                       "record": null, "error": null}""",
+                )
                 "/meeting/odd" -> json(200, "<html>captive portal</html>")
                 "/meeting/m1" -> json(
                     200,
@@ -150,6 +157,37 @@ class BoardApiTest {
             assertEquals(409, e.status)
             assertEquals("meeting m0 is still being processed", e.reason)
         }
+    }
+
+    @Test
+    fun anUploadTheBoardQueuesSaysHowManyGoFirstAndHowLong() {
+        uploadBody = """{"meeting_id": "m1", "bytes": 5, "status": "queued", "ahead": 2, "wait_s": 900}"""
+        val file = File.createTempFile("meeting", ".ogg").apply { deleteOnExit() }
+
+        val r = api().upload(file, "m1", 2, null, null, null)
+
+        assertTrue(r.queued)
+        assertEquals(2, r.ahead)
+        assertEquals(900.0, r.waitS, 0.0)
+    }
+
+    @Test
+    fun anUploadTakenAtOnceIsNotQueued() {
+        val file = File.createTempFile("meeting", ".ogg").apply { deleteOnExit() }
+
+        val r = api().upload(file, "m1", 2, null, null, null)
+
+        assertFalse(r.queued)
+        assertEquals(0, r.ahead)
+    }
+
+    @Test
+    fun aQueuedMeetingsStatusSaysItsPlace() {
+        val s = api().status("q1")
+
+        assertEquals("queued", s.state)
+        assertEquals(1, s.ahead)
+        assertEquals(420.0, s.waitS!!, 0.0)
     }
 
     @Test

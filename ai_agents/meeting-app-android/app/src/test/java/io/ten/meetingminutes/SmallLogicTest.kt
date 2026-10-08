@@ -26,6 +26,17 @@ class SmallLogicTest {
     }
 
     @Test
+    fun aQueuedMeetingsNotificationWaitsForTheMeetingsBeforeIt() {
+        assertEquals(10_000L + (300 + 600 + 120) * 1000L, Estimate.notifyAtMs(10_000L, 600.0, waitS = 300.0))
+    }
+
+    @Test
+    fun aQueuedMeetingSaysHowManyGoFirst() {
+        assertEquals("排隊中，前面還有 2 場", Texts.state("queued", 0, 0, null, ahead = 2))
+        assertEquals("排隊中，下一個就輪到", Texts.state("queued", 0, 0, null, ahead = 0))
+    }
+
+    @Test
     fun statesReadInPlainWords() {
         assertEquals("準備中", Texts.state("decoding", 0, 0, null))
         assertEquals("轉成文字 2 / 5", Texts.state("transcribing", 2, 5, null))

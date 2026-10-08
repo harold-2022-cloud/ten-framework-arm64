@@ -61,13 +61,18 @@ object Work {
                 store.put(m.copy(state = "starting"))
                 begin(api)
                 store.put(m.copy(state = "uploading"))
-                api.upload(
+                val r = api.upload(
                     File(m.file), m.id, m.speakers, m.title,
                     m.recordedAtMs / 1000, m.script,
                 )
                 val now = System.currentTimeMillis()
-                schedule(m, Estimate.notifyAtMs(now, m.durationS))
-                m.copy(state = "received", uploadedAtMs = now).also(store::put)
+                // Queued behind other meetings, the minutes come that much later.
+                val due = Estimate.notifyAtMs(now, m.durationS, r.waitS)
+                schedule(m, due)
+                m.copy(
+                    state = if (r.queued) "queued" else "received",
+                    uploadedAtMs = now, ahead = r.ahead, dueAtMs = due,
+                ).also(store::put)
             } catch (e: ApiError) {
                 m.copy(state = "upload_failed", error = Texts.error(e.status, e.reason))
                     .also(store::put)
@@ -78,9 +83,21 @@ object Work {
      *  phone and the meeting settled. A meeting that ended without a
      *  record (the uploader's own failures write none) is settled too. */
     suspend fun refresh(context: Context, settings: Settings, store: MeetingStore, m: Meeting): Meeting =
-        refresh(api(settings), store, m) { Due.cancel(context, it) }
+        refresh(
+            api(settings), store, m,
+            cancel = { Due.cancel(context, it) },
+            schedule = { mm, atMs -> Due.schedule(context, mm.id, mm.title, atMs) },
+        )
 
-    suspend fun refresh(api: BoardApi, store: MeetingStore, m: Meeting, cancel: (String) -> Unit): Meeting =
+    /** A queued meeting that has started gets its notification set again,
+     *  from now: the wait is over. */
+    suspend fun refresh(
+        api: BoardApi,
+        store: MeetingStore,
+        m: Meeting,
+        cancel: (String) -> Unit,
+        schedule: (Meeting, Long) -> Unit,
+    ): Meeting =
         withContext(Dispatchers.IO) {
             try {
                 val s = try {
@@ -94,7 +111,15 @@ object Work {
                     begin(api)
                     api.status(m.id)
                 }
-                var now = m.copy(state = s.state, done = s.topicsDone, total = s.topicsTotal, error = s.error)
+                var now = m.copy(
+                    state = s.state, done = s.topicsDone, total = s.topicsTotal,
+                    error = s.error, ahead = s.ahead ?: 0,
+                )
+                if (m.state == "queued" && now.state != "queued" && !now.finished) {
+                    val due = Estimate.notifyAtMs(System.currentTimeMillis(), m.durationS)
+                    schedule(now, due)
+                    now = now.copy(dueAtMs = due)
+                }
                 if (now.finished) {
                     val kept = runCatching { store.saveRecord(m.id, recordJson(api, m.id)) }.isSuccess
                     // An archived meeting whose record did not arrive is
