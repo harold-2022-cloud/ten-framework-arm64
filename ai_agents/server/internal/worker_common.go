@@ -145,6 +145,19 @@ func (w *Worker) update(req *WorkerUpdateReq) (err error) {
 	return
 }
 
+// forget takes w off the list -- if the list still holds w. A worker
+// started since on the same channel keeps its place: when an idle worker is
+// reaped, its port can close before its process is gone, and a client may
+// start a new worker on that channel in between. Removing by name then took
+// the new worker off the list, and it ran on, unreaped, holding the port.
+func forget(w *Worker) {
+	workers.LockFunc(func(m map[interface{}]interface{}) {
+		if cur, ok := m[w.ChannelName]; ok && cur == w {
+			delete(m, w.ChannelName)
+		}
+	})
+}
+
 func timeoutWorkers() {
 	for {
 		for _, channelName := range workers.Keys() {

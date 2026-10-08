@@ -110,10 +110,8 @@ func (w *Worker) start(req *StartReq) (err error) {
 			logFile.Close()
 		}
 
-		// Remove the worker from the map (defensive check for concurrent stop)
-		if workers.Contains(w.ChannelName) {
-			workers.Remove(w.ChannelName)
-		}
+		// Off the list, unless a newer worker on this channel took its place.
+		forget(w)
 
 	}()
 
@@ -133,9 +131,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 			slog.Error("Worker SIGKILL failed", "err", err, "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 			return
 		}
-		if workers.Contains(channelName) {
-			workers.Remove(channelName)
-		}
+		forget(w)
 		slog.Info("Worker stop end (forced)", "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 		return
 	}
@@ -146,9 +142,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 		err = syscall.Kill(-w.Pid, 0)
 		if err != nil {
 			// Process no longer exists - graceful shutdown succeeded
-			if workers.Contains(channelName) {
-				workers.Remove(channelName)
-			}
+			forget(w)
 			slog.Info("Worker stop end (graceful)", "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 			return nil
 		}
@@ -163,9 +157,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 		return
 	}
 
-	if workers.Contains(channelName) {
-		workers.Remove(channelName)
-	}
+	forget(w)
 	slog.Info("Worker stop end (forced after timeout)", "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 	return
 }

@@ -82,10 +82,8 @@ func (w *Worker) start(req *StartReq) (err error) {
 			logFile.Close()
 		}
 
-		// Remove the worker from the map (defensive check for concurrent stop)
-		if workers.Contains(w.ChannelName) {
-			workers.Remove(w.ChannelName)
-		}
+		// Off the list, unless a newer worker on this channel took its place.
+		forget(w)
 
 	}()
 
@@ -100,9 +98,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 	handle, err := syscall.OpenProcess(syscall.PROCESS_TERMINATE, false, uint32(w.Pid))
 	if err != nil {
 		slog.Error("Worker open process failed", "err", err, "channelName", channelName, "pid", w.Pid, "requestId", requestId, logTag)
-		if workers.Contains(channelName) {
-			workers.Remove(channelName)
-		}
+		forget(w)
 		return
 	}
 	defer syscall.CloseHandle(handle)
@@ -116,9 +112,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 		err = syscall.GetExitCodeProcess(handle, &exitCode)
 		if err != nil || exitCode != 259 { // 259 = STILL_ACTIVE
 			// Process no longer exists
-			if workers.Contains(channelName) {
-				workers.Remove(channelName)
-			}
+			forget(w)
 			slog.Info("Worker stop end (process already exited)", "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 			return nil
 		}
@@ -133,9 +127,7 @@ func (w *Worker) stop(requestId string, channelName string) (err error) {
 		return
 	}
 
-	if workers.Contains(channelName) {
-		workers.Remove(channelName)
-	}
+	forget(w)
 	slog.Info("Worker stop end (forced)", "channelName", channelName, "worker", w, "requestId", requestId, logTag)
 	return
 }
