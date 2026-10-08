@@ -146,6 +146,18 @@ def checkout():
 
 def preflight(args, auth):
     say("preflight")
+    # What the meeting extensions import. Without one, a meeting the
+    # controller cannot start reads "received" and nothing more.
+    for name in board.PACKAGES:
+        try:
+            __import__(name)
+        except ImportError as err:
+            fail(f"import {name} under Python {sys.version.split()[0]}: {err}",
+                 "re-run ai_agents/agents/scripts/install_board_arm64.sh "
+                 "voice-assistant: it installs every extension's "
+                 "requirements.txt for the runtime's interpreter")
+            return False
+    ok(f"this interpreter imports {', '.join(board.PACKAGES)}")
     status, _ = request(f"{args.server}/graphs", timeout=5)
     if status != 200:
         fail(f"no Go server at {args.server}",
@@ -217,6 +229,16 @@ def run(args, env):
             break
         time.sleep(2)
         state = state_of(args, a_id, auth) or {}
+    if state.get("state") in (None, "received"):
+        fail("A was not picked up within 180 s: it still reads "
+             f"{state.get('state')}",
+             "the controller did not start it; grep -n 'meeting flow failed"
+             f"\\|could not start' {SERVER_LOG}")
+        return
+    if state.get("state") == "failed":
+        fail(f"A ended failed: {state.get('error')}",
+             f"see the meeting lines in {SERVER_LOG}")
+        return
     if state.get("state") in FINAL:
         fail(f"A ended {state.get('state')} before the intruder could start; "
              "use a longer --minutes")

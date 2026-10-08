@@ -63,7 +63,7 @@ MODELS = {
     "SENSEVOICE_MODEL_DIR": "/home/lychee/sensevoice",
     "MEETING_VAD_MODEL": "/home/lychee/vad_models/ten-vad.onnx",
 }
-PACKAGES = ("numpy", "soundfile", "sherpa_onnx", "aiohttp", "pydantic")
+PACKAGES = ("numpy", "soundfile", "sherpa_onnx", "aiohttp", "pydantic", "opencc")
 
 failures = []
 
