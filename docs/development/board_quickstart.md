@@ -240,6 +240,10 @@ If an earlier run got stuck, `tools/ambarella/rerun_meeting_worker_check.sh`
 clears what it left (a check still running, meeting workers), installs any
 package the meeting extensions cannot import, and then runs the check.
 
+`verify_meeting_board.sh --phone` ends by waiting for a meeting from the
+Android app: it follows it on the board and checks the record, its script,
+the app's channel, and that the app left the worker running.
+
 ### Use it
 
 ```bash

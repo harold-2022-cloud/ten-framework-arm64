@@ -213,6 +213,9 @@ python3.12 tools/ambarella/check_meeting_worker.py
 之前跑到一半卡住的話，用 `tools/ambarella/rerun_meeting_worker_check.sh`：它會先清掉
 留下來的東西（還在跑的檢查、會議 worker），補裝會議 extension 缺的套件，再跑檢查。
 
+`verify_meeting_board.sh --phone` 最後會等 Android App 傳一場會議過來，在板子上跟著它
+跑完，檢查記錄、字體、App 用的 channel，以及 App 有沒有讓 worker 留著。
+
 ### 使用
 
 ```bash

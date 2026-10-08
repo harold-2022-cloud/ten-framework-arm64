@@ -64,8 +64,54 @@ MODELS = {
     "MEETING_VAD_MODEL": "/home/lychee/vad_models/ten-vad.onnx",
 }
 PACKAGES = ("numpy", "soundfile", "sherpa_onnx", "aiohttp", "pydantic", "opencc")
+# The record's script, as meeting_control_python/script.py writes it: the
+# OpenCC conversion, the name to say, and the values it leaves as they are.
+SCRIPTS = {"traditional": ("s2tw", "Traditional"), "simplified": ("t2s", "Simplified")}
+IDENTIFIERS = {"meeting_id", "id", "audio", "error", "actions_error"}
 
 failures = []
+
+
+def record_texts(value):
+    """Every text the controller converts in record.json."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key not in IDENTIFIERS:
+                yield from record_texts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from record_texts(item)
+    elif isinstance(value, str) and value.strip():
+        yield value
+
+
+def off_script(record, script):
+    """(texts checked, [(text, converted)] for those not in the script). A
+    text already in the script is left as it is by the conversion to it --
+    on 278 texts from real records, converting a converted one again never
+    changed it."""
+    from opencc import OpenCC  # pylint: disable=import-outside-toplevel
+
+    convert = OpenCC(SCRIPTS[script][0]).convert
+    texts = list(record_texts(record))
+    pairs = ((t, convert(t)) for t in texts)
+    return len(texts), [(t, c) for t, c in pairs if c != t]
+
+
+def check_script(record, script):
+    name = SCRIPTS[script][1]
+    checked, off = off_script(record, script)
+    if not checked:
+        warn(f"the record has no text to check for {name}")
+    elif not off:
+        ok(f"the record is all {name} ({checked} texts)")
+    else:
+        fail(f"{len(off)} of {checked} texts in the record are not {name}",
+             "the controller converts as it writes: did the upload's script "
+             "(or MEETING_OUTPUT_SCRIPT) say what was meant?")
+        for text, converted in off[:3]:
+            one, other = (" ".join(x.split())[:50] for x in (text, converted))
+            info(f"{one}  ->  {other}")
 
 
 def say(msg):
@@ -511,6 +557,8 @@ def report(args, meeting_id, state, duration, took, peak, auth, out_dir):
         fail("no conclusion")
     info(f"actions {len(record.get('actions') or [])}"
          + (f" ({record['actions_error']})" if record.get("actions_error") else ""))
+    if args.script:
+        check_script(record, args.script)
 
     if args.rttm:
         sys.path.insert(0, HERE)

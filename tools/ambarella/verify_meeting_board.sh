@@ -10,6 +10,7 @@
 #   tools/ambarella/verify_meeting_board.sh --minutes 12   # a shorter meeting
 #   tools/ambarella/verify_meeting_board.sh --no-meeting   # steps 1-3 only
 #   tools/ambarella/verify_meeting_board.sh --script traditional
+#   tools/ambarella/verify_meeting_board.sh --script traditional --minutes 12 --phone
 #
 #   1 checkout   the commits under test are in this tree; stops here if not,
 #                since everything after would test the old code
@@ -17,11 +18,19 @@
 #                llm extension's utf8_mend.py: U+FFFD before and after
 #   3 llm tests  ambarella_llm2_python's suite under the runtime's python3.12,
 #                with the tenapp's own TEN runtime (no TEN_SYSTEM_DIR to type)
-#   4 meeting    check_meeting_board.py on the AISHELL-4 meeting already on
-#                the board, whole by default (about 35 minutes); then the
-#                conclusion is searched for invented owners and U+FFFD
+#   4 meeting    clear_meeting_worker.sh first (a stuck run, missing
+#                packages), then check_meeting_board.py on the AISHELL-4
+#                meeting already on the board, whole by default (about 35
+#                minutes); with --script, every text in the record must be
+#                in that script; then the conclusion is searched for invented
+#                owners and U+FFFD
+#   5 phone      with --phone: clear_meeting_worker.sh again, then
+#                check_meeting_phone.py waits for a meeting from the Android
+#                app, follows it, and checks the record (in --script, or
+#                Traditional, the app's default) and that the app left the
+#                worker running
 #
-# Steps 2-4 run whatever happens to the one before; the summary lists each.
+# Steps 2-5 run whatever happens to the one before; the summary lists each.
 # Everything is also written to a log, named at the start and the end. Step 4
 # needs the server up (task run) and the LLM daemon; keep the conversation
 # graphs idle meanwhile -- the board's LLM serves one session at a time.
@@ -35,13 +44,15 @@ SPEAKERS="${SPEAKERS:-6}"
 MINUTES=""
 SCRIPT=""
 MEETING=1
+PHONE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --minutes) MINUTES="$2"; shift 2 ;;
     --script) SCRIPT="$2"; shift 2 ;;
     --no-meeting) MEETING=0; shift ;;
-    -h|--help) sed -n '6,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --phone) PHONE=1; shift ;;
+    -h|--help) sed -n '6,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -82,7 +93,9 @@ missing=0
 for subject in \
   "count the orphans to mend a broken character" \
   "ask the conclusion for no owners at all" \
-  "acknowledge segment_audio and transcribe at once"
+  "acknowledge segment_audio and transcribe at once" \
+  "end a meeting failed whatever raises" \
+  "check the record's script and a phone's meeting"
 do
   found=$(git -C "$REPO_ROOT" log -1 --format=%h --fixed-strings \
     --grep="$subject" HEAD)
@@ -149,6 +162,11 @@ fi
 # --- 4. a whole meeting through the graph ------------------------------------
 if [[ $MEETING -eq 1 ]]; then
   step "4. meeting through the graph"
+  if "$TOOLS/clear_meeting_worker.sh"; then
+    passed "board ready: no meeting worker left, packages importable"
+  else
+    failed "clear_meeting_worker.sh: the board is not ready for a meeting; see above"
+  fi
   args=(--audio "$AUDIO" --rttm "$RTTM" --speakers "$SPEAKERS")
   [[ -n "$MINUTES" ]] && args+=(--minutes "$MINUTES")
   [[ -n "$SCRIPT" ]] && args+=(--script "$SCRIPT")
@@ -172,13 +190,13 @@ if [[ $MEETING -eq 1 ]]; then
     # says 老师 as often as they did.
     # Headings in either script: the record follows the upload's choice.
     conclusion=$(awk '/^(結論|结论)$/ {on = 1; next} /^(話題|话题) / {exit} on' "$minutes_txt")
-    owners=$(grep -cE '负责人[：: ]*[0-9]' <<<"$conclusion")
+    owners=$(grep -cE '(负责人|負責人)[：: ]*[0-9]' <<<"$conclusion")
     titles=$(grep -cE '老师|老師|经理|經理|主任|园长|園長|校长|校長|先生|女士' <<<"$conclusion")
     broken=$(grep -c $'\xef\xbf\xbd' "$minutes_txt")
     if [[ $owners -eq 0 ]]; then
-      passed "conclusion: no numbered owners (负责人N)"
+      passed "conclusion: no numbered owners (负责人N / 負責人N)"
     else
-      failed "conclusion: $owners line(s) with numbered owners (负责人N)"
+      failed "conclusion: $owners line(s) with numbered owners (负责人N / 負責人N)"
     fi
     if [[ $broken -eq 0 ]]; then
       passed "minutes: no U+FFFD anywhere"
@@ -194,6 +212,21 @@ if [[ $MEETING -eq 1 ]]; then
     sed 's/^/    /' <<<"$conclusion"
   else
     failed "this run left no minutes.txt (the meeting did not complete)"
+  fi
+fi
+
+# --- 5. a meeting from the phone ---------------------------------------------
+if [[ $PHONE -eq 1 ]]; then
+  step "5. a meeting from the Android app"
+  if "$TOOLS/clear_meeting_worker.sh"; then
+    "$PY" "$TOOLS/check_meeting_phone.py" --script "${SCRIPT:-traditional}"
+    if [[ $? -eq 0 ]]; then
+      passed "check_meeting_phone.py: all its checks passed"
+    else
+      failed "check_meeting_phone.py reported failures; see above"
+    fi
+  else
+    failed "clear_meeting_worker.sh: the board is not ready for the phone; see above"
   fi
 fi
 
