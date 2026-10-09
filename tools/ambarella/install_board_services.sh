@@ -166,15 +166,22 @@ EOF
 }
 
 status() {
+  local enabled active daemons clients
   for unit in ambarella-llm ten-api; do
-    printf '  %-14s enabled: %-9s active: %s\n' "$unit" \
-      "$(systemctl is-enabled "$unit" 2>/dev/null || echo no)" \
-      "$(systemctl is-active "$unit" 2>/dev/null || echo no)"
+    # Both print the state even when they exit non-zero (disabled, inactive).
+    enabled=$(systemctl is-enabled "$unit" 2>/dev/null)
+    active=$(systemctl is-active "$unit" 2>/dev/null)
+    printf '  %-14s enabled: %-9s active: %s\n' "$unit" "${enabled:-no}" "${active:-no}"
   done
-  if pgrep -x 'test_llm|test_llm_client' >/dev/null; then
-    ok "LLM daemon processes running ($(pgrep -x 'test_llm|test_llm_client' | wc -l))"
-  else
+  daemons=$(pgrep -cx test_llm)
+  clients=$(pgrep -cx test_llm_client)
+  if [[ $daemons -eq 1 && $clients -eq 1 ]]; then
+    ok "LLM daemon running: test_llm and test_llm_client, one of each"
+  elif [[ $daemons -eq 0 && $clients -eq 0 ]]; then
     note "no LLM daemon process (test_llm) running"
+  else
+    note "LLM processes: $daemons test_llm, $clients test_llm_client; the guide shows one of" \
+      "each -- an earlier start may still hold a session (tools/ambarella/check_llm_board.sh)"
   fi
   if answers "$SERVER/graphs"; then ok "API server answers at $SERVER"; else note "nothing answers at $SERVER"; fi
   if answers "http://127.0.0.1:8765/meetings"; then
