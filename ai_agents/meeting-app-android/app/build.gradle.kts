@@ -13,8 +13,11 @@ android {
         // Android 10: the first MediaRecorder that writes Ogg-Opus.
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Raised with every APK handed out, so the settings screen tells
+        // whether a phone has the latest: 0.2.0 writes its own recording,
+        // deletes meetings, and shows the board's queue.
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {

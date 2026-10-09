@@ -514,6 +514,13 @@ private fun SetupScreen(settings: Settings, onDone: () -> Unit) {
             settings.script = script
             onDone()
         }, modifier = Modifier.fillMaxWidth()) { Text("儲存") }
+        Spacer(Modifier.height(24.dp))
+        val context = LocalContext.current
+        val version = remember {
+            runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+                .getOrNull() ?: "?"
+        }
+        Text("版本 $version", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
     }
 }
 

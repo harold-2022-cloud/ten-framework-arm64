@@ -1,18 +1,22 @@
 # 會議記錄 Android App — 開發說明
 
-這份文件給要接手開發的人。怎麼安裝、怎麼操作請看 [README.md](README.md)；
+這份文件給要接手開發的人。板子和手機怎麼設定、App 怎麼操作，請看
+[README.zh-TW.md](README.zh-TW.md)；
 這份講程式怎麼組織、改程式時要守哪些規則，以及怎麼測試。
 English: [DEVELOPMENT.md](DEVELOPMENT.md).
 
 手機只負責錄音、上傳和顯示，所有處理都在會議室的板子上。App 和板子之間只走
 區網的 HTTP（明碼）。
 
-## 目前狀態（2026-10-08）
+## 目前狀態（2026-10-09）
 
-雛型可用：已經用 Android 手機對會議室的板子實測過。
+雛型可用：**0.2.0** 版已經用 Android 手機對會議室的板子實測過。
 
-- App 依賴的板子端行為都在板子上用腳本驗證過：
-  - 所有會議共用一個 worker、`10003`、回收後重開：`tools/ambarella/check_meeting_worker.py`。
+- 板子開機就能服務：原廠大模型和 API server 都裝成了 systemd 服務
+  （`tools/ambarella/install_board_services.sh`）。
+- App 依賴的板子端行為，都在 API server 以服務身分執行的情況下，用腳本在板子上驗證過：
+  - 所有會議共用一個 worker、`10003`、回收後重開，以及排隊（第一場處理時第二場等候，
+    第一場做完自動接手）：`tools/ambarella/check_meeting_worker.py`，2026-10-09 全部通過。
   - 記錄轉成繁體：`tools/ambarella/verify_meeting_board.sh --script traditional`。
 - 一開始用 `MediaRecorder` 錄的檔案，被板子以 415 拒收；改由 App 自己寫錄音檔
   （第 5 節規則 12）之後，手機錄的會議才能完整走到「完成」。
@@ -43,6 +47,8 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64   # 換成你的 JDK 17
 - 在 WSL 裡編譯的話，Windows 可以從
   `\\wsl.localhost\<發行版>\...\app\build\outputs\apk\debug\` 拿到 APK。
 - **CI 不會編譯也不會測這個 App。** commit 前請自己在本機跑過單元測試。
+- **每發一次 APK，就把 `app/build.gradle.kts` 的 `versionCode`、`versionName` 調高。**
+  「設定」頁最下面會顯示版本，大家就是靠它判斷手機上是不是最新版。
 
 ## 2. 跟板子怎麼互動
 
@@ -103,6 +109,14 @@ sequenceDiagram
 
 不要改回「每場會議一個 channel」：第二個 worker 拿不到 port，而 App 停掉「自己的」
 worker 時，可能剛好殺掉正在處理別人會議的那個。
+
+共用一個 channel，也讓 Go server 需要一個修正。板子回收閒置的 worker 時，會先送
+SIGTERM、最多等 2 秒；它的 port 可能在程序還沒結束前就關了，這時 App 可能已經在
+`meeting-room` 上起了新的 worker。server 原本是依 channel 名稱把舊 worker 從清單移除，
+移掉的其實是新 worker 的那一筆，新 worker 就一直跑著、佔著 8765、不會被回收。現在只有
+清單上那筆確實是正在停止的 worker 才會移除（`ai_agents/server/internal/worker_common.go`
+的 `forget`，測試在 `worker_linux_test.go`）。板子上的 server 必須是這之後編的
+（`install_board_services.sh` 會重新編譯）。
 
 ### 2.2 上傳欄位
 
@@ -312,7 +326,8 @@ libsndfile 把一段合成的三秒訊號編成 16 kHz 單聲道，取出的 151
 
 1. 板子照 `docs/development/board_quickstart.zh-TW.md` 啟動，Go server 在 8081。
    給 App 用時，讓板子開機就常駐：`tools/ambarella/install_board_services.sh` 跑一次，
-   就會把大模型 daemon 和 Go server 裝成 systemd 服務。
+   就會把大模型 daemon 和 Go server 裝成 systemd 服務；之後每次 pull 再跑一次，
+   有改的部分會重新編譯並重啟。
    App 依賴的板子端行為（共用一個 worker、10003、回收後重開）可以先不用手機，在板子上跑
    `python3.12 tools/ambarella/check_meeting_worker.py` 驗證。
    用手機測時，可以讓板子一路盯著：在板子上先跑

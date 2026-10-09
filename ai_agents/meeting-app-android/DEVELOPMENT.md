@@ -1,21 +1,26 @@
 # Meeting minutes Android app — development guide
 
-For whoever takes the app on. How to install and use it is in
-[README.md](README.md); this guide covers how the code is organised, the
+For whoever takes the app on. How to set up the board and the phone and how
+to use the app is in [README.md](README.md); this guide covers how the code is organised, the
 rules to keep when changing it, and how to test it.
 Traditional Chinese: [DEVELOPMENT.zh-TW.md](DEVELOPMENT.zh-TW.md).
 
 The phone only records, uploads and displays; all processing happens on the
 meeting-room board. The app and the board talk plain HTTP over the LAN.
 
-## Status (2026-10-08)
+## Status (2026-10-09)
 
-The prototype works: it has been tested on an Android phone against the
-meeting-room board.
+The prototype works: version **0.2.0** has been tested on an Android phone
+against the meeting-room board.
 
-- What the app relies on from the board was checked on the board by script:
+- The board serves from power-on: the vendor's LLM and the API server run as
+  systemd services (`tools/ambarella/install_board_services.sh`).
+- What the app relies on from the board was checked on the board by script,
+  with the API server running as that service:
   - one worker shared by every meeting, `10003`, a reaped worker started
-    again: `tools/ambarella/check_meeting_worker.py`;
+    again, and the queue -- a second meeting waits while the first is
+    processed and is handed on by itself when it ends:
+    `tools/ambarella/check_meeting_worker.py`, all passed on 2026-10-09;
   - the record converted to Traditional:
     `tools/ambarella/verify_meeting_board.sh --script traditional`.
 - The first recordings, made with `MediaRecorder`, were turned away by the
@@ -51,6 +56,9 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64   # your JDK 17
   `\\wsl.localhost\<distro>\...\app\build\outputs\apk\debug\`.
 - **No CI builds or tests this app.** Run the unit tests locally before
   committing.
+- **Raise `versionCode` and `versionName`** in `app/build.gradle.kts` with every
+  APK handed out. The settings screen shows the version, which is how anyone
+  tells whether a phone has the latest build.
 
 ## 2. How the app talks to the board
 
@@ -120,6 +128,16 @@ Every meeting uses one channel: `meeting-room` (`Ids.CHANNEL` in
 Do not go back to a channel per meeting: a second worker cannot get the port,
 and an app stopping "its own" worker could kill the one processing someone
 else's meeting.
+
+One channel reused also needed a fix in the Go server. Reaping an idle worker
+sends it SIGTERM and waits up to 2 s; its port can close before its process is
+gone, so the app may start a new worker on `meeting-room` in between. The
+server used to take the old worker off its list by channel name -- the new
+worker's entry -- and the new worker then ran on, unreaped, holding 8765. It
+now removes an entry only if it is still the worker being stopped (`forget` in
+`ai_agents/server/internal/worker_common.go`, tested in
+`worker_linux_test.go`). The board must run a server built since
+(`install_board_services.sh` rebuilds it).
 
 ### 2.2 Upload fields
 
@@ -370,7 +388,8 @@ Conventions:
 1. Start the board as `docs/development/board_quickstart.md` says; the Go
    server is on 8081. For the app, have the board serve from power-on:
    `tools/ambarella/install_board_services.sh`, once, installs the LLM daemon
-   and the Go server as systemd services. What the app relies on from the board (one shared
+   and the Go server as systemd services; run it again after every pull, and it
+   rebuilds and restarts what changed. What the app relies on from the board (one shared
    worker, 10003, restart after reaping) can be checked without a phone:
    `python3.12 tools/ambarella/check_meeting_worker.py` on the board.
    With a phone, let the board watch: run
