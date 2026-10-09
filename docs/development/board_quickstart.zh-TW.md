@@ -154,6 +154,9 @@ daemon，參數相同，log 一樣寫到 `/tmp/log.txt`）和 `ten-api`（`task 
 playground 的話，在 `ai_agents/agents/examples/voice-assistant` 跑 `task run-frontend`。
 `--status` 看各自有沒有起來，`--uninstall` 移除兩個服務。
 
+手機上的會議記錄 App 怎麼用，從設定到分享記錄：
+[`ai_agents/meeting-app-android/README.zh-TW.md`](../../ai_agents/meeting-app-android/README.zh-TW.md)。
+
 ## 選哪個 graph
 
 | Graph | ASR | TTS | LLM | 需要 |

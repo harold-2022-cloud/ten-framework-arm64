@@ -171,6 +171,9 @@ by hand is stopped so the service can take over; for the playground, run
 `task run-frontend` in `ai_agents/agents/examples/voice-assistant`.
 `--status` says what is up, `--uninstall` removes both.
 
+How to use the meeting-minutes app on a phone, from setting it up to sharing
+the record: [`ai_agents/meeting-app-android/README.md`](../../ai_agents/meeting-app-android/README.md).
+
 ## Which graph
 
 | Graph | ASR | TTS | LLM | Needs |
