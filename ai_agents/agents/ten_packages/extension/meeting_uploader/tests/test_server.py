@@ -15,6 +15,7 @@ import pytest
 import soundfile as sf
 from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
+from yarl import URL
 
 from meeting_uploader import store
 from meeting_uploader.config import MeetingUploaderConfig
@@ -395,7 +396,9 @@ async def test_status_reports_progress_and_unknown_ids_are_404(tmp_path):
 
         status = await (await c.get("/meeting/m1")).json()
         unknown = await c.get("/meeting/nobody")
-        sneaky = await c.get("/meeting/..")
+        # Encoded, so it reaches the handler as the id "..". Written plainly,
+        # the client resolves the dot segment and asks for "/" instead.
+        sneaky = await c.get(URL("/meeting/%2E%2E", encoded=True))
 
     assert status["state"] == "transcribing"
     assert status["progress"] == {"topics_done": 1, "topics_total": 5}
