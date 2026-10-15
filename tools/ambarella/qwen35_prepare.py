@@ -36,8 +36,10 @@ model     ranch/ in the package is what vllm serve loads:
             transformers 4.52 does not know qwen3_5_text -- and the vision
             image size 384;
           - the preprocessor's size 384x384;
-          - the chat template made to answer enable_thinking: false with an
-            empty <think></think>, which is what turns thinking off.
+          - the chat template made to keep thinking off -- an empty
+            <think></think> -- unless a request sets enable_thinking: true;
+            a package with the earlier edit, off only when asked, is
+            brought up to it.
           Every file it replaces is kept first in ranch/.before-qwen35/, once.
           A symlink is replaced, never written through: ranch/config.json may
           well be a link to info/config.json.
@@ -96,10 +98,22 @@ GEN_OLD = (
     "    {{- '<|im_start|>assistant\\n' }}\n"
     "{%- endif %}"
 )
-GEN_NEW = (
+# The guide's edit, applied on 2026-10-14: thinking off only when a request
+# says enable_thinking: false.
+GEN_ASKED_OFF = (
     "{%- if add_generation_prompt %}\n"
     "    {{- '<|im_start|>assistant\\n' }}\n"
     "    {%- if enable_thinking is defined and enable_thinking is false %}\n"
+    "        {{- '<think>\\n\\n</think>\\n\\n' }}\n"
+    "    {%- endif %}\n"
+    "{%- endif %}"
+)
+# Thinking off unless a request asks for it: openai_llm2_python cannot send
+# chat_template_kwargs, so a template that waits to be told never is.
+GEN_NEW = (
+    "{%- if add_generation_prompt %}\n"
+    "    {{- '<|im_start|>assistant\\n' }}\n"
+    "    {%- if not (enable_thinking is defined and enable_thinking) %}\n"
     "        {{- '<think>\\n\\n</think>\\n\\n' }}\n"
     "    {%- endif %}\n"
     "{%- endif %}"
@@ -362,20 +376,25 @@ def model(package, check, vit_name):
     if os.path.isfile(tok_path):
         tok = load_json(tok_path)
         template = tok.get("chat_template") or ""
-        if "enable_thinking" in template:
-            ok("the chat template answers enable_thinking")
-        elif GEN_OLD not in template:
-            raise Stop(
-                "tokenizer_config.json's chat template has no generation "
-                "prompt in the form the guide changes; thinking cannot be "
-                "turned off"
-            )
-        elif check:
-            changes.append("make the chat template answer enable_thinking")
+        if GEN_NEW in template:
+            ok("the chat template keeps thinking off unless a request asks")
         else:
-            tok["chat_template"] = template.replace(GEN_OLD, GEN_NEW, 1)
-            write_json(tok_path, tok)
-            ok("the chat template now answers enable_thinking: false")
+            found = next(
+                (old for old in (GEN_ASKED_OFF, GEN_OLD) if old in template),
+                None,
+            )
+            if found is None:
+                raise Stop(
+                    "tokenizer_config.json's chat template has no generation "
+                    "prompt in a form this script knows; thinking cannot be "
+                    "turned off"
+                )
+            if check:
+                changes.append("keep thinking off unless a request asks")
+            else:
+                tok["chat_template"] = template.replace(found, GEN_NEW, 1)
+                write_json(tok_path, tok)
+                ok("the chat template now keeps thinking off unless a request asks")
 
     for c in changes:
         note(f"to do: {c}")
