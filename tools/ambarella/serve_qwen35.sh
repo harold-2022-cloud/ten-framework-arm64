@@ -244,7 +244,7 @@ if "<think>" in content or reasoning.strip():
 if not content.strip():
     print("  FAIL  the answer is empty")
     bad = 1
-if "�" in content:
+if "\ufffd" in content:
     print(f"  FAIL  {content.count(chr(0xfffd))} U+FFFD in the answer")
     bad = 1
 if not bad:
