@@ -131,7 +131,8 @@ spoken word.
 
 | Port | Who | Note |
 | --- | --- | --- |
-| 8080 | the vendor's LLM daemon | `run_llm_demo.sh` has no port option, so this one cannot move |
+| 8000 | Qwen3.5-4B on vLLM, the LLM the board's graphs ask | `QWEN_PORT` for `serve_qwen35.sh`; the graphs read `QWEN_LLM_BASE_URL` |
+| 8080 | the vendor's DeepSeek 7B daemon, when switched to it | `run_llm_demo.sh` has no port option, so this one cannot move |
 | 8081 | this repo's Go API server | `SERVER_PORT`, moved off 8080 by the install script |
 | 3000 | the playground | |
 | 49483 | TMAN Designer | |
@@ -162,14 +163,42 @@ Once, as the user who runs `task run` (sudo asks for your password):
 tools/ambarella/install_board_services.sh
 ```
 
-It installs two systemd services, enables them at boot and starts them:
-`ambarella-llm` (the vendor's daemon above, same options, still logging to
-`/tmp/log.txt`) and `ten-api` (`task run-api-server`, restarted if it dies,
-logging to `/tmp/task_run.log`). Nothing else is needed after a reboot: the
-server starts the meeting worker when a phone asks. A server already started
-by hand is stopped so the service can take over; for the playground, run
+It installs three systemd services. `qwen35-vllm` (Qwen3.5-4B on vLLM, port
+8000, the LLM the board's graphs ask) and `ten-api` (`task run-api-server`,
+logging to `/tmp/task_run.log`) are enabled at boot and started, both
+restarted if they die; `ten-api` starts once Qwen3.5-4B answers, about a
+minute after power-on. `ambarella-llm` (the vendor's DeepSeek 7B daemon,
+same options as above, still logging to `/tmp/log.txt`) is installed but
+not started at boot. Nothing else is needed after a reboot: the server
+starts the meeting worker when a phone asks. A server already started by
+hand is stopped so the service can take over; for the playground, run
 `task run-frontend` in `ai_agents/agents/examples/voice-assistant`.
-`--status` says what is up, `--uninstall` removes both.
+`--status` says what is up, and since boot when Qwen3.5-4B answered and
+when `ten-api` started; `--uninstall` removes all three. Run it again after
+every `git pull`.
+
+### The board's LLM
+
+Qwen3.5-4B (cooper-vllm, installed by `tools/ambarella/install_qwen35_vllm.sh`)
+replaced the DeepSeek 7B in October 2026: on the acceptance meeting it
+invented no owners and made two small errors where the 7B made eight. The
+two cannot run at once; `tools/ambarella/serve_qwen35.sh` switches:
+
+| Command | What it does |
+| --- | --- |
+| `serve_qwen35.sh status` | which one serves; whether vLLM runs on the script's arguments |
+| `serve_qwen35.sh test`, `test-tools` | a question as the graphs ask it; one with the weather tools |
+| `serve_qwen35.sh restart` | Qwen3.5-4B started again, after its template or arguments changed |
+| `serve_qwen35.sh stop` | the 7B serves, until `start` or the next boot |
+| `serve_qwen35.sh start` | Qwen3.5-4B serves again |
+
+To go back to the 7B for good, revert the commit that moved the graphs
+(`git log --oneline --grep "the board's graphs on Qwen3.5-4B"`), then run
+`sudo systemctl disable qwen35-vllm && sudo systemctl enable ambarella-llm`
+and `tools/ambarella/serve_qwen35.sh stop`.
+
+The weather graphs call their tool only when `WEATHERAPI_API_KEY` is set in
+`ai_agents/.env`; without it they answer without the tool.
 
 How to use the meeting-minutes app on a phone, from setting it up to sharing
 the record: [`ai_agents/meeting-app-android/README.md`](../../ai_agents/meeting-app-android/README.md).
@@ -178,9 +207,9 @@ the record: [`ai_agents/meeting-app-android/README.md`](../../ai_agents/meeting-
 
 | Graph | ASR | TTS | LLM | Needs |
 | --- | --- | --- | --- | --- |
-| **`voice_assistant_sherpa_full`** | sherpa-onnx, CPU | sherpa-onnx, CPU | the board | **nothing but `AGORA_APP_ID`** |
-| `voice_assistant_sherpa_tts` | soniox, cloud | sherpa-onnx, CPU | the board | `SONIOX_ASR_API_KEY` |
-| `voice_assistant_soniox_ambarella_llm` | soniox, cloud | elevenlabs, cloud | the board | `SONIOX_ASR_API_KEY`, `ELEVENLABS_TTS_KEY` |
+| **`voice_assistant_sherpa_full`** | sherpa-onnx, CPU | sherpa-onnx, CPU | the board, Qwen3.5-4B | **nothing but `AGORA_APP_ID`** |
+| `voice_assistant_sherpa_tts` | soniox, cloud | sherpa-onnx, CPU | the board, Qwen3.5-4B | `SONIOX_ASR_API_KEY` |
+| `voice_assistant_soniox_ambarella_llm` | soniox, cloud | elevenlabs, cloud | the board, Qwen3.5-4B | `SONIOX_ASR_API_KEY`, `ELEVENLABS_TTS_KEY` |
 | the other ten | cloud | cloud | OpenAI or Anthropic | their own keys; none of them uses the board |
 
 `voice_assistant_sherpa_full` is the one this quickstart is about. The other two
@@ -303,6 +332,10 @@ It also measured two things that hold for any graph on this board: **the
 LLM is deterministic** (same input, same output down to the byte, so
 repeating a prompt measures nothing — vary the input instead), and **one LLM
 turn really costs 23–135 seconds**, depending on how much it writes.
+
+Both were measured on the DeepSeek 7B, before the switch. On Qwen3.5-4B a
+38-minute meeting's five topics took about 20 seconds each and its
+conclusion about 80.
 
 ## Local speech models: measure before you rely on it
 

@@ -17,11 +17,11 @@
 tools/ambarella/install_board_services.sh
 ```
 
-它會把原廠大模型和 API server 裝成開機自動啟動的服務，之後板子一開機就能接手機的請求，
-不用再下任何指令。
+它會把板子的大模型（Qwen3.5-4B）和 API server 裝成開機自動啟動的服務，之後板子一開機
+就能接手機的請求，不用再下任何指令；開機後大約一分鐘、等 Qwen3.5-4B 載入完才會回應。
 
-- 確認狀態：`tools/ambarella/install_board_services.sh --status`。兩個服務都應該是 `active`，
-  大模型的 `test_llm`、`test_llm_client` 各一個，API server 有回應。
+- 確認狀態：`tools/ambarella/install_board_services.sh --status`。`qwen35-vllm` 和 `ten-api`
+  應該是 `active`（舊的 7B `ambarella-llm` 是 `inactive`），Qwen3.5-4B 和 API server 都有回應。
 - **每次 `git pull` 之後都再跑一次** `install_board_services.sh`：程式有改就會重新編譯並重啟服務
   （有會議在處理時不會重啟，會請你晚點再跑）。
 

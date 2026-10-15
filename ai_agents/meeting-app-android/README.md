@@ -22,11 +22,13 @@ for your password):
 tools/ambarella/install_board_services.sh
 ```
 
-It makes the vendor's LLM and the API server services that start at power-on,
-so the board takes a phone's request with nothing typed afterwards.
+It makes the board's LLM (Qwen3.5-4B) and the API server services that start
+at power-on, so the board takes a phone's request with nothing typed
+afterwards -- about a minute after power-on, once Qwen3.5-4B has loaded.
 
-- Check: `tools/ambarella/install_board_services.sh --status`. Both services
-  `active`, one `test_llm` and one `test_llm_client`, the API server answering.
+- Check: `tools/ambarella/install_board_services.sh --status`. `qwen35-vllm`
+  and `ten-api` `active` (`ambarella-llm`, the old 7B, `inactive`), Qwen3.5-4B
+  and the API server answering.
 - **Run `install_board_services.sh` again after every `git pull`**: it rebuilds
   and restarts what changed (not while a meeting is being processed; it then
   asks to be run again later).

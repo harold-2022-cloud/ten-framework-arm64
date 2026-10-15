@@ -117,7 +117,8 @@ SHERPA_ONNX_TTS_VOICE_DIR=/home/<你的使用者>/piper_tts/vits/vits-piper-zh_C
 
 | Port | 誰在用 | 說明 |
 | --- | --- | --- |
-| 8080 | 原廠的 LLM daemon | `run_llm_demo.sh` 沒有 port 選項，所以這個動不了 |
+| 8000 | vLLM 上的 Qwen3.5-4B，板子上的 graph 都問它 | `serve_qwen35.sh` 用 `QWEN_PORT`；graph 讀 `QWEN_LLM_BASE_URL` |
+| 8080 | 原廠的 DeepSeek 7B daemon（切換過去時） | `run_llm_demo.sh` 沒有 port 選項，所以這個動不了 |
 | 8081 | 這個 repo 的 Go API server | `SERVER_PORT`，由安裝腳本從 8080 移開 |
 | 3000 | playground | |
 | 49483 | TMAN Designer | |
@@ -147,12 +148,37 @@ task run 2>&1 | tee /tmp/task_run.log
 tools/ambarella/install_board_services.sh
 ```
 
-它會裝兩個 systemd 服務，設成開機啟動並立刻啟動：`ambarella-llm`（上面那個原廠
-daemon，參數相同，log 一樣寫到 `/tmp/log.txt`）和 `ten-api`（`task run-api-server`，
-掛掉會自動重起，log 寫到 `/tmp/task_run.log`）。之後重開機什麼都不用做：手機一發起
-請求，server 就會起會議 worker。原本手動起的 server 會被停掉、改由服務接手；要用
-playground 的話，在 `ai_agents/agents/examples/voice-assistant` 跑 `task run-frontend`。
-`--status` 看各自有沒有起來，`--uninstall` 移除兩個服務。
+它會裝三個 systemd 服務。`qwen35-vllm`（vLLM 上的 Qwen3.5-4B，port 8000，板子上的
+graph 都問它）和 `ten-api`（`task run-api-server`，log 寫到 `/tmp/task_run.log`）設成
+開機啟動並立刻啟動，掛掉都會自動重起；`ten-api` 等 Qwen3.5-4B 能回應才啟動，大約是
+開機後一分鐘。`ambarella-llm`（原廠的 DeepSeek 7B daemon，參數同上，log 一樣寫到
+`/tmp/log.txt`）只安裝、開機不啟動。之後重開機什麼都不用做：手機一發起請求，server
+就會起會議 worker。原本手動起的 server 會被停掉、改由服務接手；要用 playground 的話，
+在 `ai_agents/agents/examples/voice-assistant` 跑 `task run-frontend`。`--status` 看
+各自有沒有起來，以及開機後 Qwen3.5-4B 何時能回應、`ten-api` 何時啟動；`--uninstall`
+移除三個服務。每次 `git pull` 之後都再跑一次。
+
+### 板子的 LLM
+
+2026 年 10 月起，板子的 LLM 從 DeepSeek 7B 換成 Qwen3.5-4B（cooper-vllm，用
+`tools/ambarella/install_qwen35_vllm.sh` 安裝）：在驗收會議上，它沒有捏造分工，只有
+2 處小錯，7B 則有 8 處。兩者不能同時跑，用 `tools/ambarella/serve_qwen35.sh` 切換：
+
+| 指令 | 做什麼 |
+| --- | --- |
+| `serve_qwen35.sh status` | 現在是哪一個；vLLM 是否用腳本現在的參數在跑 |
+| `serve_qwen35.sh test`、`test-tools` | 照 graph 的方式問一題；帶天氣工具問一題 |
+| `serve_qwen35.sh restart` | 模板或參數改了之後，重新啟動 Qwen3.5-4B |
+| `serve_qwen35.sh stop` | 改由 7B 回應，直到 `start` 或下次開機 |
+| `serve_qwen35.sh start` | 改回 Qwen3.5-4B |
+
+要長期退回 7B：revert 把 graph 換過去的那個 commit
+（`git log --oneline --grep "the board's graphs on Qwen3.5-4B"`），再執行
+`sudo systemctl disable qwen35-vllm && sudo systemctl enable ambarella-llm` 和
+`tools/ambarella/serve_qwen35.sh stop`。
+
+天氣 graph 只有在 `ai_agents/.env` 設了 `WEATHERAPI_API_KEY` 時才會呼叫工具；沒設的話
+就不用工具直接回答。
 
 手機上的會議記錄 App 怎麼用，從設定到分享記錄：
 [`ai_agents/meeting-app-android/README.zh-TW.md`](../../ai_agents/meeting-app-android/README.zh-TW.md)。
@@ -161,9 +187,9 @@ playground 的話，在 `ai_agents/agents/examples/voice-assistant` 跑 `task ru
 
 | Graph | ASR | TTS | LLM | 需要 |
 | --- | --- | --- | --- | --- |
-| **`voice_assistant_sherpa_full`** | sherpa-onnx，CPU | sherpa-onnx，CPU | 板子 | **只要 `AGORA_APP_ID`** |
-| `voice_assistant_sherpa_tts` | soniox，雲端 | sherpa-onnx，CPU | 板子 | `SONIOX_ASR_API_KEY` |
-| `voice_assistant_soniox_ambarella_llm` | soniox，雲端 | elevenlabs，雲端 | 板子 | `SONIOX_ASR_API_KEY`、`ELEVENLABS_TTS_KEY` |
+| **`voice_assistant_sherpa_full`** | sherpa-onnx，CPU | sherpa-onnx，CPU | 板子，Qwen3.5-4B | **只要 `AGORA_APP_ID`** |
+| `voice_assistant_sherpa_tts` | soniox，雲端 | sherpa-onnx，CPU | 板子，Qwen3.5-4B | `SONIOX_ASR_API_KEY` |
+| `voice_assistant_soniox_ambarella_llm` | soniox，雲端 | elevenlabs，雲端 | 板子，Qwen3.5-4B | `SONIOX_ASR_API_KEY`、`ELEVENLABS_TTS_KEY` |
 | 其餘十個 | 雲端 | 雲端 | OpenAI 或 Anthropic | 各自的金鑰；都不使用板子 |
 
 這份文件講的是 `voice_assistant_sherpa_full`。另外兩個的存在是為了在同一塊板子上
@@ -267,6 +293,9 @@ python3 tools/ambarella/probe_structured_minutes.py --prompts quoted
 順帶量到兩個對任何 graph 都適用的事實：**板子的 LLM 是決定性的**（同輸入同輸出
 到 byte，所以「跑十次看穩不穩」驗不出東西，要驗只能換輸入），以及**一次 LLM
 turn 實際要 23–135 秒**，視輸出長度而定。
+
+這兩件事都是換成 Qwen3.5-4B 之前、在 DeepSeek 7B 上量的。Qwen3.5-4B 處理 38 分鐘
+的會議時，5 段話題每段約 20 秒，結論約 80 秒。
 
 ## 本地語音模型：動手依賴這些數字之前，先量一遍
 
