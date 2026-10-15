@@ -33,7 +33,12 @@ set -uo pipefail
 
 WORK="${WORK:-$HOME/workspace}"
 VENV="${VENV:-$WORK/cooper-vllm/venv_vllm}"
-QWEN_PKG="${QWEN_PKG:-$HOME/demo_resources/llm_demo/qwen3.5_4B}"
+# The package: as set; else where install_qwen35_vllm.sh unpacked it; else
+# the guide's place.
+if [[ -z "${QWEN_PKG:-}" ]]; then
+  QWEN_PKG=$(cat "$WORK/.qwen35-install/qwen_pkg" 2>/dev/null)
+  [[ -n "$QWEN_PKG" && -d "$QWEN_PKG/ranch" ]] || QWEN_PKG="$HOME/demo_resources/llm_demo/qwen3.5_4B"
+fi
 MODEL="$QWEN_PKG/ranch"
 VIT_NAME="${VIT_NAME:-qwen3.5_4b_vl_vit_384x384_n1655_a16w8_cavalry.bin}"
 SHEPHERD_DIR="${SHEPHERD_DIR:-$WORK/shepherd-1.6.9}"

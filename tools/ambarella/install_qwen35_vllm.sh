@@ -10,6 +10,8 @@
 #   tools/ambarella/install_qwen35_vllm.sh            check, install, test
 #   tools/ambarella/install_qwen35_vllm.sh --check    check only; nothing changes
 #   tools/ambarella/install_qwen35_vllm.sh --no-test  install, without the test
+#   tools/ambarella/install_qwen35_vllm.sh --model-tar ~/qwen3.5-4b_n1655-video.tar.gz
+#                                                     the model package as it came
 #
 # Run it on the board as the desktop user (lychee), not with sudo. It asks
 # sudo for dnf, and in the test for stopping and starting ambarella-llm.
@@ -19,9 +21,9 @@
 # ~/workspace/qwen35_install.log.
 #
 # What it cannot fetch, it needs on the board first. From Ambarella:
-#   ~/demo_resources/llm_demo/qwen3.5_4B   the model package
-#                                          (qwen3.5-4b_n1655-video: ranch/ and
-#                                          the ViT binary); QWEN_PKG=... if elsewhere
+#   the model package (qwen3.5-4b_n1655-video: ranch/ and the ViT binary),
+#   either as the archive it came in (--model-tar), or unpacked at
+#   ~/demo_resources/llm_demo/qwen3.5_4B (QWEN_PKG=... if elsewhere)
 # From the vendor's guide folder on the dev machine, into ~/workspace:
 #   support-qwen3.5-VL.diff.zip            the Qwen3.5 patch for cooper-vllm
 #   libamba-shepherd-n1_655.so.1.6.9       only if the board's Shepherd is
@@ -31,6 +33,10 @@
 # and the internet: GitHub, PyPI, download.pytorch.org, hf-mirror.com.
 #
 # Steps, each skipped when done:
+#   0 model        with --model-tar: unpacked into ~/demo_resources/models,
+#                  ranch/ looked for in it, and ~/demo_resources/llm_demo/
+#                  qwen3.5_4B linked to the package, as the guide lays it out.
+#                  Its place is remembered, so --model-tar is not needed again.
 #   1 packages     python3.12 and its headers, gcc-c++, cmake, git, unzip,
 #                  curl, cjson (dnf)
 #   2 sources      cooper-vllm vLLM_0.9.2_cooper_2.5.4 and transformers_amba_ext
@@ -58,19 +64,27 @@ set -uo pipefail
 
 MODE=install
 TEST=1
-for arg in "$@"; do
-  case "$arg" in
+QWEN_TAR="${QWEN_TAR:-}"
+while (($#)); do
+  case "$1" in
     --check) MODE=check ;;
     --no-test) TEST=0 ;;
-    -h|--help) sed -n '6,57p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+    --model-tar)
+      [[ -n "${2:-}" ]] || { echo "--model-tar needs the archive's path" >&2; exit 2; }
+      QWEN_TAR="$2"
+      shift
+      ;;
+    -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WORK="${WORK:-$HOME/workspace}"
 VENDOR_DIR="${VENDOR_DIR:-$WORK}"
-QWEN_PKG="${QWEN_PKG:-$HOME/demo_resources/llm_demo/qwen3.5_4B}"
+MODELS_DIR="$HOME/demo_resources/models"
+QWEN_LINK="$HOME/demo_resources/llm_demo/qwen3.5_4B"
 SHEPHERD_DIR="${SHEPHERD_DIR:-$WORK/shepherd-1.6.9}"
 PY="${PY:-python3.12}"
 VLLM_DIR="$WORK/cooper-vllm"
@@ -83,6 +97,12 @@ EXT_REF="cooper_2.5.4"
 SHEPHERD="libamba-shepherd-n1_655.so"
 SHEPHERD_NEED="1.6.9"
 TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+# The package: as set; else where an earlier run unpacked it; else the
+# guide's place.
+if [[ -z "${QWEN_PKG:-}" ]]; then
+  QWEN_PKG=$(cat "$STATE/qwen_pkg" 2>/dev/null)
+  [[ -n "$QWEN_PKG" && -f "$QWEN_PKG/ranch/info/config.json" ]] || QWEN_PKG="$QWEN_LINK"
+fi
 export WORK QWEN_PKG SHEPHERD_DIR
 
 problems=0
@@ -119,10 +139,36 @@ at_least() { # at_least 1.6.4 1.6.9
 }
 
 missing_pkgs=()
+tar_mb=0
+tar_top=""
 system_shepherd=""
 need_private_shepherd=0
 vendor_shepherd=""
 patch_file=""
+
+# The archive, from its first entries only: whether everything sits in one
+# folder (unpacked into MODELS_DIR then) or not (into a folder of its own).
+# Reading the head is quick; tar stops when head has its lines.
+tar_preflight() {
+  if [[ ! -r "$QWEN_TAR" ]]; then
+    problem "cannot read the model archive $QWEN_TAR"
+    return
+  fi
+  tar_mb=$(($(stat -c %s "$QWEN_TAR") / 1048576))
+  local head
+  head=$(tar tf "$QWEN_TAR" 2>/dev/null | head -50 | sed 's|^\./||' | grep -v '^$')
+  if [[ -z "$head" ]]; then
+    problem "$QWEN_TAR is not an archive tar can read"
+    return
+  fi
+  local first
+  first=$(echo "$head" | head -1 | sed 's|/.*||')
+  # One folder holds all of it when every entry is that folder or in it.
+  if echo "$head" | awk -v f="$first" '$0 != f && index($0, f "/") != 1 {other = 1} END {exit other}'; then
+    tar_top="$first"
+  fi
+  ok "model archive $QWEN_TAR ($tar_mb MB): unpacks into $MODELS_DIR/${tar_top:-$(basename "${QWEN_TAR%%.tar*}")}"
+}
 
 preflight() {
   echo "== preflight"
@@ -168,14 +214,27 @@ preflight() {
     fi
   fi
 
-  local free
+  # The archive is unpacked only when the package is not there yet.
+  if [[ -f "$QWEN_PKG/ranch/info/config.json" ]]; then
+    QWEN_TAR=""
+  elif [[ -n "$QWEN_TAR" ]]; then
+    tar_preflight
+  fi
+
+  local free need=6000 unpack_mb=0
+  ((unpack_mb = tar_mb * 12 / 10))
+  done_ vllm && need=0
   free=$(df -Pm "$WORK" | awk 'NR==2 {print $4}')
-  if done_ vllm; then
-    ok "$free MB free under $WORK"
-  elif ((free < 6000)); then
-    problem "$free MB free under $WORK; the install needs about 6 GB"
+  # Unpacked on the same disk, the package counts against the same room.
+  if [[ $(df -P "$WORK" | awk 'NR==2 {print $6}') == $(df -P "$HOME" | awk 'NR==2 {print $6}') ]]; then
+    ((need += unpack_mb))
+  fi
+  if ((free < need)); then
+    local hint=""
+    ((unpack_mb)) && hint="the model package unpacked is about $unpack_mb MB of that"
+    problem "$free MB free under $WORK; the install needs about $need MB" "$hint"
   else
-    ok "$free MB free under $WORK"
+    ok "$free MB free under $WORK (about $need MB needed)"
   fi
 
   if [[ -f "$VENDOR_DIR/be6dbd5.diff" ]]; then
@@ -235,10 +294,12 @@ preflight() {
   if [[ -f "$QWEN_PKG/ranch/info/config.json" ]]; then
     python3 -I "$HERE/qwen35_prepare.py" model "$QWEN_PKG" --check ||
       problem "the model package at $QWEN_PKG is not as expected (above)"
+  elif [[ -n "$QWEN_TAR" ]]; then
+    note "the model package is checked once it is unpacked (step 0)"
   else
     problem "no Qwen3.5-4B package at $QWEN_PKG (ranch/info/config.json)" \
-      "put the package from Ambarella there, or run with QWEN_PKG=/path/to/it"
-    find "$HOME/demo_resources" -maxdepth 4 -iname '*qwen3*5*' 2>/dev/null | head -5 | sed 's/^/        found: /'
+      "give the archive from Ambarella with --model-tar, or run with QWEN_PKG=/path/to/it"
+    find "$HOME" -maxdepth 4 -iname '*qwen3*5*' 2>/dev/null | head -5 | sed 's/^/        found: /'
   fi
 
   if ((problems)); then
@@ -251,6 +312,38 @@ preflight() {
 
 # --------------------------------------------------------------------------
 # the steps
+
+step_model_tar() {
+  echo "== 0 model"
+  if [[ -z "$QWEN_TAR" ]]; then
+    ok "the package is at $QWEN_PKG"
+    return
+  fi
+  local dest="$MODELS_DIR" root
+  if [[ -n "$tar_top" ]]; then
+    root="$MODELS_DIR/$tar_top"
+  else
+    root="$MODELS_DIR/$(basename "${QWEN_TAR%%.tar*}")"
+    dest="$root"
+  fi
+  mkdir -p "$dest"
+  echo "  unpacking $QWEN_TAR into $dest ($tar_mb MB; a few minutes)"
+  tar xf "$QWEN_TAR" -C "$dest" --no-same-owner || fail "could not unpack $QWEN_TAR"
+  local ranch
+  ranch=$(find "$root" -maxdepth 4 -type d -name ranch -exec test -f '{}/info/config.json' ';' -print 2>/dev/null | head -1)
+  [[ -n "$ranch" ]] || fail "$QWEN_TAR holds no ranch/info/config.json (looked in $root)"
+  QWEN_PKG=$(dirname "$ranch")
+  echo "$QWEN_PKG" > "$STATE/qwen_pkg"
+  ok "the package is $QWEN_PKG"
+  python3 -I "$HERE/qwen35_prepare.py" model "$QWEN_PKG" --check || fail "the unpacked package is not as expected (above)"
+  mkdir -p "$(dirname "$QWEN_LINK")"
+  if [[ -L "$QWEN_LINK" || ! -e "$QWEN_LINK" ]]; then
+    ln -sfn "$QWEN_PKG" "$QWEN_LINK"
+    ok "$QWEN_LINK -> $QWEN_PKG"
+  else
+    note "$QWEN_LINK exists and is not a link; left as it is (serve_qwen35.sh reads the place from $STATE/qwen_pkg)"
+  fi
+}
 
 step_packages() {
   echo "== 1 packages"
@@ -423,6 +516,7 @@ if [[ $MODE == check ]]; then
   echo "  ready to install: run it again without --check"
   exit 0
 fi
+step_model_tar
 step_packages
 step_sources
 step_venv
