@@ -30,8 +30,8 @@ run      asks what meeting_control_python asks, the way it asks it (flow.py,
          ambarella.py), stripped. Every prompt and answer is saved, and
          DIR/<label>/run.json after each answer: a round that stopped goes on
          where it was when it is run again. --prompts NAME asks a set from
-         meeting_prompt_variants.json instead of the shipped one; the
-         prompts asked are kept in run.json.
+         meeting_control_python/prompt_variants.json instead of the
+         shipped one; the prompts asked are kept in run.json.
 compare  the two rounds side by side. Per topic: seconds, characters, the
          share copied from the transcript, people the meeting does not have
          (titles, owners, numbered placeholders), speaker numbers beyond the
@@ -73,7 +73,15 @@ ACTIONS = os.path.join(
     "meeting_control_python",
     "actions.py",
 )
-VARIANTS = os.path.join(HERE, "meeting_prompt_variants.json")
+VARIANTS = os.path.join(
+    REPO,
+    "ai_agents",
+    "agents",
+    "ten_packages",
+    "extension",
+    "meeting_control_python",
+    "prompt_variants.json",
+)
 SHIPPED = "shipped"
 THINK_END = "</think>"
 # The graph's llm node gives up on a turn after this long (llm
@@ -354,7 +362,8 @@ class OpenAI:
 
 def prompts_for(name):
     """(segment_prompt, meeting_prompt): the shipped ones from the
-    extension's config.py, or a set from meeting_prompt_variants.json."""
+    extension's config.py, or a set from
+    meeting_control_python/prompt_variants.json."""
     if name == SHIPPED:
         control = PMS.control_config()
         return control.segment_prompt, control.meeting_prompt
@@ -978,7 +987,7 @@ def main():
         "--prompts",
         default=SHIPPED,
         help=f"{SHIPPED} (meeting_control_python's), or a set in "
-        "meeting_prompt_variants.json",
+        "meeting_control_python/prompt_variants.json",
     )
     c = sub.add_parser("compare", help="two rounds side by side")
     c.add_argument("dir", help="the comparison's folder; the page goes here")

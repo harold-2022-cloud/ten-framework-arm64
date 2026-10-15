@@ -16,7 +16,8 @@
 #                                                          comparison, keeping its answers
 #   tools/ambarella/compare_meeting_llm.sh --prompts explicit-owners
 #                                                          both models asked a prompt set from
-#                                                          meeting_prompt_variants.json
+#                                                          ai_agents/agents/ten_packages/extension/
+#                                                          meeting_control_python/prompt_variants.json
 #
 # With --prompts, each model's round is also compared with its round under
 # the shipped prompts on the same record, from the newest comparison that
@@ -106,8 +107,8 @@ command -v "$PY" >/dev/null || fail "no $PY: the prompts come from meeting_contr
 ok "$PY with pydantic"
 if [[ "$PROMPTS" != shipped ]]; then
   "$PY" -c 'import json, sys; sys.exit(sys.argv[2] not in json.load(open(sys.argv[1])))' \
-    "$HERE/meeting_prompt_variants.json" "$PROMPTS" ||
-    fail "no prompt set $PROMPTS in tools/ambarella/meeting_prompt_variants.json"
+    "$HERE/../../ai_agents/agents/ten_packages/extension/meeting_control_python/prompt_variants.json" "$PROMPTS" ||
+    fail "no prompt set $PROMPTS in ai_agents/agents/ten_packages/extension/meeting_control_python/prompt_variants.json"
 fi
 ok "prompts: $PROMPTS"
 [[ -x "$HOME/workspace/cooper-vllm/venv_vllm/bin/vllm" ]] ||
