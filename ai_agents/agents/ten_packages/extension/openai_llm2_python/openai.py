@@ -212,10 +212,14 @@ class OpenAIChatGPT:
         # Build request
         req = {
             "model": self.config.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                *parsed_messages,
-            ],
+            # No prompt, no system message: an empty one is still a message
+            # the model reads, and differs from the one it was evaluated with.
+            "messages": (
+                [{"role": "system", "content": system_prompt}]
+                if system_prompt
+                else []
+            )
+            + parsed_messages,
             "tools": tools,
             "stream": request_input.streaming,
             "n": 1,  # Assuming single response for now
