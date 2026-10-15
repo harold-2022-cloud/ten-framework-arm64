@@ -145,7 +145,9 @@ mark() { touch "$STATE/$1"; }
 pip_() { "$VENV/bin/python" -m pip "$@"; }
 
 mkdir -p "$WORK" "$STATE"
-exec > >(tee -a "$LOG") 2>&1
+# tee ignores Ctrl-C and a hangup: they reach the whole foreground group, and
+# a tee gone with them would take on_exit's give-back down with SIGPIPE.
+exec > >(trap '' INT HUP; exec tee -a "$LOG") 2>&1
 TEE_PID=$!
 TEST_STARTED=0
 # On any exit: the 7B daemon given back if the test took it, then all the

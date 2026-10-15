@@ -20,7 +20,8 @@
 #                llm extension's utf8_mend.py: U+FFFD before and after.
 #                For a graph on Qwen3.5-4B, instead: the model's chat template
 #                brought up to date (vLLM restarted if it changed), Qwen3.5-4B
-#                started if it is not running, and serve_qwen35.sh test
+#                started if it is not running (a meeting worker left up is
+#                cleared first), and serve_qwen35.sh test
 #   3 llm tests  the graph's llm extension's suite -- ambarella_llm2_python,
 #                or openai_llm2_python for Qwen3.5-4B -- under the runtime's
 #                python3.12, with the tenapp's own TEN runtime (no
@@ -43,7 +44,8 @@
 # graphs idle meanwhile -- the board's LLM serves one session at a time. For a
 # graph on Qwen3.5-4B, sudo is asked at the start (switching the LLM needs it)
 # and, if this run started Qwen3.5-4B, the 7B is given back at the end unless
-# --keep-qwen.
+# --keep-qwen -- also after Ctrl-C -- and checked: its daemon runs, 8080
+# listens.
 
 set -uo pipefail
 
@@ -66,13 +68,15 @@ while [[ $# -gt 0 ]]; do
     --phone) PHONE=1; shift ;;
     --graph) GRAPH="$2"; shift 2 ;;
     --keep-qwen) KEEP_QWEN=1; shift ;;
-    -h|--help) sed -n '6,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '6,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 LOG="/tmp/verify_meeting_$(date +%Y%m%d_%H%M%S).log"
-exec > >(tee "$LOG") 2>&1
+# tee ignores Ctrl-C and a hangup: they reach the whole foreground group, and
+# a tee gone with them would take on_exit's give-back down with SIGPIPE.
+exec > >(trap '' INT HUP; exec tee "$LOG") 2>&1
 TEE_PID=$!
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -80,6 +84,8 @@ TOOLS="$REPO_ROOT/tools/ambarella"
 LLM_EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/ambarella_llm2_python"
 SYSTEM_DIR="${SYSTEM_DIR:-$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/system}"
 SERVE="${SERVE:-$TOOLS/serve_qwen35.sh}"
+CLEAR="${CLEAR:-$TOOLS/clear_meeting_worker.sh}"
+UPLOADER="${UPLOADER:-http://127.0.0.1:8765}"
 QWEN_PKG="${QWEN_PKG:-$(cat "$HOME/workspace/.qwen35-install/qwen_pkg" 2>/dev/null || echo "$HOME/demo_resources/llm_demo/qwen3.5_4B")}"
 PROBE_RUNS="$HOME/meeting_probe/summary_probe"
 CHECK_RUNS="$HOME/meeting_probe/board_check"
@@ -127,7 +133,7 @@ trap on_exit EXIT
 if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
   # Switching the LLM needs sudo minutes in; asked now, kept fresh.
   sudo -v || { echo "sudo is needed to switch the board's LLM"; exit 1; }
-  ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) &
+  ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) >/dev/null 2>&1 &
   SUDO_KEEP=$!
 fi
 
@@ -180,7 +186,18 @@ if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
       failed "qwen35_prepare.py could not update $QWEN_PKG; see above"
     fi
   fi
-  if [[ $(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer EMPTY' http://127.0.0.1:8000/v1/models) == 200 ]]; then
+  serving=0
+  [[ $(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer EMPTY' http://127.0.0.1:8000/v1/models) == 200 ]] && serving=1
+  # start and restart refuse while a meeting worker is up -- the phone app
+  # leaves one -- and step 4 would clear it anyway: cleared now, when needed.
+  if ((!serving || restart)) && [[ $(curl -s -m 2 -o /dev/null -w '%{http_code}' "$UPLOADER/meetings") != 000 ]]; then
+    if "$CLEAR"; then
+      passed "the meeting worker left up is cleared, so Qwen3.5-4B can switch"
+    else
+      failed "clear_meeting_worker.sh: a meeting worker is up and was not cleared; see above"
+    fi
+  fi
+  if ((serving)); then
     if ((restart)); then
       "$SERVE" restart || failed "Qwen3.5-4B did not come back after the restart; see above"
     fi
@@ -262,7 +279,7 @@ fi
 # --- 4. a whole meeting through the graph ------------------------------------
 if [[ $MEETING -eq 1 ]]; then
   step "4. meeting through the graph"
-  if "$TOOLS/clear_meeting_worker.sh"; then
+  if "$CLEAR"; then
     passed "board ready: no meeting worker left, packages importable"
   else
     failed "clear_meeting_worker.sh: the board is not ready for a meeting; see above"
@@ -319,7 +336,7 @@ fi
 # --- 5. a meeting from the phone ---------------------------------------------
 if [[ $PHONE -eq 1 ]]; then
   step "5. a meeting from the Android app"
-  if "$TOOLS/clear_meeting_worker.sh"; then
+  if "$CLEAR"; then
     "$PY" "$TOOLS/check_meeting_phone.py" --script "${SCRIPT:-traditional}"
     if [[ $? -eq 0 ]]; then
       passed "check_meeting_phone.py: all its checks passed"
@@ -335,12 +352,19 @@ fi
 # Here rather than only on exit, so that the summary says whether it was.
 if ((STARTED_QWEN)) && ((!KEEP_QWEN)); then
   step "the 7B given back"
-  if "$SERVE" stop; then
-    passed "Qwen3.5-4B stopped, the DeepSeek 7B given back"
-  else
-    failed "serve_qwen35.sh stop did not finish; see above"
-  fi
+  "$SERVE" stop || failed "serve_qwen35.sh stop did not finish; see above"
   STARTED_QWEN=0
+  # Not taken on its word: it says ok after a wait that ran out, too. The 7B
+  # is back when its daemon runs and 8080 listens.
+  daemon=no
+  port=no
+  pgrep -x test_llm >/dev/null && daemon=yes
+  (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null && port=yes
+  if [[ $daemon == yes && $port == yes ]]; then
+    passed "the DeepSeek 7B is back: test_llm runs, 8080 listens"
+  else
+    failed "the DeepSeek 7B is not back (test_llm running: $daemon, 8080 listening: $port); tools/ambarella/serve_qwen35.sh status"
+  fi
 fi
 
 summary

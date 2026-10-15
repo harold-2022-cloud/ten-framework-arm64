@@ -76,7 +76,9 @@ else
   OUT="$ROOT/$(date +%Y%m%d-%H%M%S)"
 fi
 mkdir -p "$OUT"
-exec > >(tee -a "$OUT/compare.log") 2>&1
+# tee ignores Ctrl-C and a hangup: they reach the whole foreground group, and
+# a tee gone with them would take on_exit's give-back down with SIGPIPE.
+exec > >(trap '' INT HUP; exec tee -a "$OUT/compare.log") 2>&1
 TEE_PID=$!
 QWEN_STARTED=0
 SUDO_KEEP=""
@@ -99,7 +101,7 @@ echo "== preflight"
 [[ $(id -u) -ne 0 ]] || fail "run it as the desktop user (lychee), not with sudo"
 # Asked now, while someone is at the terminal; kept fresh in the background.
 sudo -v || fail "sudo is needed to switch the board's LLM (stop and start ambarella-llm)"
-( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) &
+( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) >/dev/null 2>&1 &
 SUDO_KEEP=$!
 ok "sudo, kept fresh until this ends"
 command -v "$PY" >/dev/null || fail "no $PY: the prompts come from meeting_control_python, which runs under it"
