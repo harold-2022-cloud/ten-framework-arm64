@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# clear_meeting_worker.sh, faked.
+echo "clear" >> "$FAKE_LOG"
+echo "  (fake clear_meeting_worker.sh)"
+exit 0

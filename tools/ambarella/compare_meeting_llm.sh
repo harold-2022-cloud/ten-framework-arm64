@@ -4,9 +4,10 @@
 # Licensed under the Apache License, Version 2.0.
 #
 # Compare the board's two LLMs on one meeting, end to end: the DeepSeek 7B
-# daemon answers every prompt the meeting graph would send, then the board
-# switches to Qwen3.5-4B, which answers the same prompts, then the 7B is
-# given back and the two rounds are compared (compare_meeting_llm.py).
+# daemon answers every prompt the meeting graph would send, then Qwen3.5-4B
+# answers the same prompts, then the board is put back on the LLM it served
+# before (Qwen3.5-4B, since the switch) and the two rounds are compared
+# (compare_meeting_llm.py).
 #
 #   tools/ambarella/compare_meeting_llm.sh                 every topic of the newest
 #                                                          Simplified board check
@@ -25,10 +26,10 @@
 #
 # Run it on the board as the desktop user (lychee), not with sudo. It asks
 # for the sudo password once, at the start, and keeps it fresh until it ends:
-# the switch between the models (serve_qwen35.sh stopping and starting
-# ambarella-llm) comes minutes in, and a prompt there timed out. The meeting
-# graph has no LLM while Qwen3.5-4B answers, so it refuses while a meeting
-# worker is up. Whatever happens, the 7B daemon is given back at the end.
+# the switches between the models (serve_qwen35.sh stop and start) come
+# minutes in, and a prompt there timed out. The graphs have no Qwen3.5-4B
+# while the 7B answers, so it refuses while a meeting worker is up. Whatever
+# happens, the board is put back on the LLM it served before.
 # Run it inside tmux or screen: a whole meeting takes a while. Everything is
 # also written to <the comparison's folder>/compare.log.
 
@@ -39,6 +40,8 @@ ROOT="$HOME/meeting_probe/llm_compare"
 PY="${PY:-python3.12}"
 QWEN_API="http://127.0.0.1:${QWEN_PORT:-8000}/v1"
 QWEN_MODEL="qwen3.5_4B"
+SERVE="${SERVE:-$HERE/serve_qwen35.sh}"
+UPLOADER="${MEETING_UPLOADER:-http://127.0.0.1:8765}"
 A="deepseek-7b"
 B="qwen35-4b"
 
@@ -80,14 +83,15 @@ mkdir -p "$OUT"
 # a tee gone with them would take on_exit's give-back down with SIGPIPE.
 exec > >(trap '' INT HUP; exec tee -a "$OUT/compare.log") 2>&1
 TEE_PID=$!
-QWEN_STARTED=0
+WAS=""
+SWITCHED=0
 SUDO_KEEP=""
-# On any exit: the 7B given back if Qwen3.5-4B took its place, sudo no
-# longer kept fresh, then all the output through tee before the prompt
-# comes back.
+# On any exit: the board put back on the LLM it served before, if this
+# switched it; sudo no longer kept fresh; then all the output through tee
+# before the prompt comes back.
 on_exit() {
   local rc=$?
-  ((QWEN_STARTED)) && "$HERE/serve_qwen35.sh" stop
+  ((SWITCHED)) && "$SERVE" back "$WAS"
   # The loop and the sleep it is in.
   [[ -n "$SUDO_KEEP" ]] && { pkill -P "$SUDO_KEEP" 2>/dev/null; kill "$SUDO_KEEP" 2>/dev/null; }
   exec >&- 2>&-
@@ -116,16 +120,19 @@ ok "prompts: $PROMPTS"
 [[ -x "$HOME/workspace/cooper-vllm/venv_vllm/bin/vllm" ]] ||
   fail "Qwen3.5-4B is not installed: tools/ambarella/install_qwen35_vllm.sh"
 ok "Qwen3.5-4B is installed"
-if [[ $(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/meetings) != 000 ]]; then
-  fail "a meeting worker is up (8765): the graph would lose its LLM. Let the board reap it, or run tools/ambarella/clear_meeting_worker.sh"
+if [[ $(curl -s -m 2 -o /dev/null -w '%{http_code}' "$UPLOADER/meetings") != 000 ]]; then
+  fail "a meeting worker is up ($UPLOADER): the graphs would lose their LLM. Let the board reap it, or run tools/ambarella/clear_meeting_worker.sh"
 fi
 ok "no meeting worker is up"
-if [[ $(curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer EMPTY' "$QWEN_API/models") == 200 ]]; then
-  note "Qwen3.5-4B is serving; stopping it, so the 7B answers first"
-  "$HERE/serve_qwen35.sh" stop || fail "could not stop Qwen3.5-4B"
+WAS=$("$SERVE" which)
+ok "the board serves: $WAS"
+if [[ $WAS != 7b ]]; then
+  note "switching to the 7B, so that it answers first"
+  SWITCHED=1
+  "$SERVE" stop || fail "could not switch to the 7B"
 fi
 pgrep -x test_llm >/dev/null ||
-  fail "the DeepSeek 7B daemon is not running: sudo systemctl start ambarella-llm"
+  fail "the DeepSeek 7B daemon is not running: tools/ambarella/serve_qwen35.sh stop"
 ok "the DeepSeek 7B daemon is running"
 
 echo "== round 1: DeepSeek 7B"
@@ -133,17 +140,17 @@ echo "== round 1: DeepSeek 7B"
   fail "round 1 stopped (above); run this again with --resume to go on"
 
 echo "== switching to Qwen3.5-4B"
-QWEN_STARTED=1
-"$HERE/serve_qwen35.sh" start || fail "Qwen3.5-4B did not start (above)"
+SWITCHED=1
+"$SERVE" start || fail "Qwen3.5-4B did not start (above)"
 
 echo "== round 2: Qwen3.5-4B"
 "$PY" "$HERE/compare_meeting_llm.py" run --label "$B" --out "$OUT" \
   --openai "$QWEN_API" --model "$QWEN_MODEL" --prompts "$PROMPTS" "${pass[@]}" ||
   fail "round 2 stopped (above); run this again with --resume to go on"
 
-echo "== giving the board back to the 7B"
-"$HERE/serve_qwen35.sh" stop
-QWEN_STARTED=0
+echo "== putting the board back: $WAS"
+"$SERVE" back "$WAS"
+SWITCHED=0
 
 echo "== comparison"
 "$PY" "$HERE/compare_meeting_llm.py" compare "$OUT" "$A" "$B" || fail "the comparison failed (above)"

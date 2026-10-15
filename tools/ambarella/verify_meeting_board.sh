@@ -11,8 +11,8 @@
 #   tools/ambarella/verify_meeting_board.sh --no-meeting   # steps 1-3 only
 #   tools/ambarella/verify_meeting_board.sh --script traditional
 #   tools/ambarella/verify_meeting_board.sh --script traditional --minutes 12 --phone
-#   tools/ambarella/verify_meeting_board.sh --graph meeting_minutes_qwen   # the meeting on Qwen3.5-4B
-#   ... --keep-qwen   # leave Qwen3.5-4B running afterwards (default: the 7B is given back)
+#   tools/ambarella/verify_meeting_board.sh --graph NAME   # another meeting graph
+#   ... --keep-qwen   # if it switched the board from the 7B, Qwen3.5-4B left serving
 #
 #   1 checkout   the commits under test are in this tree; stops here if not,
 #                since everything after would test the old code
@@ -42,10 +42,10 @@
 # Everything is also written to a log, named at the start and the end. Step 4
 # needs the server up (task run) and the graph's LLM; keep the conversation
 # graphs idle meanwhile -- the board's LLM serves one session at a time. For a
-# graph on Qwen3.5-4B, sudo is asked at the start (switching the LLM needs it)
-# and, if this run started Qwen3.5-4B, the 7B is given back at the end unless
-# --keep-qwen -- also after Ctrl-C -- and checked: its daemon runs, 8080
-# listens.
+# graph on Qwen3.5-4B, sudo is asked at the start (switching the LLM needs it),
+# and the board is left on the LLM it served: if this run switched it from
+# the 7B, the 7B is given back at the end -- also after Ctrl-C -- and checked
+# (its daemon runs, 8080 listens), unless --keep-qwen.
 
 set -uo pipefail
 
@@ -68,12 +68,12 @@ while [[ $# -gt 0 ]]; do
     --phone) PHONE=1; shift ;;
     --graph) GRAPH="$2"; shift 2 ;;
     --keep-qwen) KEEP_QWEN=1; shift ;;
-    -h|--help) sed -n '6,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-LOG="/tmp/verify_meeting_$(date +%Y%m%d_%H%M%S).log"
+LOG="${LOG_DIR:-/tmp}/verify_meeting_$(date +%Y%m%d_%H%M%S).log"
 # tee ignores Ctrl-C and a hangup: they reach the whole foreground group, and
 # a tee gone with them would take on_exit's give-back down with SIGPIPE.
 exec > >(trap '' INT HUP; exec tee "$LOG") 2>&1
@@ -85,7 +85,8 @@ LLM_EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/ambarella_llm2_pytho
 SYSTEM_DIR="${SYSTEM_DIR:-$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/system}"
 SERVE="${SERVE:-$TOOLS/serve_qwen35.sh}"
 CLEAR="${CLEAR:-$TOOLS/clear_meeting_worker.sh}"
-UPLOADER="${UPLOADER:-http://127.0.0.1:8765}"
+UPLOADER="${MEETING_UPLOADER:-http://127.0.0.1:8765}"
+LLM_PORT="${LLM_PORT:-8080}"
 QWEN_PKG="${QWEN_PKG:-$(cat "$HOME/workspace/.qwen35-install/qwen_pkg" 2>/dev/null || echo "$HOME/demo_resources/llm_demo/qwen3.5_4B")}"
 PROBE_RUNS="$HOME/meeting_probe/summary_probe"
 CHECK_RUNS="$HOME/meeting_probe/board_check"
@@ -117,13 +118,14 @@ EOF
 [[ -n "$LLM_ADDON" ]] || { echo "no graph $GRAPH with an llm node"; exit 2; }
 echo "graph   $GRAPH (llm: $LLM_ADDON)"
 
-STARTED_QWEN=0
+WAS=""
+SWITCHED=0
 SUDO_KEEP=""
-# On any exit: the 7B given back if this run started Qwen3.5-4B (unless
-# --keep-qwen), sudo no longer kept fresh, the output through tee.
+# On any exit: the 7B given back if this run switched the board from it
+# (unless --keep-qwen), sudo no longer kept fresh, the output through tee.
 on_exit() {
   local rc=$?
-  if ((STARTED_QWEN)) && ((!KEEP_QWEN)); then "$SERVE" stop; fi
+  if ((SWITCHED)) && ((!KEEP_QWEN)) && [[ $WAS == 7b ]]; then "$SERVE" back 7b; fi
   [[ -n "$SUDO_KEEP" ]] && { pkill -P "$SUDO_KEEP" 2>/dev/null; kill "$SUDO_KEEP" 2>/dev/null; }
   exec >&- 2>&-
   wait "$TEE_PID" 2>/dev/null
@@ -152,7 +154,10 @@ for subject in \
   "send no system message when the prompt is empty" \
   "keep Qwen3.5's thinking off unless a request asks" \
   "meeting_minutes_qwen, the meeting graph on Qwen3.5-4B" \
-  "check the graph's own LLM and vLLM's memory"
+  "check the graph's own LLM and vLLM's memory" \
+  "run Qwen3.5-4B as a service, with tool calls" \
+  "boot into Qwen3.5-4B, ten-api after it" \
+  "the board's graphs on Qwen3.5-4B"
 do
   found=$(git -C "$REPO_ROOT" log -1 --format=%h --fixed-strings \
     --grep="$subject" HEAD)
@@ -186,8 +191,10 @@ if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
       failed "qwen35_prepare.py could not update $QWEN_PKG; see above"
     fi
   fi
+  WAS=$("$SERVE" which)
+  echo "  the board serves: $WAS"
   serving=0
-  [[ $(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer EMPTY' http://127.0.0.1:8000/v1/models) == 200 ]] && serving=1
+  [[ $WAS == qwen ]] && serving=1
   # start and restart refuse while a meeting worker is up -- the phone app
   # leaves one -- and step 4 would clear it anyway: cleared now, when needed.
   if ((!serving || restart)) && [[ $(curl -s -m 2 -o /dev/null -w '%{http_code}' "$UPLOADER/meetings") != 000 ]]; then
@@ -202,7 +209,7 @@ if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
       "$SERVE" restart || failed "Qwen3.5-4B did not come back after the restart; see above"
     fi
   elif "$SERVE" start; then
-    STARTED_QWEN=1
+    SWITCHED=1
   else
     failed "Qwen3.5-4B did not start; see above"
   fi
@@ -348,24 +355,28 @@ if [[ $PHONE -eq 1 ]]; then
   fi
 fi
 
-# --- the board given back ----------------------------------------------------
-# Here rather than only on exit, so that the summary says whether it was.
-if ((STARTED_QWEN)) && ((!KEEP_QWEN)); then
+# --- the board left on the LLM it served -------------------------------------
+# Here rather than only on exit, so that the summary says what became of it.
+if ((SWITCHED)) && [[ $WAS == 7b ]] && ((KEEP_QWEN)); then
+  noted "--keep-qwen: Qwen3.5-4B left serving; serve_qwen35.sh stop gives the 7B back"
+elif ((SWITCHED)) && [[ $WAS == 7b ]]; then
   step "the 7B given back"
-  "$SERVE" stop || failed "serve_qwen35.sh stop did not finish; see above"
-  STARTED_QWEN=0
+  "$SERVE" back 7b || failed "serve_qwen35.sh back 7b did not finish; see above"
   # Not taken on its word: it says ok after a wait that ran out, too. The 7B
-  # is back when its daemon runs and 8080 listens.
+  # is back when its daemon runs and its port listens.
   daemon=no
   port=no
   pgrep -x test_llm >/dev/null && daemon=yes
-  (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null && port=yes
+  (exec 3<>"/dev/tcp/127.0.0.1/$LLM_PORT") 2>/dev/null && port=yes
   if [[ $daemon == yes && $port == yes ]]; then
-    passed "the DeepSeek 7B is back: test_llm runs, 8080 listens"
+    passed "the DeepSeek 7B is back: test_llm runs, $LLM_PORT listens"
   else
-    failed "the DeepSeek 7B is not back (test_llm running: $daemon, 8080 listening: $port); tools/ambarella/serve_qwen35.sh status"
+    failed "the DeepSeek 7B is not back (test_llm running: $daemon, $LLM_PORT listening: $port); tools/ambarella/serve_qwen35.sh status"
   fi
+elif ((SWITCHED)); then
+  noted "Qwen3.5-4B left serving: nothing served before this run, and every board graph asks it"
 fi
+SWITCHED=0
 
 summary
 for line in "${RESULTS[@]}"; do
