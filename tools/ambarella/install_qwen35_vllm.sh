@@ -8,10 +8,13 @@
 # summaries can be compared with the DeepSeek 7B the meeting graph uses.
 #
 #   tools/ambarella/install_qwen35_vllm.sh            check, install, test
-#   tools/ambarella/install_qwen35_vllm.sh --check    check only; nothing changes
+#   tools/ambarella/install_qwen35_vllm.sh --check    check only; nothing is installed
 #   tools/ambarella/install_qwen35_vllm.sh --no-test  install, without the test
 #   tools/ambarella/install_qwen35_vllm.sh --model-tar ~/qwen3.5-4b_n1655-video.tar.gz
 #                                                     the model package as it came
+#   tools/ambarella/install_qwen35_vllm.sh --guide-zip PATH
+#                                                     the vendor's guide zip, if it is not
+#                                                     ~/vllm-qwen3.5-guide.zip
 #
 # Run it on the board as the desktop user (lychee), not with sudo. It asks
 # sudo for dnf, and in the test for stopping and starting ambarella-llm.
@@ -24,13 +27,15 @@
 #   the model package (qwen3.5-4b_n1655-video: ranch/ and the ViT binary),
 #   either as the archive it came in (--model-tar), or unpacked at
 #   ~/demo_resources/llm_demo/qwen3.5_4B (QWEN_PKG=... if elsewhere)
-# From the vendor's guide folder on the dev machine, into ~/workspace:
+# From the vendor's guide, vllm-qwen3.5-guide.zip:
 #   support-qwen3.5-VL.diff.zip            the Qwen3.5 patch for cooper-vllm
 #   libamba-shepherd-n1_655.so.1.6.9       only if the board's Shepherd is
 #                                          older than 1.6.9
-# e.g. from the dev machine's checkout:
-#   scp ambarella_ai_developer_kit_doc/vllm-qwen3.5-guide/{support-qwen3.5-VL.diff.zip,libamba-shepherd-n1_655.so.1.6.9} lychee@BOARD:workspace/
-# and the internet: GitHub, PyPI, download.pytorch.org, hf-mirror.com.
+# taken from ~/vllm-qwen3.5-guide.zip (--guide-zip if elsewhere), which is
+# unpacked into ~/workspace/.qwen35-install/guide on every run, --check too;
+# or put into ~/workspace by hand. Their md5 is compared with the copies this
+# script was tested with. And the internet: GitHub, PyPI,
+# download.pytorch.org, hf-mirror.com.
 #
 # Steps, each skipped when done:
 #   0 model        with --model-tar: unpacked into ~/demo_resources/models,
@@ -65,6 +70,7 @@ set -uo pipefail
 MODE=install
 TEST=1
 QWEN_TAR="${QWEN_TAR:-}"
+GUIDE_ZIP="${GUIDE_ZIP:-}"
 while (($#)); do
   case "$1" in
     --check) MODE=check ;;
@@ -72,6 +78,11 @@ while (($#)); do
     --model-tar)
       [[ -n "${2:-}" ]] || { echo "--model-tar needs the archive's path" >&2; exit 2; }
       QWEN_TAR="$2"
+      shift
+      ;;
+    --guide-zip)
+      [[ -n "${2:-}" ]] || { echo "--guide-zip needs the zip's path" >&2; exit 2; }
+      GUIDE_ZIP="$2"
       shift
       ;;
     -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -97,6 +108,10 @@ EXT_REF="cooper_2.5.4"
 SHEPHERD="libamba-shepherd-n1_655.so"
 SHEPHERD_NEED="1.6.9"
 TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+GUIDE_DIR="$STATE/guide"
+# The guide's files as this script was tested with them (guide of 2026-10-12).
+TESTED_MD5="d2f7a50a525b068677bc37a9ecbd9272 support-qwen3.5-VL.diff.zip
+f0c5a77c8af78c87127cb0667b7bab6b libamba-shepherd-n1_655.so.1.6.9"
 # The package: as set; else where an earlier run unpacked it; else the
 # guide's place.
 if [[ -z "${QWEN_PKG:-}" ]]; then
@@ -145,6 +160,52 @@ system_shepherd=""
 need_private_shepherd=0
 vendor_shepherd=""
 patch_file=""
+
+# Whether a guide file is the copy this script was tested with.
+md5_note() {
+  local sum tested
+  sum=$(md5sum "$1" | cut -d' ' -f1)
+  tested=$(echo "$TESTED_MD5" | awk -v n="$(basename "$1")" '$2 == n {print $1}')
+  if [[ -z "$tested" ]]; then
+    return
+  elif [[ "$sum" == "$tested" ]]; then
+    ok "$(basename "$1"): md5 $sum, the copy this script was tested with"
+  else
+    note "$(basename "$1"): md5 $sum differs from the tested copy ($tested); Ambarella may have changed it"
+  fi
+}
+
+# The guide zip, unpacked afresh into the installer's own folder.
+unpack_guide() {
+  [[ -z "$GUIDE_ZIP" && -f "$HOME/vllm-qwen3.5-guide.zip" ]] && GUIDE_ZIP="$HOME/vllm-qwen3.5-guide.zip"
+  [[ -n "$GUIDE_ZIP" ]] || return 0
+  rm -rf "$GUIDE_DIR"
+  mkdir -p "$GUIDE_DIR"
+  # Python's zipfile, not unzip: unzip may be among what step 1 installs.
+  if python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+    "$GUIDE_ZIP" "$GUIDE_DIR" 2>/dev/null; then
+    ok "unpacked $GUIDE_ZIP into $GUIDE_DIR"
+  else
+    problem "could not unpack the guide zip $GUIDE_ZIP"
+  fi
+}
+guide_file() { find "$GUIDE_DIR" -type f -name "$1" 2>/dev/null | head -1; }
+
+# Shared libraries the model package carries: a Shepherd among them would
+# be the one built with the model, and may suit it better than the guide's.
+package_libs() {
+  local libs
+  libs=$(find -L "$QWEN_PKG" -maxdepth 6 -type f -name '*.so*' 2>/dev/null | head -20)
+  if [[ -z "$libs" ]]; then
+    ok "the model package carries no shared libraries"
+    return
+  fi
+  note "the model package carries shared libraries:"
+  echo "$libs" | sed 's/^/        /'
+  if echo "$libs" | grep -qiE 'shepherd'; then
+    note "one is a Shepherd; this install uses ${vendor_shepherd:-the system library} -- compare the two before going on"
+  fi
+}
 
 # The archive, from its first entries only: whether everything sits in one
 # folder (unpacked into MODELS_DIR then) or not (into a folder of its own).
@@ -237,18 +298,23 @@ preflight() {
     ok "$free MB free under $WORK (about $need MB needed)"
   fi
 
+  unpack_guide
   if [[ -f "$VENDOR_DIR/be6dbd5.diff" ]]; then
     patch_file="$VENDOR_DIR/be6dbd5.diff"
   elif [[ -f "$VENDOR_DIR/support-qwen3.5-VL.diff.zip" ]]; then
     patch_file="$VENDOR_DIR/support-qwen3.5-VL.diff.zip"
+  else
+    patch_file=$(guide_file support-qwen3.5-VL.diff.zip)
+    [[ -n "$patch_file" ]] || patch_file=$(guide_file be6dbd5.diff)
   fi
   if done_ patch; then
     ok "the Qwen3.5 patch is applied"
   elif [[ -n "$patch_file" ]]; then
     ok "the Qwen3.5 patch: $patch_file"
+    [[ "$patch_file" == *.zip ]] && md5_note "$patch_file"
   else
-    problem "no support-qwen3.5-VL.diff.zip in $VENDOR_DIR" \
-      "copy it from the dev machine: scp ambarella_ai_developer_kit_doc/vllm-qwen3.5-guide/support-qwen3.5-VL.diff.zip lychee@BOARD:workspace/"
+    problem "no support-qwen3.5-VL.diff.zip in $VENDOR_DIR${GUIDE_ZIP:+ or in $GUIDE_ZIP}" \
+      "put vllm-qwen3.5-guide.zip in ~ (or give it with --guide-zip), or the patch zip in $VENDOR_DIR"
   fi
 
   local link
@@ -270,16 +336,26 @@ preflight() {
         vendor_shepherd="$SHEPHERD_DIR/$SHEPHERD.$SHEPHERD_NEED"
       elif [[ -f "$VENDOR_DIR/$SHEPHERD.$SHEPHERD_NEED" ]]; then
         vendor_shepherd="$VENDOR_DIR/$SHEPHERD.$SHEPHERD_NEED"
+      else
+        vendor_shepherd=$(guide_file "$SHEPHERD.$SHEPHERD_NEED")
       fi
       if [[ -z "$vendor_shepherd" ]]; then
-        problem "no $SHEPHERD.$SHEPHERD_NEED in $VENDOR_DIR" \
-          "copy it from the dev machine: scp ambarella_ai_developer_kit_doc/vllm-qwen3.5-guide/$SHEPHERD.$SHEPHERD_NEED lychee@BOARD:workspace/"
+        problem "no $SHEPHERD.$SHEPHERD_NEED in $VENDOR_DIR${GUIDE_ZIP:+ or in $GUIDE_ZIP}" \
+          "put vllm-qwen3.5-guide.zip in ~ (or give it with --guide-zip), or the library in $VENDOR_DIR"
       else
-        local lost
-        lost=$(LD_LIBRARY_PATH="$SHEPHERD_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$vendor_shepherd" 2>/dev/null |
-          awk '/not found/ {print $1}' | tr '\n' ' ')
+        md5_note "$vendor_shepherd"
+        local lddout lost
+        # ldd failing at all (not this machine's architecture, a broken file)
+        # says nothing about the libraries; it is not a pass.
+        if ! lddout=$(LD_LIBRARY_PATH="$SHEPHERD_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$vendor_shepherd" 2>&1); then
+          problem "ldd cannot read $vendor_shepherd: $(echo "$lddout" | head -1)"
+          lddout=""
+        fi
+        lost=$(echo "$lddout" | awk '/not found/ {print $1}' | tr '\n' ' ')
         lost=${lost% }
-        if [[ -n "$lost" && "$lost" != "libcjson.so.1" ]]; then
+        if [[ -z "$lddout" ]]; then
+          :
+        elif [[ -n "$lost" && "$lost" != "libcjson.so.1" ]]; then
           problem "Shepherd $SHEPHERD_NEED needs libraries this board does not have: $lost" \
             "they are not the names the board's own Shepherd uses (see below); ask Ambarella which BSP package provides them"
           ls /usr/lib64/libamba-cavalry-mem* /usr/lib64/libamba-nnctrl* /usr/lib64/libcavalry_mem* \
@@ -294,6 +370,7 @@ preflight() {
   if [[ -f "$QWEN_PKG/ranch/info/config.json" ]]; then
     python3 -I "$HERE/qwen35_prepare.py" model "$QWEN_PKG" --check ||
       problem "the model package at $QWEN_PKG is not as expected (above)"
+    package_libs
   elif [[ -n "$QWEN_TAR" ]]; then
     note "the model package is checked once it is unpacked (step 0)"
   else
@@ -336,6 +413,7 @@ step_model_tar() {
   echo "$QWEN_PKG" > "$STATE/qwen_pkg"
   ok "the package is $QWEN_PKG"
   python3 -I "$HERE/qwen35_prepare.py" model "$QWEN_PKG" --check || fail "the unpacked package is not as expected (above)"
+  package_libs
   mkdir -p "$(dirname "$QWEN_LINK")"
   if [[ -L "$QWEN_LINK" || ! -e "$QWEN_LINK" ]]; then
     ln -sfn "$QWEN_PKG" "$QWEN_LINK"
