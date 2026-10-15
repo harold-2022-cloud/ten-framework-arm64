@@ -11,13 +11,20 @@
 #   tools/ambarella/verify_meeting_board.sh --no-meeting   # steps 1-3 only
 #   tools/ambarella/verify_meeting_board.sh --script traditional
 #   tools/ambarella/verify_meeting_board.sh --script traditional --minutes 12 --phone
+#   tools/ambarella/verify_meeting_board.sh --graph meeting_minutes_qwen   # the meeting on Qwen3.5-4B
+#   ... --keep-qwen   # leave Qwen3.5-4B running afterwards (default: the 7B is given back)
 #
 #   1 checkout   the commits under test are in this tree; stops here if not,
 #                since everything after would test the old code
 #   2 garbling   every answer probe_meeting_summary.py saved, mended by the
-#                llm extension's utf8_mend.py: U+FFFD before and after
-#   3 llm tests  ambarella_llm2_python's suite under the runtime's python3.12,
-#                with the tenapp's own TEN runtime (no TEN_SYSTEM_DIR to type)
+#                llm extension's utf8_mend.py: U+FFFD before and after.
+#                For a graph on Qwen3.5-4B, instead: the model's chat template
+#                brought up to date (vLLM restarted if it changed), Qwen3.5-4B
+#                started if it is not running, and serve_qwen35.sh test
+#   3 llm tests  the graph's llm extension's suite -- ambarella_llm2_python,
+#                or openai_llm2_python for Qwen3.5-4B -- under the runtime's
+#                python3.12, with the tenapp's own TEN runtime (no
+#                TEN_SYSTEM_DIR to type)
 #   4 meeting    clear_meeting_worker.sh first (a stuck run, missing
 #                packages), then check_meeting_board.py on the AISHELL-4
 #                meeting already on the board, whole by default (about 35
@@ -32,8 +39,11 @@
 #
 # Steps 2-5 run whatever happens to the one before; the summary lists each.
 # Everything is also written to a log, named at the start and the end. Step 4
-# needs the server up (task run) and the LLM daemon; keep the conversation
-# graphs idle meanwhile -- the board's LLM serves one session at a time.
+# needs the server up (task run) and the graph's LLM; keep the conversation
+# graphs idle meanwhile -- the board's LLM serves one session at a time. For a
+# graph on Qwen3.5-4B, sudo is asked at the start (switching the LLM needs it)
+# and, if this run started Qwen3.5-4B, the 7B is given back at the end unless
+# --keep-qwen.
 
 set -uo pipefail
 
@@ -45,6 +55,8 @@ MINUTES=""
 SCRIPT=""
 MEETING=1
 PHONE=0
+GRAPH="meeting_minutes"
+KEEP_QWEN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,18 +64,23 @@ while [[ $# -gt 0 ]]; do
     --script) SCRIPT="$2"; shift 2 ;;
     --no-meeting) MEETING=0; shift ;;
     --phone) PHONE=1; shift ;;
-    -h|--help) sed -n '6,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --graph) GRAPH="$2"; shift 2 ;;
+    --keep-qwen) KEEP_QWEN=1; shift ;;
+    -h|--help) sed -n '6,46p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
 LOG="/tmp/verify_meeting_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee "$LOG") 2>&1
+TEE_PID=$!
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TOOLS="$REPO_ROOT/tools/ambarella"
 LLM_EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/ambarella_llm2_python"
-SYSTEM_DIR="$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/system"
+SYSTEM_DIR="${SYSTEM_DIR:-$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/ten_packages/system}"
+SERVE="${SERVE:-$TOOLS/serve_qwen35.sh}"
+QWEN_PKG="${QWEN_PKG:-$(cat "$HOME/workspace/.qwen35-install/qwen_pkg" 2>/dev/null || echo "$HOME/demo_resources/llm_demo/qwen3.5_4B")}"
 PROBE_RUNS="$HOME/meeting_probe/summary_probe"
 CHECK_RUNS="$HOME/meeting_probe/board_check"
 
@@ -83,6 +100,36 @@ summary() {
 
 echo "repo    $REPO_ROOT"
 echo "log     $LOG"
+LLM_ADDON=$("$PY" - "$REPO_ROOT/ai_agents/agents/examples/voice-assistant/tenapp/property.json" "$GRAPH" <<'EOF'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+for g in data["ten"]["predefined_graphs"]:
+    if g["name"] == sys.argv[2]:
+        print(next((n["addon"] for n in g["graph"]["nodes"] if n["name"] == "llm"), ""))
+EOF
+)
+[[ -n "$LLM_ADDON" ]] || { echo "no graph $GRAPH with an llm node"; exit 2; }
+echo "graph   $GRAPH (llm: $LLM_ADDON)"
+
+STARTED_QWEN=0
+SUDO_KEEP=""
+# On any exit: the 7B given back if this run started Qwen3.5-4B (unless
+# --keep-qwen), sudo no longer kept fresh, the output through tee.
+on_exit() {
+  local rc=$?
+  if ((STARTED_QWEN)) && ((!KEEP_QWEN)); then "$SERVE" stop; fi
+  [[ -n "$SUDO_KEEP" ]] && { pkill -P "$SUDO_KEEP" 2>/dev/null; kill "$SUDO_KEEP" 2>/dev/null; }
+  exec >&- 2>&-
+  wait "$TEE_PID" 2>/dev/null
+  exit "$rc"
+}
+trap on_exit EXIT
+if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
+  # Switching the LLM needs sudo minutes in; asked now, kept fresh.
+  sudo -v || { echo "sudo is needed to switch the board's LLM"; exit 1; }
+  ( while kill -0 "$$" 2>/dev/null; do sudo -n -v 2>/dev/null; sleep 50; done ) &
+  SUDO_KEEP=$!
+fi
 
 # --- 1. the checkout carries the code under test -----------------------------
 step "1. checkout"
@@ -95,7 +142,11 @@ for subject in \
   "ask the conclusion for no owners at all" \
   "acknowledge segment_audio and transcribe at once" \
   "end a meeting failed whatever raises" \
-  "check the record's script and a phone's meeting"
+  "check the record's script and a phone's meeting" \
+  "send no system message when the prompt is empty" \
+  "keep Qwen3.5's thinking off unless a request asks" \
+  "meeting_minutes_qwen, the meeting graph on Qwen3.5-4B" \
+  "check the graph's own LLM and vLLM's memory"
 do
   found=$(git -C "$REPO_ROOT" log -1 --format=%h --fixed-strings \
     --grep="$subject" HEAD)
@@ -113,49 +164,98 @@ if [[ $missing -eq 1 ]]; then
 fi
 passed "checkout has the fixes under test"
 
-# --- 2. the mender on every answer saved from the board ----------------------
-step "2. garbling, from saved bytes"
-runs=()
-for dir in "$PROBE_RUNS"/*/; do
-  compgen -G "$dir*.sse" >/dev/null && runs+=("${dir%/}")
-done
-if [[ ${#runs[@]} -eq 0 ]]; then
-  noted "no saved answers under $PROBE_RUNS; skipped"
-else
-  before_total=0
-  after_total=0
-  for dir in "${runs[@]}"; do
-    out=$("$PY" "$TOOLS/probe_meeting_summary.py" --garbling "$dir" 2>&1)
-    echo "$out"
-    # Table rows: answer, events, as read, joined, mended, events not UTF-8.
-    # Rows saved by an older probe say "lost" -- their bytes are already
-    # U+FFFD -- and are not counted.
-    read -r before after < <(echo "$out" | awk \
-      'NF == 6 && $2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ {b += $3; a += $5}
-       END {print b + 0, a + 0}')
-    before_total=$((before_total + before))
-    after_total=$((after_total + after))
-  done
-  if [[ $after_total -eq 0 ]]; then
-    passed "garbling: $before_total U+FFFD as read before, 0 mended (${#runs[@]} saved runs)"
-  else
-    failed "garbling: $before_total U+FFFD as read before, $after_total left after mending"
+if [[ "$LLM_ADDON" == openai_llm2_python ]]; then
+  # --- 2. Qwen3.5-4B: the template the graph relies on, and an answer --------
+  step "2. Qwen3.5-4B: its chat template, and an answer"
+  todo=$(python3 -I "$TOOLS/qwen35_prepare.py" model "$QWEN_PKG" --check 2>&1)
+  echo "$todo"
+  restart=0
+  if grep -q "FAIL" <<<"$todo"; then
+    failed "the Qwen3.5-4B package at $QWEN_PKG is not as expected; see above"
+  elif grep -q "to do:" <<<"$todo"; then
+    if python3 -I "$TOOLS/qwen35_prepare.py" model "$QWEN_PKG"; then
+      passed "model package brought up to date (thinking off unless a request asks)"
+      restart=1
+    else
+      failed "qwen35_prepare.py could not update $QWEN_PKG; see above"
+    fi
   fi
-fi
-
-# --- 3. the llm extension's suite under the runtime's interpreter -----------
-step "3. ambarella_llm2_python tests"
-if [[ ! -d "$SYSTEM_DIR/ten_runtime_python" ]]; then
-  failed "no TEN runtime at $SYSTEM_DIR; run ai_agents/agents/scripts/install_board_arm64.sh"
-else
-  out=$(TEN_SYSTEM_DIR="$SYSTEM_DIR" "$LLM_EXT/tests/bin/start" -q 2>&1)
-  echo "$out" | tail -5
-  count=""
-  [[ "$out" =~ ([0-9]+)\ passed ]] && count="${BASH_REMATCH[1]}"
-  if [[ -n "$count" ]] && ! [[ "$out" =~ [0-9]+\ (failed|error) ]]; then
-    passed "llm extension: $count passed"
+  if [[ $(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer EMPTY' http://127.0.0.1:8000/v1/models) == 200 ]]; then
+    if ((restart)); then
+      "$SERVE" restart || failed "Qwen3.5-4B did not come back after the restart; see above"
+    fi
+  elif "$SERVE" start; then
+    STARTED_QWEN=1
   else
-    failed "llm extension tests did not pass; see above"
+    failed "Qwen3.5-4B did not start; see above"
+  fi
+  if "$SERVE" test; then
+    passed "Qwen3.5-4B answers, thinking off by default, no U+FFFD"
+  else
+    failed "Qwen3.5-4B's answer is not right; see above"
+  fi
+
+  # --- 3. openai_llm2_python's suite under the runtime's interpreter ---------
+  step "3. openai_llm2_python tests"
+  LLM_EXT="$REPO_ROOT/ai_agents/agents/ten_packages/extension/openai_llm2_python"
+  if [[ ! -d "$SYSTEM_DIR/ten_runtime_python" ]]; then
+    failed "no TEN runtime at $SYSTEM_DIR; run ai_agents/agents/scripts/install_board_arm64.sh"
+  else
+    out=$(TEN_SYSTEM_DIR="$SYSTEM_DIR" "$LLM_EXT/tests/bin/start" -q 2>&1)
+    echo "$out" | tail -5
+    count=""
+    [[ "$out" =~ ([0-9]+)\ passed ]] && count="${BASH_REMATCH[1]}"
+    if [[ -n "$count" ]] && ! [[ "$out" =~ [0-9]+\ (failed|error) ]]; then
+      passed "openai_llm2_python: $count passed"
+    else
+      failed "openai_llm2_python tests did not pass; see above"
+    fi
+  fi
+else
+  # --- 2. the mender on every answer saved from the board --------------------
+  step "2. garbling, from saved bytes"
+  runs=()
+  for dir in "$PROBE_RUNS"/*/; do
+    compgen -G "$dir*.sse" >/dev/null && runs+=("${dir%/}")
+  done
+  if [[ ${#runs[@]} -eq 0 ]]; then
+    noted "no saved answers under $PROBE_RUNS; skipped"
+  else
+    before_total=0
+    after_total=0
+    for dir in "${runs[@]}"; do
+      out=$("$PY" "$TOOLS/probe_meeting_summary.py" --garbling "$dir" 2>&1)
+      echo "$out"
+      # Table rows: answer, events, as read, joined, mended, events not UTF-8.
+      # Rows saved by an older probe say "lost" -- their bytes are already
+      # U+FFFD -- and are not counted.
+      read -r before after < <(echo "$out" | awk \
+        'NF == 6 && $2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ {b += $3; a += $5}
+         END {print b + 0, a + 0}')
+      before_total=$((before_total + before))
+      after_total=$((after_total + after))
+    done
+    if [[ $after_total -eq 0 ]]; then
+      passed "garbling: $before_total U+FFFD as read before, 0 mended (${#runs[@]} saved runs)"
+    else
+      failed "garbling: $before_total U+FFFD as read before, $after_total left after mending"
+    fi
+  fi
+
+  # --- 3. the llm extension's suite under the runtime's interpreter ----------
+  step "3. ambarella_llm2_python tests"
+  if [[ ! -d "$SYSTEM_DIR/ten_runtime_python" ]]; then
+    failed "no TEN runtime at $SYSTEM_DIR; run ai_agents/agents/scripts/install_board_arm64.sh"
+  else
+    out=$(TEN_SYSTEM_DIR="$SYSTEM_DIR" "$LLM_EXT/tests/bin/start" -q 2>&1)
+    echo "$out" | tail -5
+    count=""
+    [[ "$out" =~ ([0-9]+)\ passed ]] && count="${BASH_REMATCH[1]}"
+    if [[ -n "$count" ]] && ! [[ "$out" =~ [0-9]+\ (failed|error) ]]; then
+      passed "llm extension: $count passed"
+    else
+      failed "llm extension tests did not pass; see above"
+    fi
   fi
 fi
 
@@ -168,6 +268,7 @@ if [[ $MEETING -eq 1 ]]; then
     failed "clear_meeting_worker.sh: the board is not ready for a meeting; see above"
   fi
   args=(--audio "$AUDIO" --rttm "$RTTM" --speakers "$SPEAKERS")
+  args+=(--graph "$GRAPH")
   [[ -n "$MINUTES" ]] && args+=(--minutes "$MINUTES")
   [[ -n "$SCRIPT" ]] && args+=(--script "$SCRIPT")
   before=$(ls -d "$CHECK_RUNS"/*/ 2>/dev/null | sort)
@@ -228,6 +329,18 @@ if [[ $PHONE -eq 1 ]]; then
   else
     failed "clear_meeting_worker.sh: the board is not ready for the phone; see above"
   fi
+fi
+
+# --- the board given back ----------------------------------------------------
+# Here rather than only on exit, so that the summary says whether it was.
+if ((STARTED_QWEN)) && ((!KEEP_QWEN)); then
+  step "the 7B given back"
+  if "$SERVE" stop; then
+    passed "Qwen3.5-4B stopped, the DeepSeek 7B given back"
+  else
+    failed "serve_qwen35.sh stop did not finish; see above"
+  fi
+  STARTED_QWEN=0
 fi
 
 summary

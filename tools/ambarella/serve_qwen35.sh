@@ -9,8 +9,11 @@
 #
 #   tools/ambarella/serve_qwen35.sh start    stop the 7B daemon, start Qwen3.5-4B,
 #                                            wait until it answers
-#   tools/ambarella/serve_qwen35.sh test     one meeting-style question, thinking
-#                                            off: the answer, seconds, tokens/s
+#   tools/ambarella/serve_qwen35.sh restart  stop and start Qwen3.5-4B, the 7B left as it is
+#   tools/ambarella/serve_qwen35.sh test     one meeting-style question, asked as
+#                                            the graphs ask (no chat_template_kwargs):
+#                                            thinking must be off by default; the
+#                                            answer, seconds, tokens/s
 #   tools/ambarella/serve_qwen35.sh stop     stop Qwen3.5-4B; start the 7B daemon
 #                                            again if start stopped it
 #   tools/ambarella/serve_qwen35.sh status   which one is up
@@ -145,7 +148,8 @@ give_back_daemon() {
   note "  check again later: tools/ambarella/install_board_services.sh --status"
 }
 
-do_stop() {
+# vLLM alone: the 7B is left as it is, and so is the note that it was taken.
+stop_vllm() {
   local pid
   if pid=$(vllm_pid); then
     # vLLM's engine runs in processes of its own; the session holds them all.
@@ -162,7 +166,23 @@ do_stop() {
   fi
   rm -f "$RUN/pid"
   serving && fail "something still answers at $API that this script did not start"
+  return 0
+}
+
+do_stop() {
+  stop_vllm
   give_back_daemon
+}
+
+# A template changed under a running vLLM is read only when it starts again.
+# What start would refuse is refused before the stop, not after it.
+do_restart() {
+  [[ $(id -u) -ne 0 ]] || fail "run it as the desktop user (lychee), not with sudo"
+  if worker_up; then
+    fail "a meeting worker is up (8765 answers): its meeting would lose the LLM. Let the board reap it, or run tools/ambarella/clear_meeting_worker.sh"
+  fi
+  stop_vllm
+  do_start
 }
 
 do_start() {
@@ -235,12 +255,13 @@ prompt = (
     "说话人2：物料周一能到，我来跟进供应商。\n"
     "说话人1：好，那彩排就放在周二下午，大家都要到。"
 )
+# No chat_template_kwargs: asked as openai_llm2_python asks, which cannot
+# send them, thinking must be off by the template's default.
 body = {
     "model": name,
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": 256,
     "temperature": 0,
-    "chat_template_kwargs": {"enable_thinking": False},
 }
 req = urllib.request.Request(
     api + "/v1/chat/completions",
@@ -266,7 +287,8 @@ print(f"  ok    {took:.1f} s, {tokens} tokens"
       + (f", {tokens / took:.1f} tokens/s" if took and tokens else ""))
 bad = 0
 if "<think>" in content or reasoning.strip():
-    print("  FAIL  thinking is not off: the answer carries a <think> part")
+    print("  FAIL  thinking is not off by default: run qwen35_prepare.py model "
+          "on the package, then serve_qwen35.sh restart")
     bad = 1
 if not content.strip():
     print("  FAIL  the answer is empty")
@@ -298,8 +320,9 @@ mkdir -p "$RUN"
 case "${1:-}" in
   start) do_start ;;
   stop) do_stop ;;
+  restart) do_restart ;;
   test) do_test ;;
   status) do_status ;;
-  -h|--help|"") sed -n '6,30p' "$0" | sed 's/^# \{0,1\}//'; [[ -n "${1:-}" ]] ;;
-  *) echo "unknown command: $1 (start, test, stop, status)" >&2; exit 2 ;;
+  -h|--help|"") sed -n '6,33p' "$0" | sed 's/^# \{0,1\}//'; [[ -n "${1:-}" ]] ;;
+  *) echo "unknown command: $1 (start, restart, test, stop, status)" >&2; exit 2 ;;
 esac
