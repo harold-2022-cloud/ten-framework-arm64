@@ -10,7 +10,7 @@ G.722 16k ──► agora_rtc ──► streamid_adapter ──┬──► stt 
                                      main_control ◄───┘
                                           │
                                           ▼
-                    llm (board LLM demo server) ──► tts (tts_d) ──► agora_rtc
+                    llm (Qwen3.5-4B on vLLM)    ──► tts (tts_d) ──► agora_rtc
 ```
 
 ## Before starting
@@ -22,16 +22,16 @@ G.722 16k ──► agora_rtc ──► streamid_adapter ──┬──► stt 
    chmod +x /home/lychee/asr_tts_demo/app_demo/{asr_d,tts_d}
    ```
 
-2. Start the board's LLM demo server:
+2. Start the board's LLM, Qwen3.5-4B on vLLM (installed by
+   `tools/ambarella/install_qwen35_vllm.sh`; once
+   `tools/ambarella/install_board_services.sh` has run, it starts at power-on):
 
    ```bash
-   cd /usr/share/ambarella/llm_demo/
-   ./run_llm_demo.sh --run_mode start --model_type 9 \
-       --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+   tools/ambarella/serve_qwen35.sh start
    ```
 
-   The first load after boot takes up to 80 s; wait for `Device ENABLE` in
-   `/tmp/log.txt`.
+   Loading takes about a minute. It stops the vendor's DeepSeek 7B daemon if
+   that runs: the two cannot share the NPU.
 
 3. **Move TEN's API server off port 8080.** The board's LLM demo server binds
    port 8080 and `run_llm_demo.sh` has no port flag, while TEN's Go API server

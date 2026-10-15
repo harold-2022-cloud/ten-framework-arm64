@@ -1,7 +1,7 @@
 # 在安霸 N1-655 開發板上跑語音助理
 
-從 clone 到能對話。語音跑在板子的 CPU 上，LLM 是原廠的 daemon，所以預設的
-graph 完全不需要任何雲端語音服務。
+從 clone 到能對話。語音跑在板子的 CPU 上，LLM（Qwen3.5-4B）跑在板子的
+NPU 上，所以預設的 graph 完全不需要任何雲端語音服務。
 
 英文版是 [`board_quickstart.md`](board_quickstart.md)。更長的背景——為什麼把語音
 從 Vector Processor 搬到 CPU、量到什麼、擴充怎麼運作——在
@@ -10,35 +10,27 @@ graph 完全不需要任何雲端語音服務。
 
 ## 開始之前
 
-板子上要先有原廠的 LLM demo 在跑。那不是這個 repo 的一部分，這個 repo 也裝不了它。
-照開發套件手冊的方式啟動：
+板子的 LLM 是 vLLM（cooper-vllm）上的 Qwen3.5-4B，跑在板子的 NPU 上。先安裝一次；
+腳本照開發套件手冊的步驟做，需要套件裡的哪些東西寫在它的檔頭：
 
 ```bash
-cd /usr/share/ambarella/llm_demo/
-./run_llm_demo.sh --run_mode start --model_type 9 \
-    --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+tools/ambarella/install_qwen35_vllm.sh --model-tar ~/qwen3.5-4b_n1655-video.tar.gz
 ```
 
-**一定要從那個目錄執行。** 兩個程序都會繼承啟動器的工作目錄，那正是讓日誌落在
-`/tmp/log.txt` 的原因。從別的地方啟動，日誌就會跑到那個地方去，所有讀它的工具
-——包括 `check_llm_board.sh`——都會找不到。
-
-開機後第一次載入模型最久約 80 秒。`/tmp/log.txt` 出現 `Device ENABLE` 那一行才算
-就緒。這時健康的板子**正好兩個程序**：`test_llm` 和 `test_llm_client`；多於兩個
-代表前一次的執行還佔著 session。
-
-`--max_user 1` 是一次只能一段對話。上一段還在生成時送第二個請求會被拒絕，
-`/tmp/log.txt` 會寫出來：
-`current user num (2) > max_user_num (1), please wait 180s`。
-
-然後把上面每一項都檢查一遍：
+然後啟動它，並照 graph 的方式問一題：
 
 ```bash
-tools/ambarella/check_llm_board.sh
+tools/ambarella/serve_qwen35.sh start
+tools/ambarella/serve_qwen35.sh test
 ```
 
-它拿板子的實際狀態去比對手冊——啟動器、兩個程序、模型檔、日誌、port——只回報
-差異，不做任何修改。**每一行都要是 `MATCHES`** 才往下走。
+`start` 會先停掉正在跑的原廠 DeepSeek 7B daemon（兩者不能共用 NPU），再載入
+Qwen3.5-4B，大約一分鐘。裝好開機服務之後（見[或是：開機就常駐](#或是開機就常駐)），
+它開機就會啟動，這些都不用再打。
+
+原廠的 7B daemon（`/usr/share/ambarella/llm_demo/run_llm_demo.sh`）留在板子上，給
+LLM 比較和退回時用：`serve_qwen35.sh stop` 會切過去，`tools/ambarella/check_llm_board.sh`
+會拿它跟手冊比對。
 
 ## 安裝
 
@@ -70,7 +62,7 @@ placeholder 都有 `|` 預設值：
 
 | 變數 | 預設值 |
 | --- | --- |
-| `AMBARELLA_LLM_BASE_URL` | `http://127.0.0.1:8080` |
+| `QWEN_LLM_BASE_URL` | `http://127.0.0.1:8000/v1` |
 | `SHERPA_ONNX_ASR_MODEL_DIR` | `/home/lychee/zipformer_asr/models/...`，絕對路徑，見[模型](#模型) |
 | `SHERPA_ONNX_TTS_VOICE_DIR` | `/home/lychee/piper_tts/vits/...`，絕對路徑，見[模型](#模型) |
 | `WEATHERAPI_API_KEY` | 空字串——只有天氣工具會不能用 |
@@ -126,8 +118,8 @@ SHERPA_ONNX_TTS_VOICE_DIR=/home/<你的使用者>/piper_tts/vits/vits-piper-zh_C
 `.env.example` 裡 `SERVER_PORT` 預設是 8080，而在這塊板子上那個 port 已經被佔了。
 如果 playground 報 `Parse Error: Invalid header token`，代表它正打進 LLM——回來的是
 LLM 的錯誤頁，它的第二行 header 是一個沒有冒號的 `LLM`，不是合法的 header。
-把 `SERVER_PORT` 和 `AGENT_SERVER_URL` 移開，而 `AMBARELLA_LLM_BASE_URL`
-**要維持 8080**，那是 daemon 真正的位置。
+把 `SERVER_PORT` 和 `AGENT_SERVER_URL` 移開；8080 留給 7B daemon，板子切換到 7B
+時它就在那裡。
 
 ## 啟動
 
@@ -172,10 +164,16 @@ graph 都問它）和 `ten-api`（`task run-api-server`，log 寫到 `/tmp/task_
 | `serve_qwen35.sh stop` | 改由 7B 回應，直到 `start` 或下次開機 |
 | `serve_qwen35.sh start` | 改回 Qwen3.5-4B |
 
-要長期退回 7B：revert 把 graph 換過去的那個 commit
-（`git log --oneline --grep "the board's graphs on Qwen3.5-4B"`），再執行
-`sudo systemctl disable qwen35-vllm && sudo systemctl enable ambarella-llm` 和
-`tools/ambarella/serve_qwen35.sh stop`。
+要長期退回 7B：先用 `tools/ambarella/install_board_services.sh --uninstall` 移除服務，
+再 checkout 切換前的那個 commit，從那裡安裝——那個版本的腳本會把 7B 和 API server
+設成開機啟動：
+
+```bash
+git checkout "$(git log --format=%h -1 --grep 'run Qwen3.5-4B as a service')^"
+tools/ambarella/install_board_services.sh
+```
+
+之後只要再跑一次現在的腳本，就會切回 Qwen3.5-4B。
 
 天氣 graph 只有在 `ai_agents/.env` 設了 `WEATHERAPI_API_KEY` 時才會呼叫工具；沒設的話
 就不用工具直接回答。

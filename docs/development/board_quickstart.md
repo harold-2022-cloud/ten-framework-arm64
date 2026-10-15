@@ -1,7 +1,7 @@
 # Running the voice assistant on an Ambarella N1-655 board
 
-From a clone to a conversation. Speech runs on the board's CPU and the LLM is
-the vendor's daemon, so nothing in the default graph talks to a cloud speech
+From a clone to a conversation. Speech runs on the board's CPU and the LLM,
+Qwen3.5-4B, on its NPU, so nothing in the default graph talks to a cloud speech
 provider.
 
 A Traditional Chinese edition of this page is at
@@ -14,39 +14,30 @@ itself is in [`arm64_build.md`](arm64_build.md).
 
 ## Before you start
 
-The board needs the vendor's LLM demo already running. It is not part of this
-repo and this repo cannot install it. Start it the way the developer kit's
-guide says:
+The board's LLM is Qwen3.5-4B on vLLM (cooper-vllm), on the board's NPU.
+Install it once; the script follows the developer kit's guide, and its header
+says what it needs from the kit:
 
 ```bash
-cd /usr/share/ambarella/llm_demo/
-./run_llm_demo.sh --run_mode start --model_type 9 \
-    --model_path ~/demo_resources/llm_demo --ip 127.0.0.1 --max_user 1
+tools/ambarella/install_qwen35_vllm.sh --model-tar ~/qwen3.5-4b_n1655-video.tar.gz
 ```
 
-**Run it from that directory.** Both processes inherit the launcher's working
-directory, and that is what puts the log at `/tmp/log.txt`. Started from
-somewhere else, the log lands there instead and every tool that reads it —
-including `check_llm_board.sh` — finds nothing.
-
-The first load after a boot takes up to about 80 seconds. It is ready when
-`/tmp/log.txt` contains a `Device ENABLE` line. A healthy board then shows
-exactly two processes, `test_llm` and `test_llm_client`; more than that means
-an earlier run is still holding a session.
-
-`--max_user 1` is one conversation at a time. A second request while one is
-still generating is refused, and `/tmp/log.txt` says so:
-`current user num (2) > max_user_num (1), please wait 180s`.
-
-Then check all of it:
+Then start it, and ask it one question the way the graphs ask:
 
 ```bash
-tools/ambarella/check_llm_board.sh
+tools/ambarella/serve_qwen35.sh start
+tools/ambarella/serve_qwen35.sh test
 ```
 
-That compares the board against the guide — the launcher, the two processes,
-the model files, the log, the ports — and reports differences rather than
-fixing them. Every line should say `MATCHES` before you go further.
+`start` stops the vendor's DeepSeek 7B daemon if it runs, since the two cannot
+share the NPU, and loads Qwen3.5-4B in about a minute. Once the services are
+installed ([Or keep it running from power-on](#or-keep-it-running-from-power-on)),
+it starts at power-on and none of this is typed again.
+
+The vendor's 7B daemon (`/usr/share/ambarella/llm_demo/run_llm_demo.sh`) stays
+on the board for the LLM comparison and as a way back: `serve_qwen35.sh stop`
+switches to it, and `tools/ambarella/check_llm_board.sh` compares it with the
+guide.
 
 ## Install
 
@@ -80,7 +71,7 @@ graph reads has a `|` default in `property.json`:
 
 | Variable | Default |
 | --- | --- |
-| `AMBARELLA_LLM_BASE_URL` | `http://127.0.0.1:8080` |
+| `QWEN_LLM_BASE_URL` | `http://127.0.0.1:8000/v1` |
 | `SHERPA_ONNX_ASR_MODEL_DIR` | `/home/lychee/zipformer_asr/models/...` — absolute, see [The models](#the-models) |
 | `SHERPA_ONNX_TTS_VOICE_DIR` | `/home/lychee/piper_tts/vits/...` — absolute, see [The models](#the-models) |
 | `WEATHERAPI_API_KEY` | empty — only the weather tool stops working |
@@ -141,8 +132,8 @@ spoken word.
 already taken. If the playground reports `Parse Error: Invalid header token`,
 it is proxying into the LLM: what comes back is an LLM error page whose second
 header line is the bare word `LLM`, which is not a valid header. Move
-`SERVER_PORT` and `AGENT_SERVER_URL`, and leave `AMBARELLA_LLM_BASE_URL` on
-8080 where the daemon actually is.
+`SERVER_PORT` and `AGENT_SERVER_URL`; 8080 stays the 7B daemon's, for when the
+board is switched to it.
 
 ## Run
 
@@ -192,10 +183,17 @@ two cannot run at once; `tools/ambarella/serve_qwen35.sh` switches:
 | `serve_qwen35.sh stop` | the 7B serves, until `start` or the next boot |
 | `serve_qwen35.sh start` | Qwen3.5-4B serves again |
 
-To go back to the 7B for good, revert the commit that moved the graphs
-(`git log --oneline --grep "the board's graphs on Qwen3.5-4B"`), then run
-`sudo systemctl disable qwen35-vllm && sudo systemctl enable ambarella-llm`
-and `tools/ambarella/serve_qwen35.sh stop`.
+To go back to the 7B for good, remove the services with
+`tools/ambarella/install_board_services.sh --uninstall`, check out the commit
+before the switch, and install from there -- that revision's script sets up
+the 7B and the API server at power-on:
+
+```bash
+git checkout "$(git log --format=%h -1 --grep 'run Qwen3.5-4B as a service')^"
+tools/ambarella/install_board_services.sh
+```
+
+Running the current script again switches back to Qwen3.5-4B.
 
 The weather graphs call their tool only when `WEATHERAPI_API_KEY` is set in
 `ai_agents/.env`; without it they answer without the tool.
