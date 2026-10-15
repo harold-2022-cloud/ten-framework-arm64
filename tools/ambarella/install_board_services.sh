@@ -3,8 +3,8 @@
 # This file is part of TEN Framework, an open source project.
 # Licensed under the Apache License, Version 2.0.
 #
-# Make the board serve from power-on with nothing to type afterwards: two
-# systemd services, enabled and started. Run once.
+# Make the board serve from power-on with nothing to type afterwards: its
+# systemd services, enabled and started. Run once, and again after a pull.
 #
 #   tools/ambarella/install_board_services.sh              install, enable, start
 #   git pull --ff-only && tools/ambarella/install_board_services.sh   update
@@ -12,17 +12,27 @@
 #   tools/ambarella/install_board_services.sh --print      the unit files; nothing changes
 #   tools/ambarella/install_board_services.sh --uninstall  stop, disable, remove
 #
-#   ambarella-llm  the vendor's LLM daemon on 8080: run_llm_demo.sh --run_mode
-#                  start at boot and stop at shutdown, run from its own
-#                  directory so its log stays /tmp/log.txt; as root, which is
-#                  what its processes run as anyway
+#   qwen35-vllm    Qwen3.5-4B on vLLM, port 8000, the LLM every board graph
+#                  asks: serve_qwen35.sh exec, as you, its output appended to
+#                  ~/workspace/vllm_qwen35.log by the process itself; started
+#                  when /v1/models answers (serve_qwen35.sh ready, up to 300 s;
+#                  loading takes about 55); restarted if it dies. Starting it
+#                  stops ambarella-llm and the other way round: one model on
+#                  the NPU at a time
+#   ambarella-llm  the vendor's DeepSeek 7B daemon on 8080, installed but not
+#                  started at boot: serve_qwen35.sh stop switches to it, for
+#                  the LLM comparison or as a way back. run_llm_demo.sh
+#                  --run_mode start at its start and stop at its stop, run
+#                  from its own directory so its log stays /tmp/log.txt; as
+#                  root, which is what its processes run as anyway
 #   ten-api        the Go API server on SERVER_PORT (8081): `task
 #                  run-api-server` in examples/voice-assistant, as you, with
 #                  this terminal's environment (written to /etc/ten-api.env,
 #                  readable by root only) -- the same .env and environment as
-#                  a run by hand;
-#                  restarted if it dies; its output appended to
-#                  /tmp/task_run.log, where the checks look
+#                  a run by hand; started after qwen35-vllm, so that it takes
+#                  no request before the LLM answers; restarted if it dies;
+#                  its output appended to /tmp/task_run.log, where the checks
+#                  look
 #
 # With these up, any phone can ask for meeting minutes at any time: the
 # server starts the meeting worker for the request, the record stays on the
@@ -30,13 +40,18 @@
 #
 # A server started by hand (task run) holds the port, so it is stopped and the
 # service takes over -- the playground stops with it; `task run-frontend` in
-# examples/voice-assistant brings it back. An LLM daemon already running is
-# left as it is; the service takes it over at the next boot.
+# examples/voice-assistant brings it back. The board is switched to
+# Qwen3.5-4B under its service -- the 7B stopped if it serves, a Qwen3.5-4B
+# started by hand replaced -- but not while a meeting worker is up, whose
+# meeting would lose the LLM halfway; the services then take over at the
+# next boot, or when this runs again.
 #
 # Run it again after every git pull: when the API server's Go code changed,
-# server/bin/api is built again and ten-api restarted -- but not while a
-# meeting worker is up, so a meeting being processed is not cut short; it
-# then says to run this again later.
+# server/bin/api is built again and ten-api restarted, and when
+# serve_qwen35.sh starts vLLM on other arguments than the running one's,
+# qwen35-vllm is restarted -- neither while a meeting worker is up, so a
+# meeting being processed is not cut short; it then says to run this again
+# later.
 #
 # Run it as the user who runs `task run`, not with sudo: sudo asks for your
 # password for systemctl and /etc/systemd/system. The LLM daemon's options
@@ -51,14 +66,18 @@ case "${1:-}" in
   --status) MODE=status ;;
   --print) MODE=print ;;
   --uninstall) MODE=uninstall ;;
-  -h|--help) sed -n '6,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "unknown option: $1" >&2; exit 2 ;;
 esac
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
-SERVER_DIR="$REPO_ROOT/ai_agents/server"
-ENV_FILE="$REPO_ROOT/ai_agents/.env"
+SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/ai_agents/server}"
+ENV_FILE="${ENV_FILE:-$REPO_ROOT/ai_agents/.env}"
+SERVE="${SERVE:-$REPO_ROOT/tools/ambarella/serve_qwen35.sh}"
+QWEN_VLLM="${QWEN_VLLM:-$HOME/workspace/cooper-vllm/venv_vllm/bin/vllm}"
+UPLOADER="${MEETING_UPLOADER:-http://127.0.0.1:8765}"
+TASK_LOG="${TASK_LOG:-/tmp/task_run.log}"
 UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 ENV_OUT="${ENV_OUT:-/etc/ten-api.env}"
 LLM_DIR="${LLM_DIR:-/usr/share/ambarella/llm_demo}"
@@ -139,11 +158,43 @@ WantedBy=multi-user.target
 EOF
 }
 
+qwen_unit() {
+  cat <<EOF
+[Unit]
+Description=Qwen3.5-4B on vLLM (cooper-vllm), port 8000: the LLM every board graph asks
+After=network-online.target ambarella-llm.service
+Wants=network-online.target
+# One model on the NPU at a time: starting either one stops the other, the
+# stop ordered before the start (After=).
+Conflicts=ambarella-llm.service
+
+[Service]
+Type=simple
+User=$RUN_USER
+WorkingDirectory=$HOME
+Environment=$(q "HOME=$HOME")
+Environment=$(q "PATH=$PATH")
+# The process appends to ~/workspace/vllm_qwen35.log itself, not systemd
+# (see ten-api.service).
+ExecStart=$(q "$SERVE") exec
+# Started when /v1/models answers, about 55 s in: what is ordered after this
+# unit, ten-api, starts once the LLM can answer.
+ExecStartPost=$(q "$SERVE") ready 300
+TimeoutStartSec=330
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 api_unit() {
   cat <<EOF
 [Unit]
 Description=TEN API server: meeting minutes and the voice assistant ($SERVER)
-After=network-online.target ambarella-llm.service
+After=network-online.target qwen35-vllm.service
 Wants=network-online.target
 
 [Service]
@@ -156,7 +207,7 @@ EnvironmentFile=$ENV_OUT
 # The shell, running as $RUN_USER, opens the log -- not systemd: with
 # fs.protected_regular, root may not open another user's file in /tmp for
 # append, and the service died before it ran (status 209/STDOUT).
-ExecStart=/bin/sh -c $(q "exec '$TASK' run-api-server >> /tmp/task_run.log 2>&1")
+ExecStart=/bin/sh -c $(q "exec '$TASK' run-api-server >> '$TASK_LOG' 2>&1")
 Restart=on-failure
 RestartSec=5
 
@@ -166,26 +217,36 @@ EOF
 }
 
 status() {
-  local enabled active daemons clients
-  for unit in ambarella-llm ten-api; do
+  local enabled active now qwen_up api_start
+  for unit in qwen35-vllm ambarella-llm ten-api; do
     # Both print the state even when they exit non-zero (disabled, inactive).
     enabled=$(systemctl is-enabled "$unit" 2>/dev/null)
     active=$(systemctl is-active "$unit" 2>/dev/null)
     printf '  %-14s enabled: %-9s active: %s\n' "$unit" "${enabled:-no}" "${active:-no}"
   done
-  daemons=$(pgrep -cx test_llm)
-  clients=$(pgrep -cx test_llm_client)
-  if [[ $daemons -eq 1 && $clients -eq 1 ]]; then
-    ok "LLM daemon running: test_llm and test_llm_client, one of each"
-  elif [[ $daemons -eq 0 && $clients -eq 0 ]]; then
-    note "no LLM daemon process (test_llm) running"
-  else
-    note "LLM processes: $daemons test_llm, $clients test_llm_client; the guide shows one of" \
-      "each -- an earlier start may still hold a session (tools/ambarella/check_llm_board.sh)"
+  now=$("$SERVE" which 2>/dev/null)
+  case "$now" in
+    qwen) ok "the LLM: Qwen3.5-4B answers" ;;
+    7b) note "the LLM: the DeepSeek 7B daemon serves, not Qwen3.5-4B, which every board graph asks; serve_qwen35.sh start switches back" ;;
+    *) note "the LLM: none answers (Qwen3.5-4B loads for about a minute after boot)" ;;
+  esac
+  if [[ $now == qwen ]] && "$SERVE" stale 2>/dev/null; then
+    note "vLLM runs on older arguments than serve_qwen35.sh's: run this again, or serve_qwen35.sh restart"
+  fi
+  # At boot ten-api waits for Qwen3.5-4B (After= qwen35-vllm, whose start ends
+  # when it answers). Both in microseconds since boot.
+  qwen_up=$(systemctl show qwen35-vllm -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+  api_start=$(systemctl show ten-api -p ExecMainStartTimestampMonotonic --value 2>/dev/null)
+  if [[ "${qwen_up:-0}" =~ ^[1-9][0-9]*$ && "${api_start:-0}" =~ ^[1-9][0-9]*$ ]]; then
+    if ((api_start >= qwen_up)); then
+      ok "since boot: Qwen3.5-4B up at $((qwen_up / 1000000)) s, ten-api started at $((api_start / 1000000)) s"
+    else
+      note "since boot: ten-api started at $((api_start / 1000000)) s, before Qwen3.5-4B was up at $((qwen_up / 1000000)) s -- one of them was started again by hand"
+    fi
   fi
   if answers "$SERVER/graphs"; then ok "API server answers at $SERVER"; else note "nothing answers at $SERVER"; fi
-  if answers "http://127.0.0.1:8765/meetings"; then
-    note "a meeting worker is up (8765 answers): a meeting is in progress or was just served"
+  if answers "$UPLOADER/meetings"; then
+    note "a meeting worker is up ($UPLOADER answers): a meeting is in progress or was just served"
   fi
 }
 
@@ -195,8 +256,8 @@ if [[ $MODE == status ]]; then
 fi
 
 if [[ $MODE == uninstall ]]; then
-  sudo systemctl disable --now ten-api ambarella-llm 2>/dev/null
-  sudo rm -f "$UNIT_DIR/ten-api.service" "$UNIT_DIR/ambarella-llm.service"
+  sudo systemctl disable --now ten-api qwen35-vllm ambarella-llm 2>/dev/null
+  sudo rm -f "$UNIT_DIR/ten-api.service" "$UNIT_DIR/qwen35-vllm.service" "$UNIT_DIR/ambarella-llm.service"
   sudo systemctl daemon-reload
   ok "removed; start by hand again as board_quickstart.md says"
   exit 0
@@ -207,11 +268,16 @@ fi
   fail "no server/bin/api: run ai_agents/agents/scripts/install_board_arm64.sh first"
 [[ -x "$LLM_DIR/run_llm_demo.sh" ]] || fail "no $LLM_DIR/run_llm_demo.sh: is the vendor's LLM demo installed?"
 [[ -d "$LLM_MODEL_PATH" ]] || fail "no model at $LLM_MODEL_PATH (LLM_MODEL_PATH=... picks another)"
+[[ -x "$QWEN_VLLM" ]] || fail "Qwen3.5-4B is not installed ($QWEN_VLLM): tools/ambarella/install_qwen35_vllm.sh"
+[[ -x "$SERVE" ]] || fail "no $SERVE"
 
 if [[ $MODE == print ]]; then
   echo "# $ENV_OUT (variable names; values are written only on install)"
   environment | cut -d= -f1 | tr '\n' ' '
   echo
+  echo
+  echo "# $UNIT_DIR/qwen35-vllm.service"
+  qwen_unit
   echo
   echo "# $UNIT_DIR/ambarella-llm.service"
   llm_unit
@@ -223,9 +289,9 @@ fi
 
 [[ $(id -u) -ne 0 ]] || fail "run this as the user who runs task run, not with sudo"
 
-# The service appends to /tmp/task_run.log as $RUN_USER.
-if [[ -e /tmp/task_run.log && ! -w /tmp/task_run.log ]]; then
-  sudo chown "$RUN_USER" /tmp/task_run.log || fail "/tmp/task_run.log is not $RUN_USER's to write"
+# The service appends to $TASK_LOG as $RUN_USER.
+if [[ -e "$TASK_LOG" && ! -w "$TASK_LOG" ]]; then
+  sudo chown "$RUN_USER" "$TASK_LOG" || fail "$TASK_LOG is not $RUN_USER's to write"
 fi
 
 why_not() {
@@ -239,36 +305,35 @@ echo "== units"
 # What ten-api runs with now, to tell whether it must restart to pick up a change.
 was=$(sudo cat "$UNIT_DIR/ten-api.service" "$ENV_OUT" 2>/dev/null | md5sum)
 tmp=$(mktemp -d)
+qwen_unit > "$tmp/qwen35-vllm.service"
 llm_unit > "$tmp/ambarella-llm.service"
 api_unit > "$tmp/ten-api.service"
 environment > "$tmp/ten-api.env"
 nvars=$(grep -c . "$tmp/ten-api.env")
 sudo install -m 600 -o root -g root "$tmp/ten-api.env" "$ENV_OUT" ||
   fail "could not write $ENV_OUT"
-sudo install -m 644 "$tmp/ambarella-llm.service" "$tmp/ten-api.service" "$UNIT_DIR/" ||
+sudo install -m 644 "$tmp/qwen35-vllm.service" "$tmp/ambarella-llm.service" "$tmp/ten-api.service" "$UNIT_DIR/" ||
   fail "could not write $UNIT_DIR"
 rm -rf "$tmp"
 sudo systemctl daemon-reload
-sudo systemctl enable ambarella-llm ten-api >/dev/null 2>&1 || fail "systemctl enable failed"
-ok "ambarella-llm and ten-api installed in $UNIT_DIR and enabled at boot"
+sudo systemctl enable qwen35-vllm ten-api >/dev/null 2>&1 || fail "systemctl enable failed"
+sudo systemctl disable ambarella-llm >/dev/null 2>&1
+ok "qwen35-vllm and ten-api installed in $UNIT_DIR and enabled at boot; ambarella-llm installed, not started at boot"
 ok "ten-api runs with this terminal's environment: $nvars variables in $ENV_OUT"
 changed=0
 [[ "$(sudo cat "$UNIT_DIR/ten-api.service" "$ENV_OUT" 2>/dev/null | md5sum)" != "$was" ]] && changed=1
 
-echo "== LLM daemon"
-if pgrep -x 'test_llm|test_llm_client' >/dev/null; then
-  note "already running, started by hand: left as it is; the service runs it from the next boot"
+echo "== LLM"
+now=$("$SERVE" which)
+if answers "$UPLOADER/meetings"; then
+  note "a meeting worker is up: the board keeps its LLM ($now) for now, so that its meeting is not cut short; Qwen3.5-4B serves from the next boot, or run this again when it is idle"
+elif [[ $now == qwen ]] && systemctl is-active --quiet qwen35-vllm && ! "$SERVE" stale; then
+  ok "Qwen3.5-4B answers, run by qwen35-vllm"
+elif [[ $now == qwen ]]; then
+  # Started by hand, or on older arguments: the service takes over.
+  "$SERVE" restart || fail "Qwen3.5-4B did not come back under qwen35-vllm (above)"
 else
-  sudo systemctl start ambarella-llm || { why_not ambarella-llm; fail "ambarella-llm did not start"; }
-  for _ in $(seq 150); do
-    grep -q "Device ENABLE" /tmp/log.txt 2>/dev/null && break
-    sleep 1
-  done
-  if grep -q "Device ENABLE" /tmp/log.txt 2>/dev/null; then
-    ok "LLM daemon up (Device ENABLE in /tmp/log.txt)"
-  else
-    note "started, but no Device ENABLE in /tmp/log.txt after 150 s; the first load can be slow"
-  fi
+  "$SERVE" start || fail "Qwen3.5-4B did not start under qwen35-vllm (above)"
 fi
 
 echo "== API server"
@@ -315,8 +380,8 @@ for _ in $(seq 30); do
 done
 if ! answers "$SERVER/graphs"; then
   why_not ten-api
-  echo "  -- tail /tmp/task_run.log"
-  tail -5 /tmp/task_run.log 2>&1 | sed 's/^/     /'
+  echo "  -- tail $TASK_LOG"
+  tail -5 "$TASK_LOG" 2>&1 | sed 's/^/     /'
   fail "ten-api is installed but $SERVER does not answer"
 fi
 ok "API server answers at $SERVER, run by the ten-api service"
@@ -324,5 +389,5 @@ ok "API server answers at $SERVER, run by the ten-api service"
 echo
 status
 echo
-echo "From now on both start at power-on. To check after a reboot:"
+echo "From now on Qwen3.5-4B and the API server start at power-on (the 7B does not). To check after a reboot:"
 echo "  tools/ambarella/install_board_services.sh --status"

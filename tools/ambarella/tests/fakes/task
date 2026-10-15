@@ -1,0 +1,3 @@
+#!/bin/sh
+# task, faked: install_board_services.sh only needs it to be there.
+exit 0

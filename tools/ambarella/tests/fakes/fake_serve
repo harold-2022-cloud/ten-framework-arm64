@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# serve_qwen35.sh, faked: every call written to $FAKE_LOG as "serve ...";
+# which says $FAKE_WHICH (qwen); stale is true when $FAKE_STALE is set;
+# test sleeps $SLOW_TEST seconds when set; the rest succeed. Its last line
+# says it finished: a run whose output pipe died with it would not have it.
+echo "serve $*" >> "$FAKE_LOG"
+case "${1:-}" in
+  which) echo "${FAKE_WHICH:-qwen}"; exit 0 ;;
+  stale) [[ -n "${FAKE_STALE:-}" ]]; exit ;;
+esac
+echo "  (fake serve_qwen35.sh $*)"
+[[ "${1:-}" == test && -n "${SLOW_TEST:-}" ]] && sleep "$SLOW_TEST"
+echo "  (fake serve_qwen35.sh ${1:-}, done)"
+exit 0
