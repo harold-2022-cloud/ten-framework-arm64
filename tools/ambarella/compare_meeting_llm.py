@@ -12,6 +12,8 @@ afterwards.
   python3.12 tools/ambarella/compare_meeting_llm.py run --label qwen35-4b --out DIR \\
       --openai http://127.0.0.1:8000/v1 --model qwen3.5_4B
   python3.12 tools/ambarella/compare_meeting_llm.py compare DIR
+  python3.12 tools/ambarella/compare_meeting_llm.py run ... --prompts explicit-owners
+  python3.12 tools/ambarella/compare_meeting_llm.py compare DIR OTHER_DIR/qwen35-4b qwen35-4b
 
 tools/ambarella/compare_meeting_llm.sh runs all three and switches the
 board's LLM in between.
@@ -27,14 +29,19 @@ run      asks what meeting_control_python asks, the way it asks it (flow.py,
          whatever follows </think> if there is one (ambarella_llm2_python's
          ambarella.py), stripped. Every prompt and answer is saved, and
          DIR/<label>/run.json after each answer: a round that stopped goes on
-         where it was when it is run again.
+         where it was when it is run again. --prompts NAME asks a set from
+         meeting_prompt_variants.json instead of the shipped one; the
+         prompts asked are kept in run.json.
 compare  the two rounds side by side. Per topic: seconds, characters, the
          share copied from the transcript, people the meeting does not have
          (titles, owners, numbered placeholders), speaker numbers beyond the
          meeting's, repeated lines, U+FFFD. For the conclusion the same, and
          whether parse_actions() found action items. Whether both rounds were
          asked the same prompts is checked, not assumed. Prints the table and
-         writes DIR/compare.html with the answers next to each other.
+         writes DIR/compare.html with the answers next to each other. A round
+         may also be named by its folder, from another comparison: the same
+         model under two prompt sets, say; the page is then
+         DIR/compare-<one>-vs-<other>.html.
 
 Run it under python3.12, as check_meeting_board.py: the prompts come from
 meeting_control_python's config.py, which needs pydantic.
@@ -65,6 +72,8 @@ ACTIONS = os.path.join(
     "meeting_control_python",
     "actions.py",
 )
+VARIANTS = os.path.join(HERE, "meeting_prompt_variants.json")
+SHIPPED = "shipped"
 THINK_END = "</think>"
 # The graph's llm node gives up on a turn after this long (llm
 # total_timeout_s); an answer that takes longer is lost there.
@@ -342,9 +351,24 @@ class OpenAI:
 # --- run ----------------------------------------------------------------
 
 
+def prompts_for(name):
+    """(segment_prompt, meeting_prompt): the shipped ones from the
+    extension's config.py, or a set from meeting_prompt_variants.json."""
+    if name == SHIPPED:
+        control = PMS.control_config()
+        return control.segment_prompt, control.meeting_prompt
+    with open(VARIANTS, encoding="utf-8") as f:
+        sets = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
+    if name not in sets:
+        sys.exit(
+            f"no prompt set {name!r}; there are: {SHIPPED}, " + ", ".join(sets)
+        )
+    return sets[name]["segment_prompt"], sets[name]["meeting_prompt"]
+
+
 def run(args):
     record_path, record = pick_record(args.record)
-    control = PMS.control_config()
+    segment_prompt, meeting_prompt = prompts_for(args.prompts)
     topics = record["topics"]
     wanted = chosen(args.topics, len(topics))
     llm = (
@@ -364,8 +388,11 @@ def run(args):
         "record_sha": record_sha,
         "speakers": speaker_count(record),
         "topics_asked": sorted(wanted),
-        "segment_prompt_sha": sha1(control.segment_prompt),
-        "meeting_prompt_sha": sha1(control.meeting_prompt),
+        "prompts": args.prompts,
+        "segment_prompt": segment_prompt,
+        "meeting_prompt": meeting_prompt,
+        "segment_prompt_sha": sha1(segment_prompt),
+        "meeting_prompt_sha": sha1(meeting_prompt),
     }
     earlier = {}
     if os.path.isfile(state_path):
@@ -386,7 +413,7 @@ def run(args):
     say(f"{args.label}: {llm.name}")
     info(
         f"record {record_path} ({len(topics)} topics, {head['speakers']} speakers); "
-        f"asking topics {args.topics or 'all'}"
+        f"asking topics {args.topics or 'all'}; prompts: {args.prompts}"
     )
     if isinstance(llm, Daemon):
         PMS.thinking()
@@ -455,7 +482,7 @@ def run(args):
     for n, topic in enumerate(topics, 1):
         if n not in wanted or topic.get("error") or not topic.get("utterances"):
             continue
-        prompt = control.segment_prompt + topic_lines(topic)
+        prompt = segment_prompt + topic_lines(topic)
         summaries[n] = ask(
             "topic",
             n,
@@ -474,7 +501,7 @@ def run(args):
         f"第{n}段：{s}" for n, s in sorted(summaries.items()) if s
     )
     if body:
-        conclusion = ask("conclusion", 0, control.meeting_prompt + body, {})
+        conclusion = ask("conclusion", 0, meeting_prompt + body, {})
         parse = load("actions", ACTIONS).parse_actions
         actions, error = parse(conclusion)
         state["actions"] = actions
@@ -552,47 +579,86 @@ def measures(item, speakers, summaries_mention):
     }
 
 
+def round_path(root, name):
+    """A round: a label in root, or a round's own folder from elsewhere."""
+    path = os.path.expanduser(name)
+    if os.sep not in name and not os.path.isdir(path):
+        path = os.path.join(root, name)
+    return path if path.endswith(".json") else os.path.join(path, "run.json")
+
+
 def compare(args):
     root = os.path.expanduser(args.dir)
     rounds = []
-    for label in args.labels or sorted(
+    for name in args.labels or sorted(
         os.path.basename(os.path.dirname(p))
         for p in glob.glob(os.path.join(root, "*", "run.json"))
     ):
-        with open(os.path.join(root, label, "run.json"), encoding="utf-8") as f:
-            rounds.append(json.load(f))
+        path = round_path(root, name)
+        with open(path, encoding="utf-8") as f:
+            r = json.load(f)
+        r.setdefault("prompts", SHIPPED)  # rounds from before prompt sets
+        if r["prompts"] == SHIPPED and not r.get("segment_prompt"):
+            try:  # the text as shipped now; needs the extension's pydantic
+                r["segment_prompt"], r["meeting_prompt"] = prompts_for(SHIPPED)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        r["_folder"] = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        rounds.append(r)
     if len(rounds) != 2:
         sys.exit(
             f"{root} holds {len(rounds)} rounds; compare takes two (give the labels)"
         )
     a, b = rounds[0], rounds[1]
-    say(f"{a['label']}  vs  {b['label']}")
+    # What each round is called here: its label, then its prompt set and its
+    # comparison's folder as far as it takes to tell the two apart.
+    for r in rounds:
+        r["_name"] = r["label"]
+    if a["prompts"] != b["prompts"]:
+        for r in rounds:
+            r["_name"] += f" ({r['prompts']})"
+    if a["_name"] == b["_name"]:
+        for r in rounds:
+            r["_name"] += f" [{r['_folder']}]"
+    say(f"{a['_name']}  vs  {b['_name']}")
     problems = []
-    for key in ("record_sha", "segment_prompt_sha", "meeting_prompt_sha"):
-        if a.get(key) != b.get(key):
-            problems.append(f"{key} differs: {a.get(key)} / {b.get(key)}")
+    if a.get("record_sha") != b.get("record_sha"):
+        problems.append(
+            f"different records: {a.get('record')} / {b.get('record')}"
+        )
+    if a["prompts"] != b["prompts"]:
+        info(
+            f"asked different prompt sets, on purpose: {a['prompts']} / {b['prompts']}"
+        )
+    else:
+        for key in ("segment_prompt_sha", "meeting_prompt_sha"):
+            if a.get(key) != b.get(key):
+                problems.append(f"{key} differs: {a.get(key)} / {b.get(key)}")
     items = {}
     for r in rounds:
         for item in r["items"]:
-            items.setdefault((item["kind"], item["n"]), {})[r["label"]] = item
-    for (kind, n), pair in sorted(items.items()):
-        if kind == "topic" and len(pair) == 2:
-            sha_a, sha_b = (pair[r["label"]]["prompt_sha"] for r in rounds)
-            if sha_a != sha_b:
-                problems.append(
-                    f"topic {n} was asked differently: {sha_a} / {sha_b}"
-                )
+            items.setdefault((item["kind"], item["n"]), {})[r["_name"]] = item
+    if a["prompts"] == b["prompts"]:
+        for (kind, n), pair in sorted(items.items()):
+            if kind == "topic" and len(pair) == 2:
+                sha_a, sha_b = (pair[r["_name"]]["prompt_sha"] for r in rounds)
+                if sha_a != sha_b:
+                    problems.append(
+                        f"topic {n} was asked differently: {sha_a} / {sha_b}"
+                    )
     for p in problems:
         info(f"NOT THE SAME QUESTIONS: {p}")
     if not problems:
         info(
-            f"the same record ({a['record_sha']}) and the same prompts in both rounds"
+            f"the same record ({a['record_sha']})"
+            + (" and the same prompts" if a["prompts"] == b["prompts"] else "")
+            + " in both rounds"
         )
 
     speakers = a["speakers"]
     # Per round: every speaker its topic summaries name.
     named = {
-        r["label"]: set().union(
+        r["_name"]: set().union(
             *(
                 mentioned(i["answer"])
                 for i in r["items"]
@@ -616,7 +682,7 @@ def compare(args):
             )
         )
 
-    labels = [a["label"], b["label"]]
+    labels = [a["_name"], b["_name"]]
     width = 60
     print(
         f"\n  {'':<12}"
@@ -668,7 +734,7 @@ def compare(args):
         lost = [it for it in r["items"] if it["total_s"] > GIVE_UP_S]
         unfinished = [it for it in r["items"] if not it["finished"]]
         info(
-            f"{r['label']}: {total / 60:.1f} minutes in all; "
+            f"{r['_name']}: {total / 60:.1f} minutes in all; "
             f"{len(lost)} over the graph's {GIVE_UP_S:.0f} s; "
             f"{len(unfinished)} unfinished; parse_actions: "
             f"{len(r.get('actions') or [])} item(s)"
@@ -683,14 +749,21 @@ def compare(args):
         "(asked for 3-5; ! when not, or a list); rep: repeated lines"
     )
 
-    page = os.path.join(root, "compare.html")
+    if args.labels and any(os.sep in n for n in args.labels):
+        safe = [
+            re.sub(r"[^A-Za-z0-9._-]+", "_", r["_name"]).strip("_")
+            for r in rounds
+        ]
+        page = os.path.join(root, f"compare-{safe[0]}-vs-{safe[1]}.html")
+    else:
+        page = os.path.join(root, "compare.html")
     with open(page, "w", encoding="utf-8") as f:
         f.write(render(rounds, rows, problems, speakers))
     print(f"\nside by side: {page}", flush=True)
 
 
 def render(rounds, rows, problems, speakers):
-    labels = [r["label"] for r in rounds]
+    labels = [r["_name"] for r in rounds]
     e = html.escape
     columns = 10
 
@@ -786,13 +859,19 @@ def render(rounds, rows, problems, speakers):
             f'<section><h3>{title}</h3>{context}<div class="pair">{answers}</div></section>'
         )
     actions = "".join(
-        f"<div class=\"answer\"><h4>{e(r['label'])}：parse_actions</h4><pre>"
+        f"<div class=\"answer\"><h4>{e(r['_name'])}：parse_actions</h4><pre>"
         + e(json.dumps(r.get("actions") or [], ensure_ascii=False, indent=1))
         + (f"\n\n{e(r['actions_error'])}" if r.get("actions_error") else "")
         + "</pre></div>"
         for r in rounds
     )
     warn = "".join(f'<p class="bad">提示詞不同：{e(p)}</p>' for p in problems)
+    asked = "".join(
+        f"<details><summary>{e(r['_name'])} 用的提示詞（{e(r['prompts'])}）</summary>"
+        f"<pre>摘要：{e(r.get('segment_prompt') or '（這一輪沒有存下）')}"
+        f"結論：{e(r.get('meeting_prompt') or '（這一輪沒有存下）')}</pre></details>"
+        for r in rounds
+    )
     return f"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -814,13 +893,14 @@ def render(rounds, rows, problems, speakers):
  details pre {{ color: #57606a; font-size: 14px; }}
 </style></head><body>
 <h1>會議紀錄 LLM 比較：{e(' vs '.join(labels))}</h1>
-<p>同一份紀錄（{e(rounds[0]['record'])}，{speakers} 位說話人）、同一份提示詞。
+<p>同一份紀錄（{e(rounds[0]['record'])}，{speakers} 位說話人）；提示詞：{e(' / '.join(r['prompts'] for r in rounds))}。
 「抄寫」是回答中與逐字稿逐字相同（連續 10 字以上）的比例；「捏造的人」是會議裡沒有的稱謂、負責人或編號佔位；
 「沒發言卻被提到」是摘要提到、但在那段逐字稿裡一句話都沒說的說話人（結論則是各段摘要都沒提過的說話人），在回答裡標紅；
 「Markdown」是標題、粗體、項目符號的數量，App 與 minutes.txt 會原樣顯示這些符號；
 「句數」對照摘要要求的三到五句，寫成條列也標紅；
 紅色秒數表示超過 graph 的 {GIVE_UP_S:.0f} 秒上限或沒寫完。</p>
 {warn}
+{asked}
 <table><tr><th></th>{head}</tr><tr><th></th>{sub}</tr>{''.join(table)}</table>
 {''.join(sections)}
 <section><h3>待辦事項（parse_actions）</h3><div class="pair">{actions}</div></section>
@@ -850,9 +930,20 @@ def main():
     r.add_argument("--model", default="qwen3.5_4B")
     r.add_argument("--max-tokens", type=int, default=2048)
     r.add_argument("--max-seconds", type=float, default=600.0)
+    r.add_argument(
+        "--prompts",
+        default=SHIPPED,
+        help=f"{SHIPPED} (meeting_control_python's), or a set in "
+        "meeting_prompt_variants.json",
+    )
     c = sub.add_parser("compare", help="two rounds side by side")
-    c.add_argument("dir")
-    c.add_argument("labels", nargs="*")
+    c.add_argument("dir", help="the comparison's folder; the page goes here")
+    c.add_argument(
+        "labels",
+        nargs="*",
+        help="two rounds: labels in DIR, or round folders from elsewhere "
+        "(default: the two rounds in DIR)",
+    )
     args = p.parse_args()
     if args.what == "run":
         run(args)

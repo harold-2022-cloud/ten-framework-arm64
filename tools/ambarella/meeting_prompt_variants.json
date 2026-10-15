@@ -1,0 +1,8 @@
+{
+  "_about": "Prompt sets for compare_meeting_llm.py --prompts NAME, beside the shipped ones (meeting_control_python/config.py, --prompts shipped). Keys starting with _ are notes.",
+  "explicit-owners": {
+    "_why": "On the 2026-10-15 board comparison Qwen3.5-4B gave work to real speakers that nobody in the meeting had assigned (topics 1 and 4), and carried it into the action items; the shipped segment_prompt asks for 谁要做什么 and for speaker numbers. This set asks for an owner only where the transcript states one, and for no Markdown in the conclusion, which the app and minutes.txt show as typed.",
+    "segment_prompt": "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、做了什么决定。只有逐字稿里明确说出由谁负责某件事时，才写出那个人，用逐字稿里的说话人编号；没有明确说出的，不要写负责人，也不要推测。不要逐句复述原文。\n\n",
+    "meeting_prompt": "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；二、待办事项。不要逐句复述原文。不要使用 Markdown 格式，不要用 #、* 这类符号。\n\n"
+  }
+}
