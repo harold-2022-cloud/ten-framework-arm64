@@ -1,0 +1,743 @@
+#!/usr/bin/env python3
+#
+# This file is part of TEN Framework, an open source project.
+# Licensed under the Apache License, Version 2.0.
+#
+"""Same meeting, same prompts, two LLMs: the board's DeepSeek 7B (the
+vendor's daemon, 8080) and Qwen3.5-4B (cooper-vllm, 8000). They cannot run
+at once, so each answers in a round of its own and the rounds are compared
+afterwards.
+
+  python3.12 tools/ambarella/compare_meeting_llm.py run --label deepseek-7b --out DIR
+  python3.12 tools/ambarella/compare_meeting_llm.py run --label qwen35-4b --out DIR \\
+      --openai http://127.0.0.1:8000/v1 --model qwen3.5_4B
+  python3.12 tools/ambarella/compare_meeting_llm.py compare DIR
+
+tools/ambarella/compare_meeting_llm.sh runs all three and switches the
+board's LLM in between.
+
+run      asks what meeting_control_python asks, the way it asks it (flow.py,
+         _finish): each topic's summary -- segment_prompt and the topic's
+         lines as record.llm_lines_for() writes them -- then the conclusion
+         -- meeting_prompt and "第N段：" before each summary -- then
+         parse_actions() on the conclusion. The prompts come from the
+         extension's own config.py; the lines from a board check's
+         record.json, by default the newest in Simplified, which is what the
+         graph hands the LLM. An answer is taken as the graph takes it:
+         whatever follows </think> if there is one (ambarella_llm2_python's
+         ambarella.py), stripped. Every prompt and answer is saved, and
+         DIR/<label>/run.json after each answer: a round that stopped goes on
+         where it was when it is run again.
+compare  the two rounds side by side. Per topic: seconds, characters, the
+         share copied from the transcript, people the meeting does not have
+         (titles, owners, numbered placeholders), speaker numbers beyond the
+         meeting's, repeated lines, U+FFFD. For the conclusion the same, and
+         whether parse_actions() found action items. Whether both rounds were
+         asked the same prompts is checked, not assumed. Prints the table and
+         writes DIR/compare.html with the answers next to each other.
+
+Run it under python3.12, as check_meeting_board.py: the prompts come from
+meeting_control_python's config.py, which needs pydantic.
+"""
+
+import argparse
+import glob
+import hashlib
+import html
+import http.client
+import importlib.util
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+import urllib.parse
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+ACTIONS = os.path.join(
+    REPO,
+    "ai_agents",
+    "agents",
+    "ten_packages",
+    "extension",
+    "meeting_control_python",
+    "actions.py",
+)
+THINK_END = "</think>"
+# The graph's llm node gives up on a turn after this long (llm
+# total_timeout_s); an answer that takes longer is lost there.
+GIVE_UP_S = 175.0
+# Characters written differently in the two scripts, to tell a record's.
+SCRIPT_PAIRS = (
+    ("说", "說"),
+    ("这", "這"),
+    ("们", "們"),
+    ("会", "會"),
+    ("个", "個"),
+    ("为", "為"),
+    ("来", "來"),
+    ("对", "對"),
+    ("时", "時"),
+    ("从", "從"),
+    ("还", "還"),
+    ("与", "與"),
+    ("门", "門"),
+    ("应", "應"),
+    ("过", "過"),
+    ("问", "問"),
+    ("题", "題"),
+    ("点", "點"),
+    ("没", "沒"),
+    ("话", "話"),
+)
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The daemon client, the prompts' source and the checks, as the other probe
+# has them: one way to ask the 7B, not two.
+PMS = load(
+    "probe_meeting_summary", os.path.join(HERE, "probe_meeting_summary.py")
+)
+
+
+def say(msg):
+    print(f"\n== {msg}", flush=True)
+
+
+def info(msg):
+    print(f"        {msg}", flush=True)
+
+
+def sha1(text):
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def write_json(path, value):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(value, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def as_graph_takes_it(text):
+    """ambarella_llm2_python's reasoning cut, then flow.py's strip."""
+    _, delimiter, answer = text.partition(THINK_END)
+    return (answer if delimiter else text).strip()
+
+
+# --- the record ---------------------------------------------------------
+
+
+def script_of(record):
+    text = "".join(
+        u.get("text", "")
+        for t in record["topics"]
+        for u in t.get("utterances") or []
+    )
+    simplified = sum(text.count(s) for s, _ in SCRIPT_PAIRS)
+    traditional = sum(text.count(t) for _, t in SCRIPT_PAIRS)
+    return "traditional" if traditional > simplified else "simplified"
+
+
+def pick_record(path):
+    if path:
+        with open(path, encoding="utf-8") as f:
+            record = json.load(f)
+        if script_of(record) != "simplified":
+            info(
+                f"{path} is in Traditional; the graph hands the LLM Simplified"
+            )
+        return path, record
+    found = sorted(
+        glob.glob(
+            os.path.expanduser("~/meeting_probe/board_check/*/record.json")
+        )
+    )
+    for candidate in reversed(found):
+        try:
+            with open(candidate, encoding="utf-8") as f:
+                record = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if record.get("topics") and script_of(record) == "simplified":
+            return candidate, record
+    sys.exit(
+        "no board check record.json in Simplified under "
+        "~/meeting_probe/board_check: run verify_meeting_board.sh, or pass --record"
+    )
+
+
+def topic_lines(topic):
+    """record.py's llm_lines_for(): who said what, no clock."""
+    return "\n".join(
+        f"说话人{u['speaker'] + 1}：{u['text']}" for u in topic["utterances"]
+    )
+
+
+def speaker_count(record):
+    numbers = {
+        u["speaker"]
+        for t in record["topics"]
+        for u in t.get("utterances") or []
+    }
+    return len(numbers)
+
+
+def chosen(spec, count):
+    """--topics 1-3,5 -> {1, 2, 3, 5}; empty -> every topic."""
+    if not spec:
+        return set(range(1, count + 1))
+    out = set()
+    for part in spec.split(","):
+        a, _, b = part.partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return {n for n in out if 1 <= n <= count}
+
+
+# --- asking -------------------------------------------------------------
+
+
+class Daemon:
+    """The vendor's daemon, as ambarella_llm2_python asks it: one session
+    for the whole round, cleared each turn (Reset-En)."""
+
+    name = "DeepSeek 7B daemon"
+
+    def __init__(self):
+        self.url = PMS.setting(
+            "AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080"
+        )
+        self.session = PMS.new_session_id()
+
+    def describe(self):
+        return {
+            "backend": "ambarella daemon",
+            "url": self.url,
+            "model": "model_type 9",
+        }
+
+    def ask(self, prompt, max_seconds, raw_path):
+        reply = PMS.ask_patiently(
+            self.url, prompt, max_seconds, raw_path, self.session
+        )
+        # The daemon holds a finished session briefly; do not crowd it.
+        time.sleep(5)
+        return {
+            "raw": reply.mended,
+            "first_s": reply.first,
+            "total_s": reply.total,
+            "ended": reply.ended,
+            "finished": reply.ended in PMS.DONE,
+            "tokens": None,
+        }
+
+
+class OpenAI:
+    """cooper-vllm's OpenAI API, streamed, thinking off, greedy -- the daemon
+    decodes greedily too, so one answer per prompt is the model's answer."""
+
+    def __init__(self, url, model, max_tokens):
+        self.url = url.rstrip("/")
+        self.model = model
+        self.max_tokens = max_tokens
+        self.name = f"{model} at {self.url}"
+
+    def describe(self):
+        return {
+            "backend": "openai",
+            "url": self.url,
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+        }
+
+    def ask(self, prompt, max_seconds, raw_path):
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        url = urllib.parse.urlparse(self.url + "/chat/completions")
+        conn = http.client.HTTPConnection(
+            url.hostname, url.port or 80, timeout=120
+        )
+        t0 = time.monotonic()
+        conn.request(
+            "POST",
+            url.path,
+            json.dumps(body).encode(),
+            {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer EMPTY",
+            },
+        )
+        resp = conn.getresponse()
+        raw, buf = bytearray(), b""
+        content, reasoning = [], []
+        first, ended, tokens = None, "connection closed", None
+        if resp.status != 200:
+            raw += resp.read()
+            ended = f"HTTP {resp.status}: {bytes(raw)[:200].decode('utf-8', 'replace')}"
+        while resp.status == 200:
+            if time.monotonic() - t0 > max_seconds:
+                ended = f"stopped by this probe at {max_seconds:.0f} s"
+                break
+            chunk = resp.read1(4096)
+            if not chunk:
+                break
+            raw += chunk
+            buf += chunk
+            *lines, buf = buf.split(b"\n")
+            for line in lines:
+                line = line.strip()
+                if not line.startswith(b"data:"):
+                    continue
+                data = line[5:].strip()
+                if data == b"[DONE]":
+                    continue
+                event = json.loads(data)
+                if event.get("usage"):
+                    tokens = event["usage"].get("completion_tokens")
+                for choice in event.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    for key, into in (
+                        ("content", content),
+                        ("reasoning_content", reasoning),
+                    ):
+                        if delta.get(key):
+                            into.append(delta[key])
+                            if first is None:
+                                first = time.monotonic() - t0
+                    if choice.get("finish_reason"):
+                        ended = choice["finish_reason"]
+        conn.close()
+        with open(raw_path, "wb") as f:
+            f.write(raw)
+        text = "".join(content)
+        if reasoning:
+            # Thinking was asked off; if some came, keep it visible as the
+            # daemon's would be, so the graph's cut applies alike.
+            text = "".join(reasoning) + THINK_END + text
+        return {
+            "raw": text,
+            "first_s": first,
+            "total_s": time.monotonic() - t0,
+            "ended": ended,
+            "finished": ended == "stop",
+            "tokens": tokens,
+        }
+
+
+# --- run ----------------------------------------------------------------
+
+
+def run(args):
+    record_path, record = pick_record(args.record)
+    control = PMS.control_config()
+    topics = record["topics"]
+    wanted = chosen(args.topics, len(topics))
+    llm = (
+        OpenAI(args.openai, args.model, args.max_tokens)
+        if args.openai
+        else Daemon()
+    )
+    out = os.path.join(os.path.expanduser(args.out), args.label)
+    os.makedirs(out, exist_ok=True)
+    state_path = os.path.join(out, "run.json")
+    with open(record_path, "rb") as f:
+        record_sha = hashlib.sha1(f.read()).hexdigest()[:12]
+    head = {
+        "label": args.label,
+        "llm": llm.describe(),
+        "record": record_path,
+        "record_sha": record_sha,
+        "speakers": speaker_count(record),
+        "topics_asked": sorted(wanted),
+        "segment_prompt_sha": sha1(control.segment_prompt),
+        "meeting_prompt_sha": sha1(control.meeting_prompt),
+    }
+    earlier = {}
+    if os.path.isfile(state_path):
+        with open(state_path, encoding="utf-8") as f:
+            before = json.load(f)
+        same = all(
+            before.get(k) == head[k]
+            for k in ("record_sha", "segment_prompt_sha", "meeting_prompt_sha")
+        )
+        if same:
+            earlier = {(i["kind"], i["n"]): i for i in before.get("items", [])}
+        else:
+            info(
+                "an earlier round here used another record or other prompts; starting over"
+            )
+    state = dict(head, started=time.strftime("%F %T"), items=[])
+
+    say(f"{args.label}: {llm.name}")
+    info(
+        f"record {record_path} ({len(topics)} topics, {head['speakers']} speakers); "
+        f"asking topics {args.topics or 'all'}"
+    )
+    if isinstance(llm, Daemon):
+        PMS.thinking()
+
+    def keep(item):
+        state["items"].append(item)
+        write_json(state_path, state)
+
+    def ask(kind, n, prompt, extra):
+        key = (kind, n)
+        what = f"topic {n}" if kind == "topic" else "conclusion"
+        old = earlier.get(key)
+        if old and old.get("prompt_sha") == sha1(prompt) and "answer" in old:
+            info(f"{what}: answered in an earlier run, kept")
+            keep(old)
+            return old["answer"]
+        name = f"{kind}-{n:02d}"
+        with open(
+            os.path.join(out, name + ".prompt.txt"), "w", encoding="utf-8"
+        ) as f:
+            f.write(prompt)
+        got = llm.ask(
+            prompt, args.max_seconds, os.path.join(out, name + ".raw")
+        )
+        answer = as_graph_takes_it(got["raw"])
+        with open(
+            os.path.join(out, name + ".answer.txt"), "w", encoding="utf-8"
+        ) as f:
+            f.write(answer)
+        first = (
+            f"{got['first_s']:.1f} s" if got["first_s"] is not None else "none"
+        )
+        info(
+            f"{what}: {got['total_s']:.1f} s (first character {first}), "
+            f"{len(answer)} characters, {'finished' if got['finished'] else got['ended']}"
+        )
+        info(
+            "  "
+            + answer[:90].replace("\n", " ")
+            + ("…" if len(answer) > 90 else "")
+        )
+        keep(
+            dict(
+                extra,
+                kind=kind,
+                n=n,
+                prompt=prompt,
+                prompt_sha=sha1(prompt),
+                answer=answer,
+                **{
+                    k: got[k]
+                    for k in (
+                        "raw",
+                        "first_s",
+                        "total_s",
+                        "ended",
+                        "finished",
+                        "tokens",
+                    )
+                },
+            )
+        )
+        return answer
+
+    summaries = {}
+    for n, topic in enumerate(topics, 1):
+        if n not in wanted or topic.get("error") or not topic.get("utterances"):
+            continue
+        prompt = control.segment_prompt + topic_lines(topic)
+        summaries[n] = ask(
+            "topic",
+            n,
+            prompt,
+            {
+                "start_s": topic["start_s"],
+                "end_s": topic["end_s"],
+                "transcript": "\n".join(u["text"] for u in topic["utterances"]),
+                "lines": topic_lines(topic),
+            },
+        )
+
+    # flow.py numbers by the topic's place in the meeting and leaves out the
+    # ones with no summary.
+    body = "\n\n".join(
+        f"第{n}段：{s}" for n, s in sorted(summaries.items()) if s
+    )
+    if body:
+        conclusion = ask("conclusion", 0, control.meeting_prompt + body, {})
+        parse = load("actions", ACTIONS).parse_actions
+        actions, error = parse(conclusion)
+        state["actions"] = actions
+        state["actions_error"] = error
+        info(
+            f"parse_actions: {len(actions)} action item(s)"
+            + (f"; {error}" if error else "")
+        )
+    state["ended"] = time.strftime("%F %T")
+    write_json(state_path, state)
+    print(f"\nsaved in {out}", flush=True)
+
+
+# --- compare ------------------------------------------------------------
+
+
+def measures(item, speakers):
+    answer = item["answer"]
+    numbers = {int(n) for n in re.findall(r"[说說]话?話?人\s*(\d+)", answer)}
+    _, repeated = PMS.repetition(answer)
+    return {
+        "seconds": item["total_s"],
+        "first": item.get("first_s"),
+        "chars": len(answer),
+        "copied": (
+            PMS.copied_share(answer, item["transcript"])
+            if item.get("transcript")
+            else None
+        ),
+        "people": PMS.people_named(answer),
+        "no_such_speaker": sorted(n for n in numbers if n > speakers),
+        "repeats": sum(repeated.values()),
+        "fffd": answer.count("�"),
+        "finished": item["finished"],
+        "ended": item["ended"],
+        "lost": item["total_s"] > GIVE_UP_S,
+        "tokens": item.get("tokens"),
+        "think": THINK_END in (item.get("raw") or ""),
+    }
+
+
+def compare(args):
+    root = os.path.expanduser(args.dir)
+    rounds = []
+    for label in args.labels or sorted(
+        os.path.basename(os.path.dirname(p))
+        for p in glob.glob(os.path.join(root, "*", "run.json"))
+    ):
+        with open(os.path.join(root, label, "run.json"), encoding="utf-8") as f:
+            rounds.append(json.load(f))
+    if len(rounds) != 2:
+        sys.exit(
+            f"{root} holds {len(rounds)} rounds; compare takes two (give the labels)"
+        )
+    a, b = rounds[0], rounds[1]
+    say(f"{a['label']}  vs  {b['label']}")
+    problems = []
+    for key in ("record_sha", "segment_prompt_sha", "meeting_prompt_sha"):
+        if a.get(key) != b.get(key):
+            problems.append(f"{key} differs: {a.get(key)} / {b.get(key)}")
+    items = {}
+    for r in rounds:
+        for item in r["items"]:
+            items.setdefault((item["kind"], item["n"]), {})[r["label"]] = item
+    for (kind, n), pair in sorted(items.items()):
+        if kind == "topic" and len(pair) == 2:
+            sha_a, sha_b = (pair[r["label"]]["prompt_sha"] for r in rounds)
+            if sha_a != sha_b:
+                problems.append(
+                    f"topic {n} was asked differently: {sha_a} / {sha_b}"
+                )
+    for p in problems:
+        info(f"NOT THE SAME QUESTIONS: {p}")
+    if not problems:
+        info(
+            f"the same record ({a['record_sha']}) and the same prompts in both rounds"
+        )
+
+    speakers = a["speakers"]
+    rows = []
+    for (kind, n), pair in sorted(
+        items.items(), key=lambda kv: (kv[0][0] != "topic", kv[0][1])
+    ):
+        rows.append(
+            (
+                (kind, n),
+                {lab: measures(it, speakers) for lab, it in pair.items()},
+                pair,
+            )
+        )
+
+    labels = [a["label"], b["label"]]
+    cols = "  ".join(f"{lab[:24]:^40}" for lab in labels)
+    print(f"\n  {'':<12}{cols}", flush=True)
+    sub = "  ".join(
+        f"{'secs':>6}{'chars':>7}{'copied':>8}{'people':>7}{'spk?':>5}{'rep':>4}{'FFFD':>5}"
+        + " " * 1
+        for _ in labels
+    )
+    print(f"  {'':<12}{sub}", flush=True)
+    for (kind, n), ms, _ in rows:
+        name = f"topic {n}" if kind == "topic" else "conclusion"
+        cells = []
+        for lab in labels:
+            m = ms.get(lab)
+            if not m:
+                cells.append(f"{'-':>41}")
+                continue
+            copied = f"{m['copied']:.0%}" if m["copied"] is not None else "-"
+            mark = "!" if m["lost"] or not m["finished"] else " "
+            cells.append(
+                f"{m['seconds']:>5.0f}{mark}{m['chars']:>7}{copied:>8}"
+                f"{len(m['people']):>7}{len(m['no_such_speaker']):>5}"
+                f"{m['repeats']:>4}{m['fffd']:>5} "
+            )
+        print(f"  {name:<12}" + "  ".join(cells), flush=True)
+    for r in rounds:
+        total = sum(it["total_s"] for it in r["items"])
+        lost = [it for it in r["items"] if it["total_s"] > GIVE_UP_S]
+        unfinished = [it for it in r["items"] if not it["finished"]]
+        info(
+            f"{r['label']}: {total / 60:.1f} minutes in all; "
+            f"{len(lost)} over the graph's {GIVE_UP_S:.0f} s; "
+            f"{len(unfinished)} unfinished; parse_actions: "
+            f"{len(r.get('actions') or [])} item(s)"
+            + (f" ({r['actions_error']})" if r.get("actions_error") else "")
+        )
+    info("! after the seconds: over the graph's limit, or not finished")
+    info(
+        "people: titles, owners or numbered placeholders the meeting does not have; "
+        "spk?: speaker numbers beyond its "
+        f"{speakers}; rep: repeated lines"
+    )
+
+    page = os.path.join(root, "compare.html")
+    with open(page, "w", encoding="utf-8") as f:
+        f.write(render(rounds, rows, problems, speakers))
+    print(f"\nside by side: {page}", flush=True)
+
+
+def render(rounds, rows, problems, speakers):
+    labels = [r["label"] for r in rounds]
+    e = html.escape
+
+    def cell(m):
+        if not m:
+            return "<td>-</td>" * 7
+        copied = f"{m['copied']:.0%}" if m["copied"] is not None else "-"
+        flag = ' class="bad"' if m["lost"] or not m["finished"] else ""
+        return (
+            f"<td{flag}>{m['seconds']:.0f}</td><td>{m['chars']}</td><td>{copied}</td>"
+            f"<td>{e('、'.join(m['people'])) or '-'}</td>"
+            f"<td>{e(', '.join(map(str, m['no_such_speaker']))) or '-'}</td>"
+            f"<td>{m['repeats']}</td><td>{m['fffd']}</td>"
+        )
+
+    head = "".join(f'<th colspan="7">{e(lab)}</th>' for lab in labels)
+    sub = (
+        "<th>秒</th><th>字</th><th>抄寫</th><th>捏造的人</th><th>不存在的說話人</th><th>重複行</th><th>亂碼</th>"
+        * 2
+    )
+    table = []
+    for (kind, n), ms, _ in rows:
+        name = f"話題 {n}" if kind == "topic" else "結論"
+        table.append(
+            f"<tr><th>{name}</th>"
+            + "".join(cell(ms.get(lab)) for lab in labels)
+            + "</tr>"
+        )
+    sections = []
+    for (kind, n), ms, pair in rows:
+        any_item = next(iter(pair.values()))
+        if kind == "topic":
+            lines = any_item["lines"].splitlines()
+            shown = "\n".join(lines[:12]) + (
+                f"\n……（共 {len(lines)} 行）" if len(lines) > 12 else ""
+            )
+            title = f"話題 {n}（{PMS.mmss(any_item['start_s'])}–{PMS.mmss(any_item['end_s'])}）"
+            context = f"<details><summary>逐字稿</summary><pre>{e(shown)}</pre></details>"
+        else:
+            title, context = "會議結論", ""
+        answers = "".join(
+            f'<div class="answer"><h4>{e(lab)}'
+            + (
+                f"<span>{ms[lab]['seconds']:.0f} 秒 · {ms[lab]['chars']} 字</span>"
+                if lab in ms
+                else ""
+            )
+            + f"</h4><pre>{e(pair[lab]['answer']) if lab in pair else '（沒有回答）'}</pre></div>"
+            for lab in labels
+        )
+        sections.append(
+            f'<section><h3>{title}</h3>{context}<div class="pair">{answers}</div></section>'
+        )
+    actions = "".join(
+        f"<div class=\"answer\"><h4>{e(r['label'])}：parse_actions</h4><pre>"
+        + e(json.dumps(r.get("actions") or [], ensure_ascii=False, indent=1))
+        + (f"\n\n{e(r['actions_error'])}" if r.get("actions_error") else "")
+        + "</pre></div>"
+        for r in rounds
+    )
+    warn = "".join(f'<p class="bad">提示詞不同：{e(p)}</p>' for p in problems)
+    return f"""<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>會議紀錄 LLM 比較</title>
+<style>
+ body {{ font-family: system-ui, sans-serif; margin: 24px; color: #1b1f24; background: #fff; }}
+ table {{ border-collapse: collapse; font-size: 14px; }}
+ th, td {{ border: 1px solid #d0d7de; padding: 4px 8px; text-align: right; }}
+ th {{ background: #f6f8fa; }}
+ .bad {{ color: #b42318; font-weight: 600; }}
+ section {{ margin-top: 28px; }}
+ .pair {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
+ .answer {{ border: 1px solid #d0d7de; border-radius: 8px; padding: 8px 12px; }}
+ .answer h4 {{ margin: 4px 0 8px; display: flex; justify-content: space-between; }}
+ .answer h4 span {{ font-weight: 400; color: #57606a; }}
+ pre {{ white-space: pre-wrap; font-family: inherit; line-height: 1.6; margin: 0; }}
+ details pre {{ color: #57606a; font-size: 14px; }}
+</style></head><body>
+<h1>會議紀錄 LLM 比較：{e(' vs '.join(labels))}</h1>
+<p>同一份紀錄（{e(rounds[0]['record'])}，{speakers} 位說話人）、同一份提示詞。
+「抄寫」是回答中與逐字稿逐字相同（連續 10 字以上）的比例；「捏造的人」是會議裡沒有的稱謂、負責人或編號佔位；
+紅色秒數表示超過 graph 的 {GIVE_UP_S:.0f} 秒上限或沒寫完。</p>
+{warn}
+<table><tr><th></th>{head}</tr><tr><th></th>{sub}</tr>{''.join(table)}</table>
+{''.join(sections)}
+<section><h3>待辦事項（parse_actions）</h3><div class="pair">{actions}</div></section>
+</body></html>
+"""
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = p.add_subparsers(dest="what", required=True)
+    r = sub.add_parser("run", help="one LLM answers every prompt")
+    r.add_argument("--label", required=True)
+    r.add_argument("--out", required=True, help="the comparison's folder")
+    r.add_argument(
+        "--record",
+        help="a record.json (default: newest Simplified board check)",
+    )
+    r.add_argument("--topics", help="e.g. 1-3 or 1,4,7 (default: all)")
+    r.add_argument(
+        "--openai",
+        help="an OpenAI-style API, e.g. http://127.0.0.1:8000/v1 "
+        "(default: the vendor's daemon)",
+    )
+    r.add_argument("--model", default="qwen3.5_4B")
+    r.add_argument("--max-tokens", type=int, default=2048)
+    r.add_argument("--max-seconds", type=float, default=600.0)
+    c = sub.add_parser("compare", help="two rounds side by side")
+    c.add_argument("dir")
+    c.add_argument("labels", nargs="*")
+    args = p.parse_args()
+    if args.what == "run":
+        run(args)
+    else:
+        compare(args)
+
+
+if __name__ == "__main__":
+    main()
