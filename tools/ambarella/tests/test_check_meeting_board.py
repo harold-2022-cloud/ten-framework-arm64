@@ -13,6 +13,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -79,7 +80,28 @@ class Memory(unittest.TestCase):
         self.assertGreater(mb, 1)
 
     def test_no_such_process_is_none_not_zero(self):
-        self.assertIsNone(cmb.vllm_rss_mb(program="no-such-program-q42"))
+        self.assertIsNone(cmb.vllm_rss_mb(program="no-such-program-q42", pid_file="/nonexistent/pid"))
+
+    def test_a_vllm_under_another_title_is_found_by_its_pid_file(self):
+        # vLLM may rename its processes; serve_qwen35.sh's pid file still
+        # names the one it started.
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(proc.kill)
+        time.sleep(0.5)
+        with tempfile.NamedTemporaryFile("w", suffix=".pid", delete=False) as f:
+            f.write(f"{proc.pid}\n")
+        self.addCleanup(os.unlink, f.name)
+        mb = cmb.vllm_rss_mb(program="no-such-program-q46", pid_file=f.name)
+        self.assertIsNotNone(mb)
+        self.assertGreater(mb, 1)
+
+    def test_a_pid_file_of_a_process_gone_is_none(self):
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        with tempfile.NamedTemporaryFile("w", suffix=".pid", delete=False) as f:
+            f.write(f"{proc.pid}\n")
+        self.addCleanup(os.unlink, f.name)
+        self.assertIsNone(cmb.vllm_rss_mb(program="no-such-program-q46", pid_file=f.name))
 
     def test_memory_available_is_read(self):
         self.assertGreater(cmb.mem_available_mb(), 0)

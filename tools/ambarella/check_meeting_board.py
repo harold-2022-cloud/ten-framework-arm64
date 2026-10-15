@@ -382,8 +382,8 @@ def check_llm(addon, prop, env):
 
 
 def tree_rss_mb(is_root):
-    """Resident memory of the processes is_root(argv) picks and everything
-    under them; None when it picks none."""
+    """Resident memory of the processes is_root(pid, argv) picks and
+    everything under them; None when it picks none."""
     parent, rss, roots = {}, {}, set()
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -397,7 +397,7 @@ def tree_rss_mb(is_root):
                     rss[pid] = int(line.split()[1])
         except OSError:
             continue
-        if is_root([a.decode(errors="ignore") for a in argv]):
+        if is_root(pid, [a.decode(errors="ignore") for a in argv]):
             roots.add(pid)
     if not roots:
         return None
@@ -412,12 +412,30 @@ def tree_rss_mb(is_root):
     return sum(kb for pid, kb in rss.items() if under(pid)) / 1024
 
 
-def vllm_rss_mb(program="vllm"):
-    """`vllm serve` and its engine processes; None when none runs."""
-    return tree_rss_mb(
-        lambda argv: "serve" in argv
+# Where serve_qwen35.sh keeps the pid of the vLLM it started.
+QWEN_PID_FILE = os.path.join(
+    os.environ.get("WORK") or os.path.expanduser("~/workspace"), ".qwen35-serve", "pid"
+)
+
+
+def vllm_rss_mb(program="vllm", pid_file=QWEN_PID_FILE):
+    """`vllm serve` and its engine processes; None when none runs. Found by
+    its command line, else by the pid serve_qwen35.sh wrote: a process may
+    rename itself, and the pid still names it."""
+    found = tree_rss_mb(
+        lambda pid, argv: "serve" in argv
         and any(os.path.basename(a) == program for a in argv)
     )
+    if found is not None:
+        return found
+    try:
+        with open(pid_file, encoding="utf-8") as f:
+            started = f.read().strip()
+    except OSError:
+        return None
+    if not started.isdigit():
+        return None
+    return tree_rss_mb(lambda pid, argv: pid == started)
 
 
 def mem_available_mb():
@@ -457,7 +475,7 @@ def worker_rss_mb(channel):
     """Resident memory of this channel's worker and everything under it --
     the diarization child included. The worker's own processes are the
     ones whose command line carries the property file named after it."""
-    return tree_rss_mb(lambda argv: f"property-{channel}" in "\0".join(argv)) or 0.0
+    return tree_rss_mb(lambda pid, argv: f"property-{channel}" in "\0".join(argv)) or 0.0
 
 
 def run(args, env):
@@ -636,8 +654,9 @@ def report(args, meeting_id, state, duration, took, memory, auth, out_dir):
          + (f" (said {args.speakers})" if args.speakers else ""))
     info(f"worker peak memory {memory['worker']:.0f} MB")
     if memory["vllm"] is None:
-        info("vLLM: no `vllm serve` process found (the graph's LLM is not on "
-             "vLLM, or it ran elsewhere)")
+        info(f"vLLM: no `vllm serve` process found, nor a live pid in "
+             f"{QWEN_PID_FILE} (the graph's LLM is not on vLLM, or it ran "
+             "elsewhere)")
     else:
         info(f"vLLM peak memory {memory['vllm']:.0f} MB")
     if memory["available_low"] is not None:
