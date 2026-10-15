@@ -3,13 +3,15 @@
 # This file is part of TEN Framework, an open source project.
 # Licensed under the Apache License, Version 2.0.
 #
-"""Run one meeting through the board's meeting_minutes graph, as a client
-would, and say whether each part held.
+"""Run one meeting through a meeting graph on the board -- meeting_minutes
+unless --graph names another -- as a client would, and say whether each part
+held.
 
   python3.12 tools/ambarella/check_meeting_board.py --check
   python3.12 tools/ambarella/check_meeting_board.py \\
       --audio ~/meeting_probe/M_R003S01C01.wav \\
       --rttm ~/meeting_probe/M_R003S01C01.rttm --speakers 6 --minutes 6
+  --graph meeting_minutes_qwen   the same meeting through another graph
 
 Run it on the board, under the interpreter the TEN runtime loads (3.12 on the
 N1-655, not the shell's python3): the preflight imports what the meeting
@@ -18,7 +20,8 @@ nothing about the graph.
 
 What it checks, in order:
 
-  preflight  the server lists meeting_minutes; the LLM daemon answers; the
+  preflight  the server lists the graph; the LLM the graph uses answers
+             (Qwen3.5-4B's /v1/models, or the 7B daemon's port); the
              four model files exist; this interpreter has the extensions'
              packages; where meetings land is not tmpfs and has room; nothing
              already holds 8765
@@ -27,8 +30,9 @@ What it checks, in order:
              the uploader is keeping it alive
   upload     waits for GET /meetings, then uploads the audio (a .wav is
              converted to 16 kHz mono Ogg-Opus first; --minutes cuts it)
-  process    polls the state every 10 s, printing each change and the
-             worker's resident memory
+  process    polls the state every 10 s, printing each change, the
+             worker's and vLLM's resident memory, and the lowest memory
+             available (under 500 MB fails)
   result     fetches record.json and minutes.txt into --out, reports topics,
              speakers, summaries, time and memory, and -- with --rttm -- the
              share of speech given to the wrong person
@@ -40,6 +44,7 @@ Exits non-zero if any check failed.
 import argparse
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -227,26 +232,24 @@ def preflight(args, env):
         )
     else:
         names = json.dumps(json.loads(reply or b"{}").get("data"))
-        if f'"{GRAPH}"' in names:
-            ok(f"{args.server}/graphs lists {GRAPH}")
+        if f'"{args.graph}"' in names:
+            ok(f"{args.server}/graphs lists {args.graph}")
         else:
             fail(
-                f"{args.server}/graphs has no {GRAPH}",
+                f"{args.server}/graphs has no {args.graph}",
                 "a graph added after the server started is not picked up: "
                 "restart the server and the playground",
             )
 
-    llm = setting(env, "AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080")
-    host_port = llm.split("//", 1)[-1].split("/", 1)[0]
-    host, _, port = host_port.partition(":")
-    try:
-        socket.create_connection((host, int(port or 80)), timeout=3).close()
-        ok(f"something listens at {llm} (the LLM daemon)")
-    except OSError:
-        fail(
-            f"nothing listens at {llm}",
-            "start the board's LLM daemon; tools/ambarella/check_llm_board.sh",
-        )
+    addon, prop = graph_llm(args.graph)
+    if addon is None:
+        fail(f"{args.graph} has no llm node in {TENAPP_PROPERTY}")
+    else:
+        good, message, fix = check_llm(addon, prop, env)
+        if good:
+            ok(message)
+        else:
+            fail(message, fix)
 
     for key, default in MODELS.items():
         path = setting(env, key, default)
@@ -265,7 +268,7 @@ def preflight(args, env):
             f"running under Python {version}; the runtime on the N1-655 "
             "loads 3.12, so the imports below may not speak for it"
         )
-    for name in PACKAGES:
+    for name in PACKAGES + (("openai",) if addon == "openai_llm2_python" else ()):
         try:
             __import__(name)
             ok(f"import {name}")
@@ -321,6 +324,109 @@ def free_mb(path):
     return st.f_bavail * st.f_frsize / 1024 / 1024
 
 
+TENAPP_PROPERTY = os.path.join(
+    REPO, "ai_agents", "agents", "examples", "voice-assistant", "tenapp", "property.json"
+)
+
+
+def env_ref(value, env):
+    """A graph property as the runtime reads it: ${env:NAME|default} is NAME
+    from the environment or ai_agents/.env, else the default."""
+    m = re.fullmatch(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?:\|(.*))?\}", value or "")
+    if not m:
+        return value
+    return setting(env, m.group(1), m.group(2) or "")
+
+
+def graph_llm(graph, path=TENAPP_PROPERTY):
+    """(addon, property) of the graph's llm node; (None, {}) if it has none."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    for g in data["ten"]["predefined_graphs"]:
+        if g["name"] == graph:
+            for node in g["graph"]["nodes"]:
+                if node["name"] == "llm":
+                    return node["addon"], node.get("property") or {}
+    return None, {}
+
+
+def check_llm(addon, prop, env):
+    """(ok, message, fix) for the LLM the graph asks: Qwen3.5-4B's OpenAI API
+    answering /models, or something listening where the 7B daemon is."""
+    if addon == "openai_llm2_python":
+        base = env_ref(prop.get("base_url", ""), env).rstrip("/")
+        key = env_ref(prop.get("api_key", ""), env)
+        status, _ = request(
+            f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=5
+        )
+        if status == 200:
+            return True, f"{prop.get('model')} answers at {base}", None
+        return (
+            False,
+            f"nothing answers at {base}/models (status {status})",
+            "start Qwen3.5-4B: tools/ambarella/serve_qwen35.sh start",
+        )
+    url = env_ref(prop.get("base_url", ""), env) or setting(
+        env, "AMBARELLA_LLM_BASE_URL", "http://127.0.0.1:8080"
+    )
+    host, _, port = url.split("//", 1)[-1].split("/", 1)[0].partition(":")
+    try:
+        socket.create_connection((host, int(port or 80)), timeout=3).close()
+        return True, f"something listens at {url} (the LLM daemon)", None
+    except OSError:
+        return (
+            False,
+            f"nothing listens at {url}",
+            "start the board's LLM daemon; tools/ambarella/check_llm_board.sh",
+        )
+
+
+def tree_rss_mb(is_root):
+    """Resident memory of the processes is_root(argv) picks and everything
+    under them; None when it picks none."""
+    parent, rss, roots = {}, {}, set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+            for line in open(f"/proc/{pid}/status", encoding="utf-8"):
+                if line.startswith("PPid:"):
+                    parent[pid] = line.split()[1]
+                elif line.startswith("VmRSS:"):
+                    rss[pid] = int(line.split()[1])
+        except OSError:
+            continue
+        if is_root([a.decode(errors="ignore") for a in argv]):
+            roots.add(pid)
+    if not roots:
+        return None
+
+    def under(pid):
+        while pid in parent:
+            if pid in roots:
+                return True
+            pid = parent[pid]
+        return False
+
+    return sum(kb for pid, kb in rss.items() if under(pid)) / 1024
+
+
+def vllm_rss_mb(program="vllm"):
+    """`vllm serve` and its engine processes; None when none runs."""
+    return tree_rss_mb(
+        lambda argv: "serve" in argv
+        and any(os.path.basename(a) == program for a in argv)
+    )
+
+
+def mem_available_mb():
+    for line in open("/proc/meminfo", encoding="utf-8"):
+        if line.startswith("MemAvailable:"):
+            return int(line.split()[1]) / 1024
+    return 0.0
+
+
 # --------------------------------------------------------------------------
 # the meeting
 
@@ -351,30 +457,7 @@ def worker_rss_mb(channel):
     """Resident memory of this channel's worker and everything under it --
     the diarization child included. The worker's own processes are the
     ones whose command line carries the property file named after it."""
-    parent, rss, roots = {}, {}, set()
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            cmdline = open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="ignore")
-            for line in open(f"/proc/{pid}/status", encoding="utf-8"):
-                if line.startswith("PPid:"):
-                    parent[pid] = line.split()[1]
-                elif line.startswith("VmRSS:"):
-                    rss[pid] = int(line.split()[1])
-        except OSError:
-            continue
-        if f"property-{channel}" in cmdline:
-            roots.add(pid)
-
-    def under_worker(pid):
-        while pid in parent:
-            if pid in roots:
-                return True
-            pid = parent[pid]
-        return False
-
-    return sum(kb for pid, kb in rss.items() if under_worker(pid)) / 1024
+    return tree_rss_mb(lambda argv: f"property-{channel}" in "\0".join(argv)) or 0.0
 
 
 def run(args, env):
@@ -391,13 +474,13 @@ def run(args, env):
     ok(f"{upload}: {mmss(duration)} of 16 kHz mono Ogg-Opus, "
        f"{os.path.getsize(upload) / 1024 / 1024:.1f} MB")
 
-    say(f"start {GRAPH} (channel {channel}, timeout {args.timeout} s)")
+    say(f"start {args.graph} (channel {channel}, timeout {args.timeout} s)")
     status, reply = post_json(
         f"{args.server}/start",
         {
             "request_id": uuid.uuid4().hex,
             "channel_name": channel,
-            "graph_name": GRAPH,
+            "graph_name": args.graph,
             "timeout": args.timeout,
         },
     )
@@ -455,6 +538,7 @@ def process(args, channel, meeting_id, upload, duration, auth, out_dir):
     say("process")
     t_upload = time.monotonic()
     last, peak, state, slow = None, 0.0, {}, 0
+    vllm_peak, low = None, None
     deadline = t_upload + args.max_minutes * 60
     while time.monotonic() < deadline:
         status, reply = request(
@@ -478,13 +562,20 @@ def process(args, channel, meeting_id, upload, duration, auth, out_dir):
             return
         state = json.loads(reply)
         peak = max(peak, worker_rss_mb(channel))
+        v = vllm_rss_mb()
+        if v is not None:
+            vllm_peak = max(vllm_peak or 0.0, v)
+        avail = mem_available_mb()
+        low = avail if low is None else min(low, avail)
         progress = state.get("progress") or {}
         now = (state.get("state"), progress.get("topics_done"))
         if now != last:
             print(
                 f"  {mmss(elapsed)}  {state.get('state'):<13}"
                 f"{progress.get('topics_done')}/{progress.get('topics_total')}"
-                f"   worker {peak:.0f} MB",
+                f"   worker {peak:.0f} MB"
+                + (f"   vLLM {vllm_peak:.0f} MB" if vllm_peak is not None else "")
+                + f"   available {low:.0f} MB",
                 flush=True,
             )
             last = now
@@ -500,10 +591,19 @@ def process(args, channel, meeting_id, upload, duration, auth, out_dir):
             "the worker's shared loop was held; the keep-alive pings wait "
             "on the same loop",
         )
-    report(args, meeting_id, state, duration, time.monotonic() - t_upload, peak, auth, out_dir)
+    report(
+        args,
+        meeting_id,
+        state,
+        duration,
+        time.monotonic() - t_upload,
+        {"worker": peak, "vllm": vllm_peak, "available_low": low},
+        auth,
+        out_dir,
+    )
 
 
-def report(args, meeting_id, state, duration, took, peak, auth, out_dir):
+def report(args, meeting_id, state, duration, took, memory, auth, out_dir):
     say("result")
     for name in ("record.json", "minutes.txt"):
         status, body = request(
@@ -534,7 +634,24 @@ def report(args, meeting_id, state, duration, took, peak, auth, out_dir):
         ok(f"{len(topics)} topics, none failed")
     info(f"speakers in the record {record.get('speaker_count')}"
          + (f" (said {args.speakers})" if args.speakers else ""))
-    info(f"worker peak memory {peak:.0f} MB")
+    info(f"worker peak memory {memory['worker']:.0f} MB")
+    if memory["vllm"] is None:
+        info("vLLM: no `vllm serve` process found (the graph's LLM is not on "
+             "vLLM, or it ran elsewhere)")
+    else:
+        info(f"vLLM peak memory {memory['vllm']:.0f} MB")
+    if memory["available_low"] is not None:
+        total = 0.0
+        for line in open("/proc/meminfo", encoding="utf-8"):
+            if line.startswith("MemTotal:"):
+                total = int(line.split()[1]) / 1024
+        info(f"memory available at the lowest {memory['available_low']:.0f} MB "
+             f"of {total:.0f} MB")
+        if memory["available_low"] < 500:
+            fail(f"only {memory['available_low']:.0f} MB was left available at "
+                 "the lowest",
+                 "the meeting worker and the LLM together come close to the "
+                 "board's memory")
 
     if took > args.timeout + 30:
         ok(f"kept alive {took:.0f} s with a {args.timeout} s timeout: "
@@ -587,6 +704,8 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--check", action="store_true", help="preflight only")
+    p.add_argument("--graph", default=GRAPH,
+                   help="the graph to run (default: meeting_minutes)")
     p.add_argument("--audio", help="a meeting: .wav or .ogg, 16 kHz mono")
     p.add_argument("--rttm", help="reference speakers, to score the record")
     p.add_argument("--speakers", type=int, help="how many people spoke")
