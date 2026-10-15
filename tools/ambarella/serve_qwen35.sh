@@ -49,7 +49,8 @@ NAME="qwen3.5_4B"
 API="http://127.0.0.1:$PORT"
 RUN="$WORK/.qwen35-serve"
 LOG="$WORK/vllm_qwen35.log"
-DAEMON_LOG="/tmp/log.txt"
+DAEMON_LOG="${DAEMON_LOG:-/tmp/log.txt}"
+GIVE_BACK_S="${GIVE_BACK_S:-300}"
 
 ok() { echo "  ok    $*"; }
 note() { echo "  note  $*"; }
@@ -66,11 +67,29 @@ vllm_pid() {
   pid=$(cat "$RUN/pid" 2>/dev/null) || return 1
   kill -0 "$pid" 2>/dev/null && echo "$pid"
 }
-# grep -c prints 0 for no match, and nothing for no file.
-enable_count() {
-  local n
-  n=$(grep -c 'Device ENABLE' "$DAEMON_LOG" 2>/dev/null)
-  echo "${n:-0}"
+# Where the daemon's log stands: its inode and size. What comes after is a
+# new start's. Whether the daemon appends to the log or writes it anew is not
+# known; a log that is another file now, or shorter, is read from its start.
+log_mark() { stat -c '%i %s' "$DAEMON_LOG" 2>/dev/null || echo "0 0"; }
+enabled_since() { # "inode size" from log_mark
+  local then_inode then_size now_inode now_size
+  read -r then_inode then_size <<< "$1"
+  read -r now_inode now_size <<< "$(log_mark)"
+  if [[ "$now_inode" != "$then_inode" ]] || ((now_size < then_size)); then
+    grep -q 'Device ENABLE' "$DAEMON_LOG" 2>/dev/null
+  else
+    tail -c +"$((then_size + 1))" "$DAEMON_LOG" 2>/dev/null | grep -q 'Device ENABLE'
+  fi
+}
+# Whether something listens on a port: ss where there is one, else the
+# kernel's own table (state 0A is LISTEN).
+listening() {
+  if command -v ss >/dev/null; then
+    ss -ltn 2>/dev/null | awk -v p=":$1" '$4 ~ p"$" {found = 1} END {exit !found}'
+  else
+    awk -v h=":$(printf '%04X' "$1")" 'FNR > 1 && $2 ~ h"$" && $4 == "0A" {found = 1} END {exit !found}' \
+      /proc/net/tcp /proc/net/tcp6 2>/dev/null
+  fi
 }
 
 stop_daemon() {
@@ -103,19 +122,27 @@ give_back_daemon() {
     rm -f "$RUN/llm_was_up"
     return 0
   fi
-  local before
-  before=$(enable_count)
+  local mark ready=0
+  mark=$(log_mark)
   sudo systemctl start ambarella-llm || fail "could not start ambarella-llm again"
-  for _ in $(seq 180); do
-    (( $(enable_count) > before )) && daemon_up && break
+  for _ in $(seq "$GIVE_BACK_S"); do
+    if daemon_up && listening 8080 && enabled_since "$mark"; then
+      ready=1
+      break
+    fi
     sleep 1
   done
   rm -f "$RUN/llm_was_up"
-  if (( $(enable_count) > before )) && daemon_up; then
-    ok "the DeepSeek 7B daemon is back (Device ENABLE in $DAEMON_LOG)"
-  else
-    note "ambarella-llm started, but no new Device ENABLE in $DAEMON_LOG after 180 s; the first load can be slow"
+  if ((ready)); then
+    ok "the DeepSeek 7B daemon is back: test_llm runs, 8080 listens, a new Device ENABLE in $DAEMON_LOG"
+    return 0
   fi
+  # What did and did not happen, so that the next look need not guess.
+  note "ambarella-llm was started, but is not seen ready after $GIVE_BACK_S s:"
+  note "  test_llm running: $(daemon_up && echo yes || echo no); 8080 listening: $(listening 8080 && echo yes || echo no); new Device ENABLE: $(enabled_since "$mark" && echo yes || echo no)"
+  note "  log $DAEMON_LOG, before: inode/size $mark; now: $(log_mark); its last lines:"
+  tail -3 "$DAEMON_LOG" 2>/dev/null | sed 's/^/          /'
+  note "  check again later: tools/ambarella/install_board_services.sh --status"
 }
 
 do_stop() {

@@ -48,6 +48,7 @@ meeting_control_python's config.py, which needs pydantic.
 """
 
 import argparse
+import collections
 import glob
 import hashlib
 import html
@@ -528,8 +529,39 @@ LIST_ITEM = re.compile(r"(?m)^\s*(?:\d+[.、)）]|[*\-+])\s*")
 SENTENCE = re.compile(r"[^。！？!?\n]+[。！？!?]")
 
 
+# What a role takes after it in a summary (厨师团队, 保安人员): a role the
+# meeting has is not made up.
+ROLE_SUFFIXES = ("团队", "人员", "们", "部门", "方面", "这边", "那边")
+# A stretch between punctuation, four characters or more.
+PHRASE = re.compile(r"[^，、。；：！？,.;:!?\s]{4,}")
+
+
 def mentioned(text):
     return {int(n) for n in SPEAKER.findall(text)}
+
+
+def invented_people(answer, transcript):
+    """people_named(), less what the transcript itself has: a role someone
+    in the meeting gave as theirs (厨师, 保安) is not invented."""
+    out = []
+    for name in PMS.people_named(answer):
+        core = name
+        for suffix in ROLE_SUFFIXES:
+            if core.endswith(suffix) and len(core) > len(suffix):
+                core = core[: -len(suffix)]
+        if name not in transcript and core not in transcript:
+            out.append(name)
+    return out
+
+
+def looping(answer):
+    """How often a phrase comes back after its first two. A model in a loop
+    says the same few things again and again within one line, which
+    counting repeated lines does not see. Speaker labels do not count."""
+    counts = collections.Counter(
+        p for p in PHRASE.findall(answer) if not SPEAKER.fullmatch(p)
+    )
+    return sum(n - 2 for n in counts.values() if n >= 3)
 
 
 def spoke(lines):
@@ -537,7 +569,7 @@ def spoke(lines):
     return {int(n) for n in re.findall(r"(?m)^说话人(\d+)：", lines)}
 
 
-def measures(item, speakers, summaries_mention):
+def measures(item, speakers, summaries_mention, meeting_text):
     """What compare reports for one answer. A topic's summary is held to
     its own transcript: a speaker it names who said nothing in that topic
     was put there by the model. The conclusion sees only summaries, so a
@@ -561,7 +593,9 @@ def measures(item, speakers, summaries_mention):
             if item.get("transcript")
             else None
         ),
-        "people": PMS.people_named(answer),
+        "people": invented_people(
+            answer, item.get("transcript") or meeting_text
+        ),
         "no_such_speaker": sorted(n for n in numbers if n > speakers),
         "silent": sorted(n for n in silent if n <= speakers),
         "markdown": sum(len(r.findall(answer)) for r in MARKDOWN),
@@ -569,7 +603,7 @@ def measures(item, speakers, summaries_mention):
         "listed": listed,
         "off_length": sentences is not None
         and (listed or not 3 <= sentences <= 5),
-        "repeats": sum(repeated.values()),
+        "repeats": sum(repeated.values()) + looping(answer),
         "fffd": answer.count("\ufffd"),
         "finished": item["finished"],
         "ended": item["ended"],
@@ -667,6 +701,15 @@ def compare(args):
         )
         for r in rounds
     }
+    # Per round: the whole meeting's transcript, for its conclusion.
+    heard = {
+        r["_name"]: "\n".join(
+            i.get("transcript") or ""
+            for i in r["items"]
+            if i["kind"] == "topic"
+        )
+        for r in rounds
+    }
     rows = []
     for (kind, n), pair in sorted(
         items.items(), key=lambda kv: (kv[0][0] != "topic", kv[0][1])
@@ -675,7 +718,7 @@ def compare(args):
             (
                 (kind, n),
                 {
-                    lab: measures(it, speakers, named[lab])
+                    lab: measures(it, speakers, named[lab], heard[lab])
                     for lab, it in pair.items()
                 },
                 pair,
@@ -746,7 +789,8 @@ def compare(args):
         f"have; spk?: speaker numbers beyond its {speakers}; silent: speakers "
         "named who said nothing in that topic (for the conclusion: whom no "
         "summary named); md: Markdown marks; sent: sentences in a summary "
-        "(asked for 3-5; ! when not, or a list); rep: repeated lines"
+        "(asked for 3-5; ! when not, or a list); rep: repeated lines, and "
+        "phrases said a third time or more"
     )
 
     if args.labels and any(os.sep in n for n in args.labels):
@@ -815,7 +859,7 @@ def render(rounds, rows, problems, speakers):
     head = "".join(f'<th colspan="{columns}">{e(lab)}</th>' for lab in labels)
     sub = (
         "<th>秒</th><th>字</th><th>抄寫</th><th>捏造的人</th><th>不存在的說話人</th>"
-        "<th>沒發言卻被提到</th><th>Markdown</th><th>句數</th><th>重複行</th><th>亂碼</th>"
+        "<th>沒發言卻被提到</th><th>Markdown</th><th>句數</th><th>重複</th><th>亂碼</th>"
     ) * len(labels)
     table = []
     for (kind, n), ms, _ in rows:
@@ -894,7 +938,7 @@ def render(rounds, rows, problems, speakers):
 </style></head><body>
 <h1>會議紀錄 LLM 比較：{e(' vs '.join(labels))}</h1>
 <p>同一份紀錄（{e(rounds[0]['record'])}，{speakers} 位說話人）；提示詞：{e(' / '.join(r['prompts'] for r in rounds))}。
-「抄寫」是回答中與逐字稿逐字相同（連續 10 字以上）的比例；「捏造的人」是會議裡沒有的稱謂、負責人或編號佔位；
+「抄寫」是回答中與逐字稿逐字相同（連續 10 字以上）的比例；「捏造的人」是會議裡沒有的稱謂、負責人或編號佔位（逐字稿裡有的角色，如廚師、保安，不算）；「重複」是重複的行，加上同一片段第三次以後的出現次數；
 「沒發言卻被提到」是摘要提到、但在那段逐字稿裡一句話都沒說的說話人（結論則是各段摘要都沒提過的說話人），在回答裡標紅；
 「Markdown」是標題、粗體、項目符號的數量，App 與 minutes.txt 會原樣顯示這些符號；
 「句數」對照摘要要求的三到五句，寫成條列也標紅；
