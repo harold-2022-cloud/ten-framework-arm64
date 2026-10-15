@@ -491,10 +491,40 @@ def run(args):
 # --- compare ------------------------------------------------------------
 
 
-def measures(item, speakers):
+SPEAKER = re.compile(r"[说說][话話]人\s*(\d+)")
+MARKDOWN = (
+    re.compile(r"(?m)^\s{0,3}#{1,6}\s"),  # headings
+    re.compile(r"\*\*[^*\n]+\*\*"),  # bold
+    re.compile(r"(?m)^\s*[*\-+]\s+"),  # bullets
+)
+LIST_ITEM = re.compile(r"(?m)^\s*(?:\d+[.、)）]|[*\-+])\s*")
+SENTENCE = re.compile(r"[^。！？!?\n]+[。！？!?]")
+
+
+def mentioned(text):
+    return {int(n) for n in SPEAKER.findall(text)}
+
+
+def spoke(lines):
+    """The speakers of a topic, from its lines as llm_lines_for() writes them."""
+    return {int(n) for n in re.findall(r"(?m)^说话人(\d+)：", lines)}
+
+
+def measures(item, speakers, summaries_mention):
+    """What compare reports for one answer. A topic's summary is held to
+    its own transcript: a speaker it names who said nothing in that topic
+    was put there by the model. The conclusion sees only summaries, so a
+    speaker no summary of its round named was put there by the model too."""
     answer = item["answer"]
-    numbers = {int(n) for n in re.findall(r"[说說]话?話?人\s*(\d+)", answer)}
+    numbers = mentioned(answer)
     _, repeated = PMS.repetition(answer)
+    if item["kind"] == "topic":
+        silent = numbers - spoke(item.get("lines") or "")
+        sentences = len(SENTENCE.findall(answer))
+        listed = len(LIST_ITEM.findall(answer)) >= 2
+    else:
+        silent = numbers - summaries_mention
+        sentences, listed = None, False
     return {
         "seconds": item["total_s"],
         "first": item.get("first_s"),
@@ -506,8 +536,14 @@ def measures(item, speakers):
         ),
         "people": PMS.people_named(answer),
         "no_such_speaker": sorted(n for n in numbers if n > speakers),
+        "silent": sorted(n for n in silent if n <= speakers),
+        "markdown": sum(len(r.findall(answer)) for r in MARKDOWN),
+        "sentences": sentences,
+        "listed": listed,
+        "off_length": sentences is not None
+        and (listed or not 3 <= sentences <= 5),
         "repeats": sum(repeated.values()),
-        "fffd": answer.count("�"),
+        "fffd": answer.count("\ufffd"),
         "finished": item["finished"],
         "ended": item["ended"],
         "lost": item["total_s"] > GIVE_UP_S,
@@ -554,6 +590,17 @@ def compare(args):
         )
 
     speakers = a["speakers"]
+    # Per round: every speaker its topic summaries name.
+    named = {
+        r["label"]: set().union(
+            *(
+                mentioned(i["answer"])
+                for i in r["items"]
+                if i["kind"] == "topic"
+            )
+        )
+        for r in rounds
+    }
     rows = []
     for (kind, n), pair in sorted(
         items.items(), key=lambda kv: (kv[0][0] != "topic", kv[0][1])
@@ -561,36 +608,61 @@ def compare(args):
         rows.append(
             (
                 (kind, n),
-                {lab: measures(it, speakers) for lab, it in pair.items()},
+                {
+                    lab: measures(it, speakers, named[lab])
+                    for lab, it in pair.items()
+                },
                 pair,
             )
         )
 
     labels = [a["label"], b["label"]]
-    cols = "  ".join(f"{lab[:24]:^40}" for lab in labels)
-    print(f"\n  {'':<12}{cols}", flush=True)
-    sub = "  ".join(
-        f"{'secs':>6}{'chars':>7}{'copied':>8}{'people':>7}{'spk?':>5}{'rep':>4}{'FFFD':>5}"
-        + " " * 1
-        for _ in labels
+    width = 60
+    print(
+        f"\n  {'':<12}"
+        + "  ".join(f"{lab[:width]:^{width}}" for lab in labels),
+        flush=True,
     )
-    print(f"  {'':<12}{sub}", flush=True)
+    heads = (
+        f"{'secs':>6}{'chars':>6}{'copied':>7}{'people':>7}{'spk?':>5}"
+        f"{'silent':>7}{'md':>4}{'sent':>6}{'rep':>4}{'FFFD':>5}    "
+    )
+    print(f"  {'':<12}" + "  ".join(heads for _ in labels), flush=True)
     for (kind, n), ms, _ in rows:
         name = f"topic {n}" if kind == "topic" else "conclusion"
         cells = []
         for lab in labels:
             m = ms.get(lab)
             if not m:
-                cells.append(f"{'-':>41}")
+                cells.append(f"{'-':>{width}}")
                 continue
             copied = f"{m['copied']:.0%}" if m["copied"] is not None else "-"
             mark = "!" if m["lost"] or not m["finished"] else " "
+            sent = (
+                "-"
+                if m["sentences"] is None
+                else ("list" if m["listed"] else str(m["sentences"]))
+                + ("!" if m["off_length"] else "")
+            )
             cells.append(
-                f"{m['seconds']:>5.0f}{mark}{m['chars']:>7}{copied:>8}"
+                f"{m['seconds']:>5.0f}{mark}{m['chars']:>6}{copied:>7}"
                 f"{len(m['people']):>7}{len(m['no_such_speaker']):>5}"
-                f"{m['repeats']:>4}{m['fffd']:>5} "
+                f"{len(m['silent']):>7}{m['markdown']:>4}{sent:>6}"
+                f"{m['repeats']:>4}{m['fffd']:>5}    "
             )
         print(f"  {name:<12}" + "  ".join(cells), flush=True)
+    for (kind, n), ms, _ in rows:
+        for lab in labels:
+            m = ms.get(lab)
+            if m and m["silent"]:
+                where = (
+                    f"topic {n}, who said nothing in it"
+                    if kind == "topic"
+                    else "the conclusion, whom no summary of its round named"
+                )
+                info(
+                    f"{lab} names 说话人{', '.join(map(str, m['silent']))} in {where}"
+                )
     for r in rounds:
         total = sum(it["total_s"] for it in r["items"])
         lost = [it for it in r["items"] if it["total_s"] > GIVE_UP_S]
@@ -604,9 +676,11 @@ def compare(args):
         )
     info("! after the seconds: over the graph's limit, or not finished")
     info(
-        "people: titles, owners or numbered placeholders the meeting does not have; "
-        "spk?: speaker numbers beyond its "
-        f"{speakers}; rep: repeated lines"
+        "people: titles, owners or numbered placeholders the meeting does not "
+        f"have; spk?: speaker numbers beyond its {speakers}; silent: speakers "
+        "named who said nothing in that topic (for the conclusion: whom no "
+        "summary named); md: Markdown marks; sent: sentences in a summary "
+        "(asked for 3-5; ! when not, or a list); rep: repeated lines"
     )
 
     page = os.path.join(root, "compare.html")
@@ -618,24 +692,58 @@ def compare(args):
 def render(rounds, rows, problems, speakers):
     labels = [r["label"] for r in rounds]
     e = html.escape
+    columns = 10
 
     def cell(m):
         if not m:
-            return "<td>-</td>" * 7
+            return "<td>-</td>" * columns
         copied = f"{m['copied']:.0%}" if m["copied"] is not None else "-"
-        flag = ' class="bad"' if m["lost"] or not m["finished"] else ""
+        late = ' class="bad"' if m["lost"] or not m["finished"] else ""
+
+        def flagged(value, bad):
+            return (
+                f'<td class="bad">{value}</td>' if bad else f"<td>{value}</td>"
+            )
+
+        if m["sentences"] is None:
+            sent = "<td>-</td>"
+        else:
+            sent = flagged(
+                "條列" if m["listed"] else m["sentences"], m["off_length"]
+            )
         return (
-            f"<td{flag}>{m['seconds']:.0f}</td><td>{m['chars']}</td><td>{copied}</td>"
-            f"<td>{e('、'.join(m['people'])) or '-'}</td>"
-            f"<td>{e(', '.join(map(str, m['no_such_speaker']))) or '-'}</td>"
-            f"<td>{m['repeats']}</td><td>{m['fffd']}</td>"
+            f"<td{late}>{m['seconds']:.0f}</td><td>{m['chars']}</td><td>{copied}</td>"
+            + flagged(e("、".join(m["people"])) or "-", m["people"])
+            + flagged(
+                e(", ".join(map(str, m["no_such_speaker"]))) or "-",
+                m["no_such_speaker"],
+            )
+            + flagged(e(", ".join(map(str, m["silent"]))) or "-", m["silent"])
+            + flagged(m["markdown"], m["markdown"])
+            + sent
+            + flagged(m["repeats"], m["repeats"])
+            + flagged(m["fffd"], m["fffd"])
         )
 
-    head = "".join(f'<th colspan="7">{e(lab)}</th>' for lab in labels)
+    def marked(answer, silent):
+        """The answer, with the speakers who should not be in it marked."""
+        out = e(answer)
+        if silent:
+            out = SPEAKER.sub(
+                lambda mo: (
+                    f"<mark>{mo.group(0)}</mark>"
+                    if int(mo.group(1)) in silent
+                    else mo.group(0)
+                ),
+                out,
+            )
+        return out
+
+    head = "".join(f'<th colspan="{columns}">{e(lab)}</th>' for lab in labels)
     sub = (
-        "<th>秒</th><th>字</th><th>抄寫</th><th>捏造的人</th><th>不存在的說話人</th><th>重複行</th><th>亂碼</th>"
-        * 2
-    )
+        "<th>秒</th><th>字</th><th>抄寫</th><th>捏造的人</th><th>不存在的說話人</th>"
+        "<th>沒發言卻被提到</th><th>Markdown</th><th>句數</th><th>重複行</th><th>亂碼</th>"
+    ) * len(labels)
     table = []
     for (kind, n), ms, _ in rows:
         name = f"話題 {n}" if kind == "topic" else "結論"
@@ -648,12 +756,14 @@ def render(rounds, rows, problems, speakers):
     for (kind, n), ms, pair in rows:
         any_item = next(iter(pair.values()))
         if kind == "topic":
-            lines = any_item["lines"].splitlines()
-            shown = "\n".join(lines[:12]) + (
-                f"\n……（共 {len(lines)} 行）" if len(lines) > 12 else ""
-            )
+            lines = any_item["lines"]
+            who = "、".join(f"说话人{s}" for s in sorted(spoke(lines)))
             title = f"話題 {n}（{PMS.mmss(any_item['start_s'])}–{PMS.mmss(any_item['end_s'])}）"
-            context = f"<details><summary>逐字稿</summary><pre>{e(shown)}</pre></details>"
+            context = (
+                f'<p class="who">這段發言的人：{e(who)}</p>'
+                f"<details><summary>完整逐字稿（{len(lines.splitlines())} 行）</summary>"
+                f"<pre>{e(lines)}</pre></details>"
+            )
         else:
             title, context = "會議結論", ""
         answers = "".join(
@@ -663,7 +773,13 @@ def render(rounds, rows, problems, speakers):
                 if lab in ms
                 else ""
             )
-            + f"</h4><pre>{e(pair[lab]['answer']) if lab in pair else '（沒有回答）'}</pre></div>"
+            + "</h4><pre>"
+            + (
+                marked(pair[lab]["answer"], set(ms[lab]["silent"]))
+                if lab in pair
+                else "（沒有回答）"
+            )
+            + "</pre></div>"
             for lab in labels
         )
         sections.append(
@@ -687,7 +803,9 @@ def render(rounds, rows, problems, speakers):
  th, td {{ border: 1px solid #d0d7de; padding: 4px 8px; text-align: right; }}
  th {{ background: #f6f8fa; }}
  .bad {{ color: #b42318; font-weight: 600; }}
+ mark {{ background: #fde4df; color: #b42318; font-weight: 600; }}
  section {{ margin-top: 28px; }}
+ .who {{ color: #57606a; margin: 4px 0; }}
  .pair {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
  .answer {{ border: 1px solid #d0d7de; border-radius: 8px; padding: 8px 12px; }}
  .answer h4 {{ margin: 4px 0 8px; display: flex; justify-content: space-between; }}
@@ -698,6 +816,9 @@ def render(rounds, rows, problems, speakers):
 <h1>會議紀錄 LLM 比較：{e(' vs '.join(labels))}</h1>
 <p>同一份紀錄（{e(rounds[0]['record'])}，{speakers} 位說話人）、同一份提示詞。
 「抄寫」是回答中與逐字稿逐字相同（連續 10 字以上）的比例；「捏造的人」是會議裡沒有的稱謂、負責人或編號佔位；
+「沒發言卻被提到」是摘要提到、但在那段逐字稿裡一句話都沒說的說話人（結論則是各段摘要都沒提過的說話人），在回答裡標紅；
+「Markdown」是標題、粗體、項目符號的數量，App 與 minutes.txt 會原樣顯示這些符號；
+「句數」對照摘要要求的三到五句，寫成條列也標紅；
 紅色秒數表示超過 graph 的 {GIVE_UP_S:.0f} 秒上限或沒寫完。</p>
 {warn}
 <table><tr><th></th>{head}</tr><tr><th></th>{sub}</tr>{''.join(table)}</table>
