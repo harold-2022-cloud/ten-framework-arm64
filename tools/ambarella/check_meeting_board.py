@@ -11,7 +11,7 @@ held.
   python3.12 tools/ambarella/check_meeting_board.py \\
       --audio ~/meeting_probe/M_R003S01C01.wav \\
       --rttm ~/meeting_probe/M_R003S01C01.rttm --speakers 6 --minutes 6
-  --graph meeting_minutes_qwen   the same meeting through another graph
+  --graph NAME   the same meeting through another graph
 
 Run it on the board, under the interpreter the TEN runtime loads (3.12 on the
 N1-655, not the shell's python3): the preflight imports what the meeting

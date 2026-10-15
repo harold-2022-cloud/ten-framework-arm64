@@ -2032,14 +2032,15 @@
             {
               "type": "extension",
               "name": "llm",
-              "addon": "ambarella_llm2_python",
+              "addon": "openai_llm2_python",
               "extension_group": "chatgpt",
               "property": {
-                "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
-                "model_type": 9,
+                "base_url": "${env:QWEN_LLM_BASE_URL|http://127.0.0.1:8000/v1}",
+                "api_key": "EMPTY",
+                "model": "qwen3.5_4B",
                 "prompt": "You are a helpful assistant running on an Ambarella N1-655 board. Keep answers short and spoken.",
-                "response_format": "sse",
-                "starts_in_reasoning": false
+                "max_tokens": 512,
+                "frequency_penalty": 0.0
               }
             },
             {
@@ -2235,15 +2236,15 @@
             {
               "type": "extension",
               "name": "llm",
-              "addon": "ambarella_llm2_python",
+              "addon": "openai_llm2_python",
               "extension_group": "chatgpt",
               "property": {
-                "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
-                "model_type": 9,
+                "base_url": "${env:QWEN_LLM_BASE_URL|http://127.0.0.1:8000/v1}",
+                "api_key": "EMPTY",
+                "model": "qwen3.5_4B",
                 "prompt": "用中文简短口语回答，不要条列或符号。",
-                "response_format": "sse",
-                "reset_every_turn": false,
-                "starts_in_reasoning": false
+                "max_tokens": 512,
+                "frequency_penalty": 0.0
               }
             },
             {
@@ -2433,15 +2434,15 @@
             {
               "type": "extension",
               "name": "llm",
-              "addon": "ambarella_llm2_python",
+              "addon": "openai_llm2_python",
               "extension_group": "chatgpt",
               "property": {
-                "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
-                "model_type": 9,
+                "base_url": "${env:QWEN_LLM_BASE_URL|http://127.0.0.1:8000/v1}",
+                "api_key": "EMPTY",
+                "model": "qwen3.5_4B",
                 "prompt": "用中文简短口语回答，不要条列或符号。",
-                "response_format": "sse",
-                "reset_every_turn": false,
-                "starts_in_reasoning": false
+                "max_tokens": 512,
+                "frequency_penalty": 0.0
               }
             },
             {
@@ -2593,129 +2594,6 @@
       },
       {
         "name": "meeting_minutes",
-        "auto_start": false,
-        "graph": {
-          "nodes": [
-            {
-              "type": "extension",
-              "name": "uploader",
-              "addon": "meeting_uploader",
-              "property": {
-                "listen_port": 8765,
-                "meetings_dir": "${env:MEETINGS_DIR|/tmp/meetings}",
-                "auth_token": "${env:MEETING_AUTH_TOKEN|}",
-                "channel": ""
-              }
-            },
-            {
-              "type": "extension",
-              "name": "segmenter",
-              "addon": "meeting_segmenter",
-              "property": {
-                "vad_model": "${env:MEETING_VAD_MODEL|/home/lychee/vad_models/ten-vad.onnx}"
-              }
-            },
-            {
-              "type": "extension",
-              "name": "transcriber",
-              "addon": "meeting_transcriber",
-              "property": {
-                "segmentation_model": "${env:DIARIZATION_SEG_MODEL|/home/lychee/diarization_models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx}",
-                "embedding_model": "${env:DIARIZATION_EMB_MODEL|/home/lychee/diarization_models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx}",
-                "asr_model_dir": "${env:SENSEVOICE_MODEL_DIR|/home/lychee/sensevoice}",
-                "num_threads": 4
-              }
-            },
-            {
-              "type": "extension",
-              "name": "main_control",
-              "addon": "meeting_control_python",
-              "property": {
-                "summary_timeout_s": 180.0,
-                "output_script": "${env:MEETING_OUTPUT_SCRIPT|simplified}"
-              }
-            },
-            {
-              "type": "extension",
-              "name": "llm",
-              "addon": "ambarella_llm2_python",
-              "property": {
-                "base_url": "${env:AMBARELLA_LLM_BASE_URL|http://127.0.0.1:8080}",
-                "model_type": 9,
-                "prompt": "",
-                "response_format": "sse",
-                "starts_in_reasoning": false,
-                "reset_every_turn": true,
-                "total_timeout_s": 175.0
-              }
-            }
-          ],
-          "connections": [
-            {
-              "extension": "uploader",
-              "cmd": [
-                {
-                  "name": "meeting_uploaded",
-                  "dest": [
-                    {
-                      "extension": "main_control"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "extension": "main_control",
-              "cmd": [
-                {
-                  "name": "segment_audio",
-                  "dest": [
-                    {
-                      "extension": "segmenter"
-                    }
-                  ]
-                },
-                {
-                  "name": "transcribe",
-                  "dest": [
-                    {
-                      "extension": "transcriber"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "extension": "segmenter",
-              "data": [
-                {
-                  "name": "segments_ready",
-                  "dest": [
-                    {
-                      "extension": "main_control"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "extension": "transcriber",
-              "data": [
-                {
-                  "name": "segment_transcribed",
-                  "dest": [
-                    {
-                      "extension": "main_control"
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      },
-      {
-        "name": "meeting_minutes_qwen",
         "auto_start": false,
         "graph": {
           "nodes": [

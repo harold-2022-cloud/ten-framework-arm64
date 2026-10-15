@@ -2,10 +2,11 @@
 # This file is part of TEN Framework, an open source project.
 # Licensed under the Apache License, Version 2.0.
 #
-"""meeting_minutes_qwen (examples/voice-assistant/tenapp/property.json) asks
+"""meeting_minutes (examples/voice-assistant/tenapp/property.json) asks
 Qwen3.5-4B what the 2026-10-15 evaluation asked it -- the explicit-owners
 prompts word for word, no system message, greedy, no repetition penalty --
-and is otherwise the meeting_minutes graph, node for node."""
+with TEN's path timeouts past the controller's 300 s turn. It is the only
+meeting graph: meeting_minutes_qwen, beside it while it was tried, is gone."""
 
 import json
 import os
@@ -22,44 +23,41 @@ PROPERTY = os.path.join(
     "property.json",
 )
 VARIANTS = os.path.join(EXT, "prompt_variants.json")
-CHANGED = {"segment_prompt", "meeting_prompt", "summary_timeout_s", "ten"}
 # TEN times a command out on its own path after 180 s by default
 # (core/include_internal/ten_runtime/extension/path_timer.h), and a streamed
 # answer does not reset it: without these the 300 s turn would end at 180 s.
 PATH_TIMEOUT_US = 330_000_000
 
 
-def graph(name):
+def graphs():
     with open(PROPERTY, encoding="utf-8") as f:
-        data = json.load(f)
-    return next(
-        g for g in data["ten"]["predefined_graphs"] if g["name"] == name
-    )
+        return json.load(f)["ten"]["predefined_graphs"]
 
 
 def nodes(name):
-    return {n["name"]: n for n in graph(name)["graph"]["nodes"]}
+    graph = next(g for g in graphs() if g["name"] == name)
+    return {n["name"]: n for n in graph["graph"]["nodes"]}
 
 
 def test_the_prompts_are_the_explicit_owners_set():
     with open(VARIANTS, encoding="utf-8") as f:
         wanted = json.load(f)["explicit-owners"]
-    control = nodes("meeting_minutes_qwen")["main_control"]["property"]
+    control = nodes("meeting_minutes")["main_control"]["property"]
     assert control["segment_prompt"] == wanted["segment_prompt"]
     assert control["meeting_prompt"] == wanted["meeting_prompt"]
     assert control["summary_timeout_s"] == 300.0
 
 
 def test_tens_path_timeouts_outlast_the_turn():
-    control = nodes("meeting_minutes_qwen")["main_control"]["property"]
-    llm = nodes("meeting_minutes_qwen")["llm"]["property"]
+    control = nodes("meeting_minutes")["main_control"]["property"]
+    llm = nodes("meeting_minutes")["llm"]["property"]
     assert control["ten"] == {"path_timeout": {"out_path": PATH_TIMEOUT_US}}
     assert llm["ten"] == {"path_timeout": {"in_path": PATH_TIMEOUT_US}}
     assert PATH_TIMEOUT_US > control["summary_timeout_s"] * 1_000_000
 
 
 def test_the_llm_is_qwen_as_it_was_evaluated():
-    llm = nodes("meeting_minutes_qwen")["llm"]
+    llm = nodes("meeting_minutes")["llm"]
     assert llm["addon"] == "openai_llm2_python"
     assert llm["property"] == {
         "base_url": "${env:QWEN_LLM_BASE_URL|http://127.0.0.1:8000/v1}",
@@ -73,21 +71,7 @@ def test_the_llm_is_qwen_as_it_was_evaluated():
     }
 
 
-def test_otherwise_it_is_the_meeting_minutes_graph():
-    old, new = nodes("meeting_minutes"), nodes("meeting_minutes_qwen")
-    assert set(old) == set(new)
-    for name in old:
-        if name == "llm":
-            continue
-        assert old[name]["addon"] == new[name]["addon"], name
-        before = dict(old[name].get("property") or {})
-        after = dict(new[name].get("property") or {})
-        if name == "main_control":
-            for key in CHANGED:
-                before.pop(key, None)
-                after.pop(key, None)
-        assert before == after, name
-    assert (
-        graph("meeting_minutes")["graph"]["connections"]
-        == graph("meeting_minutes_qwen")["graph"]["connections"]
-    )
+def test_there_is_one_meeting_graph():
+    names = [g["name"] for g in graphs()]
+    assert names.count("meeting_minutes") == 1
+    assert "meeting_minutes_qwen" not in names

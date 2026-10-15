@@ -49,8 +49,8 @@ class Llm(unittest.TestCase):
         self.assertEqual(cmb.env_ref(ref, {"QWEN_LLM_BASE_URL": "http://x:1/v1"}), "http://x:1/v1")
         self.assertEqual(cmb.env_ref("plain", {}), "plain")
 
-    def test_the_qwen_graph_uses_openai_llm2_python(self):
-        addon, prop = cmb.graph_llm("meeting_minutes_qwen")
+    def test_the_meeting_graph_uses_openai_llm2_python(self):
+        addon, prop = cmb.graph_llm("meeting_minutes")
         self.assertEqual(addon, "openai_llm2_python")
         self.assertEqual(prop["model"], "qwen3.5_4B")
 
