@@ -60,7 +60,12 @@
 #                  in ~/workspace/shepherd-1.6.9, which serve_qwen35.sh puts on
 #                  LD_LIBRARY_PATH for vLLM alone. The guide relinks the
 #                  system's library instead; here it and whatever else uses it
-#                  stay as they are.
+#                  stay as they are. 1.6.9 asks for libcavalry_mem.so.0 and
+#                  libnnctrl.so.3; a board with them only as
+#                  libamba-cavalry-mem-n1_655.so.0 and libamba-nnctrl-n1_655.so.3
+#                  (the same libraries under the BSP's names) gets links by
+#                  1.6.9's names in that directory, and ldd -r has to resolve
+#                  every symbol 1.6.9 takes from them.
 #  11 model        ranch/ prepared (qwen35_prepare.py model)
 #  12 test         serve_qwen35.sh start, test, stop: the 7B daemon is stopped
 #                  for it and given back afterwards, whatever happens
@@ -175,6 +180,46 @@ md5_note() {
   fi
 }
 
+# The board's name for a library 1.6.9 asks for by another: the RPMs name
+# cavalry-mem and nnctrl after the chip, the vendor's 1.6.9 build does not.
+compat_for() {
+  case "$1" in
+    libcavalry_mem.so.0) echo libamba-cavalry-mem-n1_655.so.0 ;;
+    libnnctrl.so.3) echo libamba-nnctrl-n1_655.so.3 ;;
+  esac
+}
+board_lib() {
+  local d
+  for d in /usr/lib64 /lib64; do
+    [[ -e "$d/$1" ]] && { echo "$d/$1"; return; }
+  done
+}
+
+# In dir, a link by 1.6.9's name for each library ldd could not find that
+# the board has under its own name. Prints what it could not cover.
+link_compat() { # dir "missing libraries"
+  local want board uncovered=""
+  for want in $2; do
+    [[ $want == libcjson.so.1 ]] && continue
+    board=$(board_lib "$(compat_for "$want")")
+    if [[ -n "$board" ]]; then
+      ln -sfn "$board" "$1/$want"
+    else
+      uncovered+="$want "
+    fi
+  done
+  echo "${uncovered% }"
+}
+
+# The symbols ldd -r cannot resolve for lib, with dir first on the path;
+# cJSON's left out while cjson is still to be installed (step 1).
+unresolved() { # dir lib
+  LD_LIBRARY_PATH="$1" ldd -r "$2" 2>&1 |
+    sed -n 's/.*undefined symbol: \([^[:space:],]*\).*/\1/p' |
+    { if [[ " ${missing_pkgs[*]} " == *" cjson "* ]]; then grep -v '^cJSON_'; else cat; fi; } |
+    sort -u | tr '\n' ' '
+}
+
 # The guide zip, unpacked afresh into the installer's own folder.
 unpack_guide() {
   [[ -z "$GUIDE_ZIP" && -f "$HOME/vllm-qwen3.5-guide.zip" ]] && GUIDE_ZIP="$HOME/vllm-qwen3.5-guide.zip"
@@ -229,6 +274,32 @@ tar_preflight() {
     tar_top="$first"
   fi
   ok "model archive $QWEN_TAR ($tar_mb MB): unpacks into $MODELS_DIR/${tar_top:-$(basename "${QWEN_TAR%%.tar*}")}"
+}
+
+# 1.6.9's missing libraries, tried as the board's own under 1.6.9's names,
+# in a scratch directory: every symbol it takes from them must resolve.
+check_compat() { # "missing libraries"
+  local dir="$STATE/shepherd-check" uncovered undefined
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  uncovered=$(link_compat "$dir" "$1")
+  if [[ -n "$uncovered" ]]; then
+    problem "Shepherd $SHEPHERD_NEED needs libraries this board does not have: $uncovered" \
+      "ask Ambarella which BSP package provides them"
+    ls /usr/lib64/libamba-cavalry-mem* /usr/lib64/libamba-nnctrl* /usr/lib64/libcavalry_mem* \
+      /usr/lib64/libnnctrl* 2>/dev/null | sed 's/^/        board has: /'
+    return
+  fi
+  undefined=$(unresolved "$dir" "$vendor_shepherd")
+  local which
+  which=$(for l in "$dir"/*; do echo -n "$(basename "$l") -> $(basename "$(readlink -f "$l")"), "; done)
+  if [[ -n "${undefined// /}" ]]; then
+    problem "Shepherd $SHEPHERD_NEED with the board's libraries under its names (${which%, }) lacks: $undefined" \
+      "the board's cavalry-mem / nnctrl are too old for it; ask Ambarella for the matching ones"
+  else
+    ok "Shepherd $SHEPHERD_NEED uses the board's own libraries under the names it asks for (${which%, }); every symbol it takes from them resolves (ldd -r)"
+    note "whether 1.6.9 works with these older libraries and the board's NPU driver shows only in the test (step 12)"
+  fi
 }
 
 preflight() {
@@ -355,13 +426,18 @@ preflight() {
         lost=${lost% }
         if [[ -z "$lddout" ]]; then
           :
-        elif [[ -n "$lost" && "$lost" != "libcjson.so.1" ]]; then
-          problem "Shepherd $SHEPHERD_NEED needs libraries this board does not have: $lost" \
-            "they are not the names the board's own Shepherd uses (see below); ask Ambarella which BSP package provides them"
-          ls /usr/lib64/libamba-cavalry-mem* /usr/lib64/libamba-nnctrl* /usr/lib64/libcavalry_mem* \
-            /usr/lib64/libnnctrl* 2>/dev/null | sed 's/^/        board has: /'
+        elif [[ -z "$lost" || "$lost" == "libcjson.so.1" ]]; then
+          # Found is not enough: every symbol 1.6.9 takes from them must be there.
+          local undefined
+          undefined=$(unresolved "$SHEPHERD_DIR" "$vendor_shepherd")
+          if [[ -n "${undefined// /}" ]]; then
+            problem "Shepherd $SHEPHERD_NEED finds its libraries but cannot resolve: $undefined" \
+              "the board's cavalry-mem / nnctrl are too old for it; ask Ambarella for the matching ones"
+          else
+            ok "Shepherd $SHEPHERD_NEED: $vendor_shepherd, its libraries are there and every symbol resolves (ldd -r)${lost:+ (but $lost, from step 1)}"
+          fi
         else
-          ok "Shepherd $SHEPHERD_NEED: $vendor_shepherd, its libraries are there${lost:+ (but $lost, from step 1)}"
+          check_compat "$lost"
         fi
       fi
     fi
@@ -428,6 +504,8 @@ step_packages() {
   if ((${#missing_pkgs[@]})); then
     sudo dnf install -y "${missing_pkgs[@]}" || fail "dnf install ${missing_pkgs[*]} failed"
     ok "installed ${missing_pkgs[*]}"
+    # Nothing is still to come from dnf: later checks count cJSON too.
+    missing_pkgs=()
   else
     ok "nothing to install"
   fi
@@ -563,9 +641,19 @@ step_shepherd() {
   ln -sfn "$name" "$SHEPHERD_DIR/$SHEPHERD.1"
   # Its own name for itself (SONAME); the vendor's build calls itself this.
   ln -sfn "$name" "$SHEPHERD_DIR/libshepherd.so.1"
-  local lost
+  local lost uncovered undefined
+  lost=$(LD_LIBRARY_PATH="$SHEPHERD_DIR" ldd "$SHEPHERD_DIR/$name" | awk '/not found/ {print $1}' | tr '\n' ' ')
+  if [[ -n "${lost// /}" ]]; then
+    uncovered=$(link_compat "$SHEPHERD_DIR" "$lost")
+    [[ -z "$uncovered" ]] || fail "Shepherd $SHEPHERD_NEED lacks: $uncovered"
+    for l in $lost; do
+      [[ -L "$SHEPHERD_DIR/$l" ]] && ok "$SHEPHERD_DIR/$l -> $(readlink "$SHEPHERD_DIR/$l")"
+    done
+  fi
   lost=$(LD_LIBRARY_PATH="$SHEPHERD_DIR" ldd "$SHEPHERD_DIR/$name" | awk '/not found/ {print $1}' | tr '\n' ' ')
   [[ -z "${lost// /}" ]] || fail "Shepherd $SHEPHERD_NEED still lacks: $lost"
+  undefined=$(unresolved "$SHEPHERD_DIR" "$SHEPHERD_DIR/$name")
+  [[ -z "${undefined// /}" ]] || fail "Shepherd $SHEPHERD_NEED cannot resolve: $undefined"
   ok "$SHEPHERD_DIR/$SHEPHERD.1 -> $name, for vLLM only; the system's stays $(version_of "$system_shepherd")"
 }
 
