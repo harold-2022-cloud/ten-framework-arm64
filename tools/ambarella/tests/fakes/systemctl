@@ -55,7 +55,7 @@ start_unit() {
 cmd="${1:-}"
 shift
 case "$cmd" in
-  cat) listed "$1" "${FAKE_UNITS:-}" ;;
+  cat) listed "$1" "${FAKE_UNITS:-}"; exit ;;
   is-active)
     quiet=0
     [[ "${1:-}" == --quiet ]] && { quiet=1; shift; }

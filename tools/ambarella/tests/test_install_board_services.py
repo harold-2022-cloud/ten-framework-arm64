@@ -85,7 +85,7 @@ class Units(unittest.TestCase):
             f'ExecStart="{serve}" exec',
             f'ExecStartPost="{serve}" ready 300',
             "TimeoutStartSec=330",
-            "Restart=on-failure",
+            "Restart=always",
             "Conflicts=ambarella-llm.service",
             "After=network-online.target ambarella-llm.service",
             "WantedBy=multi-user.target",

@@ -182,7 +182,9 @@ ExecStart=$(q "$SERVE") exec
 ExecStartPost=$(q "$SERVE") ready 300
 TimeoutStartSec=330
 TimeoutStopSec=30
-Restart=on-failure
+# Back whatever ended it -- a vLLM whose engine died may exit 0 -- but not
+# after a stop: systemctl stop and a Conflicts= stop leave it stopped.
+Restart=always
 RestartSec=10
 
 [Install]

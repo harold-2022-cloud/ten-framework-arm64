@@ -66,6 +66,31 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(argv[argv.index("--tool-call-parser") + 1], "hermes")
         self.assertEqual(argv[argv.index("--reasoning-parser") + 1], "qwen3")
 
+    def test_vllm_keeps_no_prompts_in_its_log(self):
+        # vLLM logs every request whole by default: every meeting's
+        # transcript, kept in vllm_qwen35.log for good.
+        b = Board(self)
+        b.ok("start")
+        self.assertIn("--disable-log-requests", read(b.path("vllm.argv")).splitlines())
+
+    def test_a_pid_file_naming_another_process_is_left_alone(self):
+        # A pid file outliving its vLLM, the number since taken by another
+        # process of the user's -- a login shell, say, with a session of its own.
+        b = Board(self)
+        other = b.path("other.pid")
+        b.start([sys.executable, "-c",
+                 "import os, time\n"
+                 "try:\n    os.setsid()\nexcept OSError:\n    pass\n"
+                 f"open({other!r}, 'w').write(str(os.getpid()))\n"
+                 "time.sleep(120)\n"])
+        self.assertTrue(wait_for(lambda: os.path.exists(other) and read(other)))
+        pid = read(other)
+        b.write(f"{RUN}/pid", pid + "\n")
+        b.write(f"{RUN}/pid.start", "1\n")
+        self.assertIn("Qwen3.5-4B not running", b.ok("status").stdout)
+        b.ok("stop")
+        self.assertFalse(gone(pid))
+
     def test_the_arguments_it_runs_on_are_kept_and_not_stale(self):
         b = Board(self)
         b.ok("start")
@@ -169,6 +194,26 @@ class WithTheServices(unittest.TestCase):
         r = b.serve("restart")
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("a meeting worker is up", r.stdout)
+        self.assertEqual(b.which(), "qwen")
+
+
+class MeetingGuard(unittest.TestCase):
+    """Every graph asks Qwen3.5-4B: taking it away while a meeting is being
+    processed must wait; bringing it back must not."""
+
+    def test_stop_refuses_while_a_meeting_worker_is_up(self):
+        b = with_the_services(self)
+        b.ok("start")
+        http_server(self, int(b.env["MEETING_UPLOADER"].rsplit(":", 1)[1]))
+        r = b.serve("stop")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("a meeting worker is up", r.stdout)
+        self.assertEqual(b.which(), "qwen")
+
+    def test_back_to_qwen_goes_ahead_while_a_meeting_worker_is_up(self):
+        b = with_the_services(self)
+        http_server(self, int(b.env["MEETING_UPLOADER"].rsplit(":", 1)[1]))
+        b.ok("back", "qwen")
         self.assertEqual(b.which(), "qwen")
 
 

@@ -39,9 +39,11 @@
 # them, vLLM runs in a session of its own and outlives the SSH login.
 #
 # Run it as the desktop user (lychee), not with sudo; it asks sudo for
-# systemctl. start and restart refuse while a meeting worker is up (8765
-# answers): its meeting would lose the LLM halfway. vLLM's output goes to
-# ~/workspace/vllm_qwen35.log.
+# systemctl. stop and restart refuse while a meeting worker is up (8765
+# answers): every graph asks Qwen3.5-4B, and the meeting would lose it
+# halfway. start does not: it gives the graphs their LLM back. vLLM's output
+# goes to ~/workspace/vllm_qwen35.log; the requests themselves are not
+# logged, or every meeting's transcript would be kept there for good.
 #
 # Settings, from the environment: WORK (~/workspace), QWEN_PKG
 # (~/demo_resources/llm_demo/qwen3.5_4B), VIT_NAME, SHEPHERD_DIR
@@ -91,6 +93,7 @@ VLLM_ARGS=(
   --enable-auto-tool-choice --tool-call-parser hermes
   --hf-overrides '{"vit_mode": 0, "model_type": "qwen3_5_text"}'
   --trust-remote-code
+  --disable-log-requests
 )
 
 ok() { echo "  ok    $*"; }
@@ -103,10 +106,19 @@ serving() {
 }
 daemon_up() { pgrep -x test_llm >/dev/null; }
 worker_up() { [[ $(curl -s -m 2 -o /dev/null -w '%{http_code}' "$UPLOADER/meetings") != 000 ]]; }
+# When a process started, in clock ticks since boot: with its pid it names
+# one process, where the pid alone may name another by now.
+started_at() { sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'; }
 vllm_pid() {
   local pid
   pid=$(cat "$RUN/pid" 2>/dev/null) || return 1
-  kill -0 "$pid" 2>/dev/null && echo "$pid"
+  kill -0 "$pid" 2>/dev/null || return 1
+  # A pid file that outlived its vLLM may name another process of the user's
+  # -- a login shell, whose whole session stop_vllm would end.
+  if [[ -f "$RUN/pid.start" && "$(started_at "$pid")" != "$(cat "$RUN/pid.start")" ]]; then
+    return 1
+  fi
+  echo "$pid"
 }
 units() { systemctl cat "$QWEN_UNIT" >/dev/null 2>&1; }
 # A vLLM this script started in the background, not the service's.
@@ -233,7 +245,7 @@ stop_vllm() {
     [[ -n "${all// /}" ]] && kill -KILL $all 2>/dev/null
     ok "stopped Qwen3.5-4B"
   fi
-  rm -f "$RUN/pid"
+  rm -f "$RUN/pid" "$RUN/pid.start"
   serving && fail "something still answers at $API that this script did not start"
   return 0
 }
@@ -253,7 +265,6 @@ do_start() {
     ok "Qwen3.5-4B already answers at $API"
     return 0
   fi
-  no_worker
   if units; then
     # The service runs it: a vLLM started by hand would hold the port, and
     # the 7B the NPU.
@@ -275,6 +286,7 @@ do_start() {
     exec setsid "$VENV/bin/vllm" "${VLLM_ARGS[@]}"
   ) >> "$LOG" 2>&1 < /dev/null &
   echo $! > "$RUN/pid"
+  started_at $! > "$RUN/pid.start"
   ok "starting Qwen3.5-4B (pid $!)${lib:+ with Shepherd from $lib}; log $LOG"
 
   local waited=0
@@ -286,7 +298,7 @@ do_start() {
     if ! vllm_pid >/dev/null; then
       echo "  -- tail $LOG"
       tail -20 "$LOG" | sed 's/^/     /'
-      do_stop
+      switch_back
       fail "vLLM exited before it answered (its log is above)"
     fi
     sleep 5
@@ -295,11 +307,18 @@ do_start() {
   done
   echo "  -- tail $LOG"
   tail -20 "$LOG" | sed 's/^/     /'
-  do_stop
+  switch_back
   fail "Qwen3.5-4B did not answer within $WAIT_S s; it is stopped again"
 }
 
 do_stop() {
+  no_worker
+  switch_back
+}
+
+# Qwen3.5-4B stopped and the 7B given back, whatever runs: stop's work, and
+# start's when Qwen3.5-4B does not come up.
+switch_back() {
   if units; then
     # With the services, stop means the 7B: Qwen3.5-4B's service stopped,
     # the 7B's started and waited for.
@@ -345,6 +364,7 @@ do_exec() {
   exec >> "$LOG" 2>&1 < /dev/null
   echo "== $(date '+%F %T') serve_qwen35.sh exec (pid $$)"
   echo $$ > "$RUN/pid"
+  started_at $$ > "$RUN/pid.start"
   vllm_env
   exec "$VENV/bin/vllm" "${VLLM_ARGS[@]}"
 }
