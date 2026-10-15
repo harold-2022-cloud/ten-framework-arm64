@@ -146,6 +146,18 @@ pip_() { "$VENV/bin/python" -m pip "$@"; }
 
 mkdir -p "$WORK" "$STATE"
 exec > >(tee -a "$LOG") 2>&1
+TEE_PID=$!
+TEST_STARTED=0
+# On any exit: the 7B daemon given back if the test took it, then all the
+# output through tee before the shell's prompt comes back.
+on_exit() {
+  local rc=$?
+  ((TEST_STARTED)) && "$HERE/serve_qwen35.sh" stop
+  exec >&- 2>&-
+  wait "$TEE_PID" 2>/dev/null
+  exit "$rc"
+}
+trap on_exit EXIT
 echo "== $(date '+%F %T') install_qwen35_vllm.sh $* (as $(id -un))"
 
 # --------------------------------------------------------------------------
@@ -669,8 +681,8 @@ step_test() {
     note "skipped (--no-test); later: serve_qwen35.sh start && serve_qwen35.sh test; serve_qwen35.sh stop"
     return
   fi
-  # Whatever happens from here, the 7B daemon is given back.
-  trap '"$HERE/serve_qwen35.sh" stop' EXIT
+  # Whatever happens from here, the 7B daemon is given back (on_exit).
+  TEST_STARTED=1
   "$HERE/serve_qwen35.sh" start || fail "Qwen3.5-4B did not start (serve_qwen35.sh start, above)"
   "$HERE/serve_qwen35.sh" test || fail "Qwen3.5-4B answered, but not as it should (above)"
   ok "Qwen3.5-4B is installed and answers"
