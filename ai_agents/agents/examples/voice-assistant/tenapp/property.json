@@ -2757,7 +2757,12 @@
                 "summary_timeout_s": 300.0,
                 "output_script": "${env:MEETING_OUTPUT_SCRIPT|simplified}",
                 "segment_prompt": "以下是一段会议的逐字稿。用中文写三到五句话，总结这段在讨论什么、做了什么决定。只有逐字稿里明确说出由谁负责某件事时，才写出那个人，用逐字稿里的说话人编号；没有明确说出的，不要写负责人，也不要推测。不要逐句复述原文。\n\n",
-                "meeting_prompt": "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；二、待办事项。不要逐句复述原文。不要使用 Markdown 格式，不要用 #、* 这类符号。\n\n"
+                "meeting_prompt": "以下是一场会议各段的总结。用中文写出：一、这场会议的结论；二、待办事项。不要逐句复述原文。不要使用 Markdown 格式，不要用 #、* 这类符号。\n\n",
+                "ten": {
+                  "path_timeout": {
+                    "out_path": 330000000
+                  }
+                }
               }
             },
             {
@@ -2771,7 +2776,12 @@
                 "prompt": "",
                 "temperature": 0.0,
                 "frequency_penalty": 0.0,
-                "max_tokens": 2048
+                "max_tokens": 2048,
+                "ten": {
+                  "path_timeout": {
+                    "in_path": 330000000
+                  }
+                }
               }
             }
           ],

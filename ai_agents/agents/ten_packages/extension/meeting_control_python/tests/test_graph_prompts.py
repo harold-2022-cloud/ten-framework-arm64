@@ -22,7 +22,11 @@ PROPERTY = os.path.join(
     "property.json",
 )
 VARIANTS = os.path.join(EXT, "prompt_variants.json")
-CHANGED = {"segment_prompt", "meeting_prompt", "summary_timeout_s"}
+CHANGED = {"segment_prompt", "meeting_prompt", "summary_timeout_s", "ten"}
+# TEN times a command out on its own path after 180 s by default
+# (core/include_internal/ten_runtime/extension/path_timer.h), and a streamed
+# answer does not reset it: without these the 300 s turn would end at 180 s.
+PATH_TIMEOUT_US = 330_000_000
 
 
 def graph(name):
@@ -46,6 +50,14 @@ def test_the_prompts_are_the_explicit_owners_set():
     assert control["summary_timeout_s"] == 300.0
 
 
+def test_tens_path_timeouts_outlast_the_turn():
+    control = nodes("meeting_minutes_qwen")["main_control"]["property"]
+    llm = nodes("meeting_minutes_qwen")["llm"]["property"]
+    assert control["ten"] == {"path_timeout": {"out_path": PATH_TIMEOUT_US}}
+    assert llm["ten"] == {"path_timeout": {"in_path": PATH_TIMEOUT_US}}
+    assert PATH_TIMEOUT_US > control["summary_timeout_s"] * 1_000_000
+
+
 def test_the_llm_is_qwen_as_it_was_evaluated():
     llm = nodes("meeting_minutes_qwen")["llm"]
     assert llm["addon"] == "openai_llm2_python"
@@ -57,6 +69,7 @@ def test_the_llm_is_qwen_as_it_was_evaluated():
         "temperature": 0.0,
         "frequency_penalty": 0.0,
         "max_tokens": 2048,
+        "ten": {"path_timeout": {"in_path": PATH_TIMEOUT_US}},
     }
 
 
