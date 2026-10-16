@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# kde-inhibit, faked: its own options to $FAKE_LOG, then the command it holds.
+# kde-inhibit, faked: its own options to $FAKE_LOG, then the command it holds
+# (after them, or after --).
 opts=()
 while [[ "${1:-}" == --* ]]; do
+  [[ "$1" == -- ]] && { shift; break; }
   opts+=("$1")
   shift
 done

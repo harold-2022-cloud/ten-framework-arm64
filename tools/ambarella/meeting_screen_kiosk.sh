@@ -42,8 +42,15 @@ log "$URL answers after $waited s"
 # the lock for as long as it runs; X11 through xset; GNOME through gsettings.
 awake=()
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *KDE* ]] && command -v kde-inhibit >/dev/null; then
-  awake=(kde-inhibit --power --screenSaver)
-  log "display kept awake by kde-inhibit --power --screenSaver while the browser runs"
+  # Tried first on a command that does nothing: a kde-inhibit that cannot
+  # run what it holds would leave no browser at all. "--" keeps the
+  # browser's own options from being read as its.
+  if kde-inhibit --power --screenSaver -- true; then
+    awake=(kde-inhibit --power --screenSaver --)
+    log "display kept awake by kde-inhibit --power --screenSaver while the browser runs"
+  else
+    log "kde-inhibit could not run a command here: the browser opens without it, and the display may dim, turn off or lock"
+  fi
 elif [[ "${XDG_SESSION_TYPE:-}" == x11 ]] && command -v xset >/dev/null; then
   xset s off -dpms && log "display kept awake: xset s off -dpms"
 elif [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]] && command -v gsettings >/dev/null; then
@@ -57,9 +64,13 @@ fi
 mkdir -p "$PROFILE"
 if command -v firefox >/dev/null; then
   # Its own profile, told to ask nothing: no welcome, no restore after a
-  # power cut, no default-browser question, no update prompt.
+  # power cut, no default-browser question, no update prompt -- at least
+  # the prefs probe_demo_screen.py showed to work on the board.
   cat > "$PROFILE/user.js" <<'EOF'
 user_pref("browser.aboutwelcome.enabled", false);
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("browser.tabs.warnOnClose", false);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.sessionstore.resume_from_crash", false);
 user_pref("browser.startup.homepage_override.mstone", "ignore");

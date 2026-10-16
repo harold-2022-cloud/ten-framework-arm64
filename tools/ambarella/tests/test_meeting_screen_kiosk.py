@@ -23,6 +23,8 @@ from fakes import Sandbox, free_port, http_server, read, wait_for  # noqa: E402 
 BROWSERS = ("firefox", "chromium", "chromium-browser", "google-chrome")
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 HAS_BROWSER = any(shutil.which(b, path=SYSTEM_PATH) for b in BROWSERS)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from probe_demo_screen import FIREFOX_PREFS as PROBED_PREFS  # noqa: E402  pylint: disable=wrong-import-position
 
 
 class Board(Sandbox):
@@ -59,9 +61,20 @@ class Kiosk(unittest.TestCase):
         profile, url = b.env["KIOSK_PROFILE"], b.env["SCREEN_URL"]
         self.assertEqual(b.browser_calls(), [f"firefox --kiosk --no-remote --profile {profile} {url}"])
         prefs = read(os.path.join(profile, "user.js"))
-        for pref in ("browser.sessionstore.resume_from_crash", "browser.shell.checkDefaultBrowser"):
-            self.assertIn(pref, prefs)
+        # At least what probe_demo_screen.py showed keeps a fresh profile
+        # from opening anything over the page on the board.
+        for pref in PROBED_PREFS:
+            self.assertIn(f'user_pref("{pref}",', prefs)
         self.assertIn("kde-inhibit", b.log())
+
+    def test_a_kde_inhibit_that_cannot_run_a_command_is_left_out(self):
+        b = Board(self, XDG_CURRENT_DESKTOP="KDE", XDG_SESSION_TYPE="wayland")
+        b.write("bin/kde-inhibit", "#!/bin/sh\necho \"kde-inhibit $*\" >> \"$FAKE_LOG\"\nexit 1\n", 0o755)
+        http_server(self, b.port)
+        r = b.kiosk()
+        self.assertEqual(r.returncode, 0, b.log())
+        self.assertEqual(len(b.browser_calls()), 1)
+        self.assertIn("display may dim", b.log())
 
     def test_on_x11_xset_keeps_the_display_awake(self):
         b = Board(self, XDG_CURRENT_DESKTOP="XFCE", XDG_SESSION_TYPE="x11")
