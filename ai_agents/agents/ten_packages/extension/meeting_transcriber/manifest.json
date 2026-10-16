@@ -55,6 +55,9 @@
     "data_out": [
       {
         "name": "segment_transcribed"
+      },
+      {
+        "name": "transcribe_progress"
       }
     ]
   },

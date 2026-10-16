@@ -8,6 +8,8 @@ The merge is the whole point. Diarization knows when each person spoke and
 recognition knows what was said; neither alone is a meeting record.
 """
 
+import asyncio
+
 import numpy as np
 import pytest
 
@@ -15,6 +17,7 @@ from meeting_transcriber.config import MeetingTranscriberConfig
 from meeting_transcriber.transcriber import (
     MeetingTranscriber,
     Utterance,
+    forward,
     read_pcm16,
     utterances_payload,
 )
@@ -315,3 +318,69 @@ def test_the_payload_carries_each_utterance_with_its_voice():
             "embedding": None,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_progress_follows_diarization_then_each_turn(tmp_path):
+    pcm = tmp_path / "segment.pcm"
+    pcm.write_bytes(b"\x00\x01" * 16000 * 10)  # 10 s
+    transcriber = make(
+        segments=[
+            FakeSegment(0.5, 3.0, 0),
+            FakeSegment(3.2, 6.0, 1),
+            FakeSegment(6.4, 9.0, 0),
+        ],
+        texts=["下週要出版本。", "", "那就下週二看。"],
+    )
+    events = []
+
+    await transcriber.transcribe(str(pcm), speakers=2, progress=events.append)
+
+    assert (events[0]["turns_done"], events[0]["turns_total"]) == (0, 3)
+    assert events[0]["diarize_s"] >= 0
+    assert all(e["step"] == "recognising" for e in events)
+    assert [e["turns_done"] for e in events[1:]] == [1, 2, 3]
+    assert events[1]["utterance"] == {
+        "start_s": 0.5,
+        "end_s": 3.0,
+        "speaker": 0,
+        "text": "下週要出版本。",
+    }
+    # A turn with no words still counts, and carries none.
+    assert "utterance" not in events[2]
+    assert events[3]["utterance"]["text"] == "那就下週二看。"
+
+
+@pytest.mark.asyncio
+async def test_where_a_topics_time_went_is_kept(tmp_path):
+    pcm = tmp_path / "segment.pcm"
+    pcm.write_bytes(b"\x00\x01" * 16000 * 10)
+    transcriber = make(
+        segments=[FakeSegment(0.5, 3.0, 0), FakeSegment(3.2, 6.0, 1)],
+        texts=["甲。", "乙。"],
+    )
+    assert transcriber.timing == {}
+
+    await transcriber.transcribe(str(pcm), speakers=2)
+
+    timing = transcriber.timing
+    assert set(timing) == {"diarize_s", "recognise_s", "embed_s", "turns"}
+    assert timing["turns"] == 2
+    assert all(value >= 0 for value in timing.values())
+
+
+@pytest.mark.asyncio
+async def test_progress_is_sent_on_in_order_and_a_failed_send_is_skipped():
+    queue = asyncio.Queue()
+    sent = []
+
+    async def send(event):
+        if event.get("bad"):
+            raise RuntimeError("the runtime said no")
+        sent.append(event["n"])
+
+    for event in ({"n": 1}, {"bad": True}, {"n": 2}, None, {"n": 3}):
+        queue.put_nowait(event)
+    await forward(queue, send)
+
+    assert sent == [1, 2]

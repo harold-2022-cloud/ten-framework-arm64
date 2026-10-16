@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional
 
@@ -53,6 +54,23 @@ def utterances_payload(utterances: List[Utterance]) -> List[dict]:
         }
         for u in utterances
     ]
+
+
+async def forward(
+    queue: "asyncio.Queue[Optional[dict]]",
+    send: Callable[[dict], Awaitable[None]],
+) -> None:
+    """Progress reports sent on in the order they came, until None. One
+    that cannot be sent is dropped: progress is for the screen, and the
+    topic's transcript must not wait on it."""
+    while True:
+        event = await queue.get()
+        if event is None:
+            return
+        try:
+            await send(event)
+        except Exception:  # pylint: disable=broad-except
+            continue
 
 
 def child_python() -> str:
@@ -134,6 +152,8 @@ class MeetingTranscriber:
         self._recogniser = None
         self._extractor = None
         self._lock = asyncio.Lock()
+        # Where the last topic's time went (transcribe() sets it).
+        self.timing: dict = {}
 
     async def transcribe(
         self,
@@ -141,12 +161,27 @@ class MeetingTranscriber:
         speakers: int,
         start_s: float = 0.0,
         duration_s: Optional[float] = None,
+        progress: Optional[Callable[[dict], None]] = None,
     ) -> List[Utterance]:
         """Who said what in one topic. Utterance times are offsets within
-        the slice; the caller adds the topic's own start_s."""
+        the slice; the caller adds the topic's own start_s.
+
+        progress, when given, hears once the speakers are told apart
+        (turns_total, diarize_s) and once per turn after it (turns_done,
+        and the utterance when the turn had words) -- always on the event
+        loop, in order. timing says where the topic's time went."""
+        self.timing = {}
         samples = read_pcm16(path, start_s, duration_s)
         if samples.size == 0:
             return []
+        loop = asyncio.get_running_loop()
+
+        def report(event: dict) -> None:
+            # Called from the recognition thread too: handed to the loop,
+            # whose call_soon_threadsafe keeps them in the order made.
+            if progress is not None:
+                loop.call_soon_threadsafe(progress, event)
+
         request = {
             "pcm_path": path,
             "start_s": start_s,
@@ -160,10 +195,28 @@ class MeetingTranscriber:
         # One segment at a time: both models are hundreds of megabytes and the
         # board has four cores shared with everything else.
         async with self._lock:
+            began = time.monotonic()
             turns = await self._diarize(request)
-            return await asyncio.get_running_loop().run_in_executor(
-                None, self._recognise, samples, turns
+            diarize_s = round(time.monotonic() - began, 1)
+            report(
+                {
+                    "step": "recognising",
+                    "turns_done": 0,
+                    "turns_total": len(turns),
+                    "diarize_s": diarize_s,
+                }
             )
+            spent = {"recognise_s": 0.0, "embed_s": 0.0}
+            out = await loop.run_in_executor(
+                None, self._recognise, samples, turns, report, spent
+            )
+            self.timing = {
+                "diarize_s": diarize_s,
+                "recognise_s": round(spent["recognise_s"], 1),
+                "embed_s": round(spent["embed_s"], 1),
+                "turns": len(turns),
+            }
+            return out
 
     def _ensure_loaded(self) -> None:
         """Lazily, and only once."""
@@ -189,30 +242,49 @@ class MeetingTranscriber:
         return (vector / norm).tolist() if norm > 0 else None
 
     def _recognise(
-        self, samples: np.ndarray, turns: List[list]
+        self,
+        samples: np.ndarray,
+        turns: List[list],
+        report: Callable[[dict], None],
+        spent: dict,
     ) -> List[Utterance]:
         # Runs on an executor thread. Recognition gives the GIL back while it
         # decodes (measured: no loop stall over 0.2 s); an embedding holds it
         # for well under a second per turn.
         self._ensure_loaded()
         out: List[Utterance] = []
-        for start_s, end_s, speaker in turns:
+        total = len(turns)
+        for done, (start_s, end_s, speaker) in enumerate(turns, 1):
+            event = {"step": "recognising", "turns_done": done}
+            event["turns_total"] = total
             begin = int(start_s * SAMPLE_RATE)
             end = min(int(end_s * SAMPLE_RATE), samples.size)
-            if end <= begin:
-                continue
-            stream = self._recogniser.create_stream()
-            stream.accept_waveform(SAMPLE_RATE, samples[begin:end])
-            self._recogniser.decode_stream(stream)
-            text = stream.result.text.strip()
+            text = ""
+            if end > begin:
+                began = time.monotonic()
+                stream = self._recogniser.create_stream()
+                stream.accept_waveform(SAMPLE_RATE, samples[begin:end])
+                self._recogniser.decode_stream(stream)
+                text = stream.result.text.strip()
+                spent["recognise_s"] += time.monotonic() - began
             if text:
+                began = time.monotonic()
+                embedding = self._embed(samples, begin, end)
+                spent["embed_s"] += time.monotonic() - began
                 out.append(
                     Utterance(
                         start_s=start_s,
                         end_s=end_s,
                         speaker=speaker,
                         text=text,
-                        embedding=self._embed(samples, begin, end),
+                        embedding=embedding,
                     )
                 )
+                event["utterance"] = {
+                    "start_s": start_s,
+                    "end_s": end_s,
+                    "speaker": speaker,
+                    "text": text,
+                }
+            report(event)
         return out

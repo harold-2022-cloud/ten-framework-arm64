@@ -18,10 +18,11 @@ from ten_runtime import (
 )
 
 from .config import MeetingTranscriberConfig
-from .transcriber import MeetingTranscriber, utterances_payload
+from .transcriber import MeetingTranscriber, forward, utterances_payload
 
 CMD_TRANSCRIBE = "transcribe"
 DATA_SEGMENT_TRANSCRIBED = "segment_transcribed"
+DATA_TRANSCRIBE_PROGRESS = "transcribe_progress"
 
 
 class MeetingTranscriberExtension(AsyncExtension):
@@ -98,18 +99,42 @@ class MeetingTranscriberExtension(AsyncExtension):
         if self.transcriber is None:
             payload["error"] = "transcriber was never initialised"
         else:
+            # How far the topic got, for the screen: sent in order, and all
+            # of it before the transcript -- the sender is drained first.
+            queue: asyncio.Queue = asyncio.Queue()
+            sender = asyncio.create_task(
+                forward(
+                    queue,
+                    lambda event: self._send(
+                        ten_env,
+                        DATA_TRANSCRIBE_PROGRESS,
+                        {"segment_id": segment_id, **event},
+                    ),
+                )
+            )
             try:
                 utterances = await self.transcriber.transcribe(
-                    path, speakers, start_s, duration_s
+                    path,
+                    speakers,
+                    start_s,
+                    duration_s,
+                    progress=queue.put_nowait,
                 )
                 payload["utterances"] = utterances_payload(utterances)
+                payload["timing"] = self.transcriber.timing
             except Exception as failure:  # pylint: disable=broad-except
                 # One segment failing must not take the meeting with it: the
                 # record says which one, and the rest stands.
                 payload["error"] = str(failure)
                 ten_env.log_error(f"segment {segment_id} failed: {failure}")
+            finally:
+                queue.put_nowait(None)
+                await sender
 
-        data = Data.create(DATA_SEGMENT_TRANSCRIBED)
+        await self._send(ten_env, DATA_SEGMENT_TRANSCRIBED, payload)
+
+    async def _send(self, ten_env: AsyncTenEnv, name: str, payload) -> None:
+        data = Data.create(name)
         data.set_property_from_json(
             None, json.dumps(payload, ensure_ascii=False)
         )
