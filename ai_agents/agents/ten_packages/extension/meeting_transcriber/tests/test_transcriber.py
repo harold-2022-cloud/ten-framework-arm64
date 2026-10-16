@@ -364,7 +364,14 @@ async def test_where_a_topics_time_went_is_kept(tmp_path):
     await transcriber.transcribe(str(pcm), speakers=2)
 
     timing = transcriber.timing
-    assert set(timing) == {"diarize_s", "recognise_s", "embed_s", "turns"}
+    # load_s: the models are loaded for the first topic, outside the rest.
+    assert set(timing) == {
+        "diarize_s",
+        "load_s",
+        "recognise_s",
+        "embed_s",
+        "turns",
+    }
     assert timing["turns"] == 2
     assert all(value >= 0 for value in timing.values())
 

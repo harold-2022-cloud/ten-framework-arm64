@@ -206,12 +206,13 @@ class MeetingTranscriber:
                     "diarize_s": diarize_s,
                 }
             )
-            spent = {"recognise_s": 0.0, "embed_s": 0.0}
+            spent = {"load_s": 0.0, "recognise_s": 0.0, "embed_s": 0.0}
             out = await loop.run_in_executor(
                 None, self._recognise, samples, turns, report, spent
             )
             self.timing = {
                 "diarize_s": diarize_s,
+                "load_s": round(spent["load_s"], 1),
                 "recognise_s": round(spent["recognise_s"], 1),
                 "embed_s": round(spent["embed_s"], 1),
                 "turns": len(turns),
@@ -250,8 +251,11 @@ class MeetingTranscriber:
     ) -> List[Utterance]:
         # Runs on an executor thread. Recognition gives the GIL back while it
         # decodes (measured: no loop stall over 0.2 s); an embedding holds it
-        # for well under a second per turn.
+        # for well under a second per turn. The models load here, once, for
+        # the first topic: timed apart, so that topic's numbers still add up.
+        began = time.monotonic()
         self._ensure_loaded()
+        spent["load_s"] += time.monotonic() - began
         out: List[Utterance] = []
         total = len(turns)
         for done, (start_s, end_s, speaker) in enumerate(turns, 1):

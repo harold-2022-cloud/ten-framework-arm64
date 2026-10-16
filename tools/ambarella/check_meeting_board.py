@@ -638,6 +638,11 @@ def timing_lines(topics):
             f"{recognise:.0f} s ({recognise / length:.2f} x), voices "
             f"embedded in {timing.get('embed_s') or 0.0:.0f} s, "
             f"{timing.get('turns') or 0} turns"
+            + (
+                f", models loaded in {timing['load_s']:.0f} s"
+                if (timing.get("load_s") or 0.0) >= 0.5
+                else ""
+            )
         )
     return lines
 
