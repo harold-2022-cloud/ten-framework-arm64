@@ -30,7 +30,8 @@ the board after a power cut and the screen comes back by itself.
 | PageUp, ←, Esc | back to the live meeting |
 | Home | the ready screen until the next upload, e.g. after a rehearsal |
 | ↑ ↓ | scroll the transcript |
-| L | every meeting; ↑ ↓ and Enter to pin one |
+| L, or 會議紀錄 (top right) | every meeting the board keeps; ↑ ↓ and Enter, or a click, opens one |
+| 回到現場 (top right) | back to the live screen, as PageUp |
 | Alt+F4 | leave the full-screen browser |
 
 ## Demo day

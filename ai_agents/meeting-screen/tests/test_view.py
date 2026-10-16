@@ -40,12 +40,12 @@ def test_the_newest_unfinished_meeting_comes_first():
     assert v["meeting"]["ahead"] == 1
 
 
-def test_a_finished_meeting_stays_for_recent_min():
-    assert build([m("a", "archived", NOW - 30 * 60)])["scene"] == "result"
-    assert build([m("a", "archived", NOW - 61 * 60)])["scene"] == "ready"
+def test_a_finished_meeting_stays_for_recent_min_two_hours_by_default():
+    assert build([m("a", "archived", NOW - 119 * 60)])["scene"] == "result"
+    assert build([m("a", "archived", NOW - 121 * 60)])["scene"] == "ready"
     assert (
-        build([m("a", "archived", NOW - 61 * 60)], recent_min=90)["scene"]
-        == "result"
+        build([m("a", "archived", NOW - 61 * 60)], recent_min=60)["scene"]
+        == "ready"
     )
 
 
@@ -56,11 +56,11 @@ def test_an_unfinished_meeting_wins_over_a_newer_finished_one():
 
 def test_the_showcase_takes_no_part_in_auto_mode():
     v = build(
-        [m("live", "archived", NOW - 61 * 60), m("show", "archived", NOW - 5)],
+        [m("live", "archived", NOW - 121 * 60), m("show", "archived", NOW - 5)],
         showcase="show",
     )
     assert v["scene"] == "ready"
-    assert v["newest_received_at"] == NOW - 61 * 60
+    assert v["newest_received_at"] == NOW - 121 * 60
     assert v["showcase_id"] == "show"
 
 
@@ -134,9 +134,17 @@ def test_each_state_lights_its_stage():
 
 def test_processing_time():
     done = build(
-        [m("a", "archived", NOW - 5, started_at=100.0, updated_at=400.0)]
+        [
+            m(
+                "a",
+                "archived",
+                NOW - 500,
+                started_at=NOW - 400,
+                updated_at=NOW - 100,
+            )
+        ]
     )["meeting"]
-    assert (done["finished_at"], done["elapsed_s"]) == (400.0, 300.0)
+    assert (done["finished_at"], done["elapsed_s"]) == (NOW - 100, 300.0)
     going = build(
         [
             m(
@@ -219,8 +227,20 @@ def test_listing_newest_first_with_the_showcase_marked():
         "state": "archived",
         "received_at": 1.0,
         "duration_s": 9.0,
+        "speakers": None,
         "showcase": True,
     }
+
+
+def test_listing_says_how_many_speakers_a_finished_meeting_found():
+    rows = view.listing(
+        [m("a", "archived", 1), m("b", "transcribing", 2)],
+        read_record=lambda i: {"speaker_count": 9} if i == "a" else None,
+    )
+    assert [(r["meeting_id"], r["speakers"]) for r in rows] == [
+        ("b", None),
+        ("a", 9),
+    ]
 
 
 def test_archived_with_no_words_is_a_failure_with_the_topic_error():
@@ -274,3 +294,15 @@ def test_a_step_left_over_from_transcribing_is_not_shown_later():
 def test_when_the_current_state_began_is_passed_on():
     v = build([m("a", "concluding", NOW - 5, updated_at=NOW - 30)])
     assert v["meeting"]["since"] == NOW - 30
+
+
+def test_a_long_meeting_stays_for_recent_min_from_when_it_ended():
+    # Received 87 minutes ago, done a minute ago: an 86-minute meeting.
+    done_now = m("a", "archived", NOW - 87 * 60, updated_at=NOW - 60)
+    assert build([done_now])["scene"] == "result"
+    done_long_ago = m(
+        "a", "archived", NOW - 250 * 60, updated_at=NOW - 121 * 60
+    )
+    assert build([done_long_ago])["scene"] == "ready"
+    failed_now = m("a", "failed", NOW - 200 * 60, updated_at=NOW - 5, error="x")
+    assert build([failed_now])["scene"] == "failed"

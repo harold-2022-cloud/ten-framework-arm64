@@ -53,6 +53,30 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.nav {
+  padding: 8px 20px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 28px;
+  cursor: pointer;
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
 main {
   display: flex;
   flex-direction: column;

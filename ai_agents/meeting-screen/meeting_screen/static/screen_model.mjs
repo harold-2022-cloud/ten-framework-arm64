@@ -171,6 +171,23 @@ export function hasWords(record) {
   return topicsOf(record).some((t) => utterancesOf(t).length > 0);
 }
 
+// A line of the meeting list: its title, else its id; then its length, the
+// speakers it found and its state.
+export function listRow(item) {
+  const parts = [];
+  if (Number(item.duration_s) > 0) {
+    parts.push(mmss(item.duration_s));
+  }
+  if (Number.isInteger(item.speakers)) {
+    parts.push(`${item.speakers} 人`);
+  }
+  parts.push(STATE_LABEL[item.state] || item.state || "");
+  return {
+    title: item.title || item.meeting_id,
+    detail: parts.filter(Boolean).join(" · "),
+  };
+}
+
 export function speakerCount(record) {
   const seen = new Set();
   for (const topic of topicsOf(record)) {

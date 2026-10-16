@@ -111,7 +111,7 @@ def test_localhost_8766_unless_told():
     args = parser().parse_args(["--meetings-dir", "/x"])
     assert (args.listen, args.recent_min, args.showcase) == (
         "127.0.0.1:8766",
-        60.0,
+        120.0,
         None,
     )
 

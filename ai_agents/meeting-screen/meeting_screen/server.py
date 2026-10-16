@@ -37,7 +37,7 @@ class Screen:
         self,
         meetings_dir: str,
         showcase: Optional[str] = None,
-        recent_min: float = 60.0,
+        recent_min: float = 120.0,
         clock=time.time,
     ):
         self.meetings_dir = meetings_dir
@@ -63,7 +63,9 @@ class Screen:
 
     def meetings(self) -> Tuple[int, object]:
         return 200, view.listing(
-            disk.list_meetings(self.meetings_dir), self.showcase
+            disk.list_meetings(self.meetings_dir),
+            self.showcase,
+            lambda meeting_id: disk.read_record(self.meetings_dir, meeting_id),
         )
 
 

@@ -298,3 +298,25 @@ test("a stage with nothing to measure has no bar", () => {
   assert.equal(m.progressBar({ stage: 2 }, 0), null);
   assert.equal(m.progressBar(null, 0), null);
 });
+
+test("a meeting in the list says its length, speakers and state", () => {
+  const row = m.listRow({
+    meeting_id: "pc-1",
+    title: "週會",
+    state: "archived",
+    received_at: null,
+    duration_s: 5176,
+    speakers: 9,
+    showcase: false,
+  });
+  assert.equal(row.title, "週會");
+  assert.equal(row.detail, "1:26:16 · 9 人 · 完成");
+  const untitled = m.listRow({
+    meeting_id: "pc-2",
+    title: "",
+    state: "transcribing",
+    duration_s: 60,
+  });
+  assert.equal(untitled.title, "pc-2");
+  assert.equal(untitled.detail, "1:00 · 分辨說話人＋轉文字");
+});

@@ -8,7 +8,7 @@ the clock come in, the body of /api/view goes out; the page only draws it.
 
 Auto mode, the showcase meeting left out:
   1. a meeting not finished (queued to concluding): the newest received;
-  2. else the newest, if received within recent_min: its result or failure;
+  2. else the newest, if it ended within recent_min: its result or failure;
   3. else the ready screen.
 A pin shows that meeting, the showcase included; the page lets go of it
 when newest_received_at grows.
@@ -102,7 +102,7 @@ def choose(
     now: float,
     showcase: Optional[str] = None,
     pin: Optional[str] = None,
-    recent_min: float = 60.0,
+    recent_min: float = 120.0,
 ) -> Tuple[Optional[Meeting], bool]:
     """The meeting to show, and whether it is pinned."""
     if pin is not None:
@@ -115,7 +115,11 @@ def choose(
         return max(going, key=_key), False
     if live:
         newest = max(live, key=_key)
-        if now - newest.received_at <= recent_min * 60:
+        # From when it ended, not when it came: a meeting processed for
+        # longer than recent_min would otherwise never show its result.
+        ended = _num(newest.state.get("updated_at"))
+        since = ended if ended is not None else newest.received_at
+        if now - since <= recent_min * 60:
             return newest, False
     return None, False
 
@@ -205,7 +209,7 @@ def build(
     now: float,
     showcase: Optional[str] = None,
     pin: Optional[str] = None,
-    recent_min: float = 60.0,
+    recent_min: float = 120.0,
 ) -> dict:
     """The body of GET /api/view."""
     chosen, pinned = choose(meetings, now, showcase, pin, recent_min)
@@ -229,10 +233,24 @@ def build(
     }
 
 
+def _found(m: Meeting, read_record) -> Optional[int]:
+    """How many speakers a finished meeting's record names."""
+    if read_record is None or _state(m) != "archived":
+        return None
+    record = read_record(m.meeting_id)
+    count = (
+        _num(record.get("speaker_count")) if isinstance(record, dict) else None
+    )
+    return int(count) if count is not None else None
+
+
 def listing(
-    meetings: List[Meeting], showcase: Optional[str] = None
+    meetings: List[Meeting],
+    showcase: Optional[str] = None,
+    read_record: Optional[Callable[[str], Optional[dict]]] = None,
 ) -> List[dict]:
-    """The body of GET /api/meetings: the newest received first."""
+    """The body of GET /api/meetings: the newest received first, each
+    finished one with the speakers it found."""
     return [
         {
             "meeting_id": m.meeting_id,
@@ -240,6 +258,7 @@ def listing(
             "state": _state(m),
             "received_at": _num(m.state.get("received_at")),
             "duration_s": _num(m.upload.get("duration_s")),
+            "speakers": _found(m, read_record),
             "showcase": m.meeting_id == showcase,
         }
         for m in sorted(meetings, key=_key, reverse=True)

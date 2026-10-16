@@ -16,13 +16,13 @@ import {
   initial,
   lanes,
   leftText,
+  listRow,
   minutesText,
   mmss,
   pinTo,
   poll,
   progressBar,
   progressText,
-  STATE_LABEL,
   shownScene,
   speakerCount,
   stageItems,
@@ -113,7 +113,7 @@ function titleLine(meeting, label) {
 
 function pinnedNote(view) {
   return view.pinned
-    ? '<p class="hint">已固定這一場 · PageUp 回到現場</p>'
+    ? '<p class="hint">正在看這一場 · 按「回到現場」或 PageUp 回到即時畫面</p>'
     : "";
 }
 
@@ -200,6 +200,8 @@ function tick() {
 
 function draw() {
   byId("stale").hidden = !model.stale;
+  // A meeting chosen from the list, or the ready screen held: a way back.
+  byId("back").hidden = !(model.pin !== null || model.ready);
   const view = model.view;
   if (!view) {
     return;
@@ -261,22 +263,26 @@ async function refresh() {
 function drawList() {
   const box = byId("list");
   box.hidden = false;
+  const head =
+    '<div class="list-head"><h2>會議紀錄</h2><button class="nav" id="list-close" type="button">關閉</button></div>';
   if (list.items.length === 0) {
-    box.innerHTML = '<p class="muted">還沒有會議</p>';
+    box.innerHTML = `${head}<p class="muted">還沒有會議</p>`;
     return;
   }
-  box.innerHTML = list.items
+  const rows = list.items
     .map((item, i) => {
       const when = item.received_at
         ? new Date(item.received_at * 1000).toLocaleString("zh-TW", {
             hour12: false,
           })
         : "";
+      const row = listRow(item);
       const tag = item.showcase ? '<span class="tag">範例</span>' : "";
       const on = i === list.index ? " on" : "";
-      return `<div class="item${on}" data-id="${escapeHtml(item.meeting_id)}">${tag}${escapeHtml(item.title || item.meeting_id)}<span class="muted"> · ${STATE_LABEL[item.state] || ""} · ${when}</span></div>`;
+      return `<div class="item${on}" data-id="${escapeHtml(item.meeting_id)}">${tag}${escapeHtml(row.title)}<span class="muted"> · ${escapeHtml(row.detail)} · ${when}</span></div>`;
     })
     .join("");
+  box.innerHTML = head + rows;
   box.querySelector(".item.on")?.scrollIntoView({ block: "nearest" });
 }
 
@@ -367,10 +373,26 @@ function onKey(event) {
 
 document.addEventListener("keydown", onKey);
 byId("list").addEventListener("click", (event) => {
+  if (event.target.closest("#list-close")) {
+    closeList();
+    return;
+  }
   const item = event.target.closest(".item");
   if (item) {
     pinMeeting(item.dataset.id);
   }
+});
+// The same as L and PageUp, for a mouse or a touch screen.
+byId("archive").addEventListener("click", () => {
+  if (list.open) {
+    closeList();
+  } else {
+    openList();
+  }
+});
+byId("back").addEventListener("click", () => {
+  model = unpin(model);
+  refresh();
 });
 setInterval(tick, 1000);
 refresh();

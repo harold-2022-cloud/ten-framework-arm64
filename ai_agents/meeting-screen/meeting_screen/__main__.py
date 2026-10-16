@@ -32,8 +32,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--recent-min",
         type=float,
-        default=60.0,
-        help="how long a finished meeting stays (60)",
+        default=120.0,
+        help="how long a finished meeting stays on, from its end (120)",
     )
     return p
 
