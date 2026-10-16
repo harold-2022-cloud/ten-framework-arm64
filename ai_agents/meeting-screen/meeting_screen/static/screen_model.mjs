@@ -151,6 +151,12 @@ export function lanes(record, duration, speakersFinal) {
     }));
 }
 
+// Whether any topic has an utterance: a meeting whose every topic failed
+// has none, and no transcript to show.
+export function hasWords(record) {
+  return topicsOf(record).some((t) => utterancesOf(t).length > 0);
+}
+
 export function speakerCount(record) {
   const seen = new Set();
   for (const topic of topicsOf(record)) {
@@ -204,58 +210,80 @@ export function failureText(meeting) {
   return { title: "這段錄音沒有處理完成", reason: String(meeting.error ?? "") };
 }
 
-// The page's own state: the last view, the pin, whether the service stopped
-// answering, and the server clock's offset from this one.
+// The page's own state: the last view; a hold -- a pinned meeting, or the
+// ready screen held by Home -- and the newest live meeting when it began;
+// whether the service stopped answering; the server clock's offset from
+// this one; and whether to ask again at once.
 export function initial() {
-  return { view: null, pin: null, pinNewest: null, stale: false, offset: 0 };
-}
-
-// A poll folded into the state. A failed one keeps the last view, marked
-// stale. A pin lets go once a live meeting newer than any at pin time
-// arrives: a live upload always wins.
-export function poll(model, outcome, clientNow) {
-  if (!outcome.ok) {
-    return { ...model, stale: true };
-  }
-  const view = outcome.view;
-  const newest = view.newest_received_at ?? null;
-  let pin = model.pin;
-  let pinNewest = model.pinNewest;
-  if (
-    pin !== null &&
-    newest !== null &&
-    (pinNewest === null || newest > pinNewest)
-  ) {
-    pin = null;
-    pinNewest = null;
-  }
-  const serverNow = Number(view.now);
   return {
-    view,
-    pin,
-    pinNewest,
+    view: null,
+    pin: null,
+    ready: false,
+    since: null,
     stale: false,
-    offset: Number.isFinite(serverNow) ? serverNow - clientNow : 0,
+    offset: 0,
+    again: false,
   };
 }
 
+// A poll folded into the state. A failed one keeps the last view, marked
+// stale. A hold lets go once a live meeting newer than any at its start
+// arrives: a live upload always wins. A pin let go asks again at once: the
+// view this poll brought was asked for with the pin.
+export function poll(model, outcome, clientNow) {
+  if (!outcome.ok) {
+    return { ...model, stale: true, again: false };
+  }
+  const view = outcome.view;
+  const newest = view.newest_received_at ?? null;
+  const held = model.pin !== null || model.ready;
+  const arrived =
+    held && newest !== null && (model.since === null || newest > model.since);
+  const serverNow = Number(view.now);
+  return {
+    view,
+    pin: arrived ? null : model.pin,
+    ready: arrived ? false : model.ready,
+    since: arrived ? null : model.since,
+    stale: false,
+    offset: Number.isFinite(serverNow) ? serverNow - clientNow : 0,
+    again: arrived && model.pin !== null,
+  };
+}
+
+function newestOf(model) {
+  return model.view ? (model.view.newest_received_at ?? null) : null;
+}
+
 export function pinTo(model, meetingId) {
-  const newest = model.view ? (model.view.newest_received_at ?? null) : null;
-  return { ...model, pin: meetingId, pinNewest: newest };
+  return { ...model, pin: meetingId, ready: false, since: newestOf(model) };
+}
+
+// Home: the ready screen, until someone uploads -- for the opening, after
+// a rehearsal that would otherwise stay on screen for recent_min.
+export function holdReady(model) {
+  return { ...model, pin: null, ready: true, since: newestOf(model) };
 }
 
 export function unpin(model) {
-  return { ...model, pin: null, pinNewest: null };
+  return { ...model, pin: null, ready: false, since: null };
+}
+
+export function shownScene(model) {
+  if (model.ready) {
+    return "ready";
+  }
+  return model.view ? model.view.scene : null;
 }
 
 // What decides a redraw: the view without the clock and the running time,
 // which tick by themselves every second.
-export function contentKey(view, pin) {
+export function contentKey(view, pin, ready = false) {
   if (!view) {
     return "";
   }
   const meeting = view.meeting ? { ...view.meeting, elapsed_s: null } : null;
-  return JSON.stringify({ ...view, now: null, meeting, pin });
+  return JSON.stringify({ ...view, now: null, meeting, pin, ready });
 }
 
 export function elapsedNow(meeting, serverNow) {

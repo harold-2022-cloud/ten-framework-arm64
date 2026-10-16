@@ -221,3 +221,21 @@ def test_listing_newest_first_with_the_showcase_marked():
         "duration_s": 9.0,
         "showcase": True,
     }
+
+
+def test_archived_with_no_words_is_a_failure_with_the_topic_error():
+    # Every topic's transcription failed: the controller still ends it
+    # archived (flow.py mark_failed, then link([]) and the conclusion).
+    failed = {"topics": [{"error": "ASR timed out", "utterances": []}]}
+    v = build([m("a", "archived", NOW - 5)], records={"a": failed})
+    assert (v["scene"], v["meeting"]["error"]) == ("failed", "ASR timed out")
+    v = build([m("a", "archived", NOW - 5)], records={"a": {"topics": []}})
+    assert (v["scene"], v["meeting"]["error"]) == ("failed", "沒有轉出任何文字")
+
+
+def test_archived_with_words_or_no_record_yet_is_the_result(record):
+    assert (
+        build([m("a", "archived", NOW - 5)], records={"a": record})["scene"]
+        == "result"
+    )
+    assert build([m("a", "archived", NOW - 5)])["scene"] == "result"

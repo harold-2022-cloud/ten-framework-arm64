@@ -11,6 +11,8 @@ import {
   elapsedNow,
   escapeHtml,
   failureText,
+  hasWords,
+  holdReady,
   initial,
   lanes,
   minutesText,
@@ -19,6 +21,7 @@ import {
   poll,
   progressText,
   STATE_LABEL,
+  shownScene,
   speakerCount,
   stageItems,
   topicSummaries,
@@ -154,7 +157,7 @@ ${transcriptHtml(meeting)}
     const reason = text.reason
       ? `<p class="error">${escapeHtml(text.reason)}</p>`
       : "";
-    return `<section class="failed">${titleLine(meeting, "用時")}<h1>${text.title}</h1>${reason}${showcaseHint(view)}${transcriptHtml(meeting)}${pinnedNote(view)}</section>`;
+    return `<section class="failed">${titleLine(meeting, "用時")}<h1>${text.title}</h1>${reason}${showcaseHint(view)}${hasWords(meeting.record) ? transcriptHtml(meeting) : ""}${pinnedNote(view)}</section>`;
   },
 };
 
@@ -182,7 +185,7 @@ function draw() {
   if (!view) {
     return;
   }
-  const key = contentKey(view, model.pin);
+  const key = contentKey(view, model.pin, model.ready);
   if (key === drawn) {
     return;
   }
@@ -193,7 +196,7 @@ function draw() {
     before.dataset.meeting === view.meeting.meeting_id;
   const keep = same ? before.scrollTop : 0;
   drawn = key;
-  const scene = SCENES[view.scene];
+  const scene = SCENES[shownScene(model)];
   byId("scene").innerHTML = scene ? scene(view) : "";
   const transcript = byId("transcript");
   if (transcript && view.meeting) {
@@ -226,6 +229,11 @@ async function refresh() {
     }
   } catch {
     model = poll(model, { ok: false }, Date.now() / 1000);
+  }
+  if (model.again) {
+    // A pin let go: what came back was the pinned meeting.
+    refresh();
+    return;
   }
   draw();
   timer = setTimeout(refresh, POLL_MS);
@@ -313,6 +321,10 @@ function onKey(event) {
     case "Escape":
       model = unpin(model);
       refresh();
+      break;
+    case "Home":
+      model = holdReady(model);
+      draw();
       break;
     case "ArrowDown":
       if (transcript) {

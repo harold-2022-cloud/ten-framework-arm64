@@ -38,6 +38,8 @@ TERMINAL = ("archived", "empty", "failed")
 # record is relabelled and saved (flow.py:179-180) before the state says
 # summarising (flow.py:183); before, each topic numbers its own speakers.
 SPEAKERS_FINAL = ("summarising", "concluding", "archived")
+# What an archived meeting with no words says when no topic says why.
+NO_WORDS = "沒有轉出任何文字"
 
 
 def _num(value) -> Optional[float]:
@@ -53,6 +55,27 @@ def _state(m: Meeting) -> Optional[str]:
 
 def _key(m: Meeting) -> Tuple[float, str]:
     return (m.received_at, m.meeting_id)
+
+
+def _wordless(state: Optional[str], record) -> bool:
+    """Archived with a record but not one utterance: every topic's
+    transcription failed (flow.py marks each failed, then links nothing and
+    concludes). It ended, but it is no result."""
+    if state != "archived" or not isinstance(record, dict):
+        return False
+    topics = record.get("topics")
+    return not any(
+        isinstance(t, dict) and t.get("utterances")
+        for t in (topics if isinstance(topics, list) else [])
+    )
+
+
+def _topic_error(record) -> Optional[str]:
+    topics = record.get("topics")
+    for t in topics if isinstance(topics, list) else []:
+        if isinstance(t, dict) and t.get("error"):
+            return str(t["error"])
+    return None
 
 
 def scene_of(state: Optional[str]) -> str:
@@ -119,6 +142,9 @@ def meeting_view(
         elapsed = max(0.0, now - started)
     record = record if isinstance(record, dict) else None
     from_record = record or {}
+    error = m.state.get("error")
+    if _wordless(state, record):
+        error = error or _topic_error(record) or NO_WORDS
     title = (
         m.state.get("title")
         or m.upload.get("title")
@@ -135,7 +161,7 @@ def meeting_view(
         "title": title,
         "state": state,
         "stage": STAGE.get(state, 1),
-        "error": m.state.get("error"),
+        "error": error,
         "received_at": _num(m.state.get("received_at")),
         "started_at": started,
         "finished_at": finished,
@@ -164,19 +190,21 @@ def build(
     chosen, pinned = choose(meetings, now, showcase, pin, recent_min)
     live = [m.received_at for m in meetings if m.meeting_id != showcase]
     on_disk = any(m.meeting_id == showcase for m in meetings)
+    if chosen is None:
+        scene, shown = "ready", None
+    else:
+        record = read_record(chosen.meeting_id)
+        scene = scene_of(_state(chosen))
+        if _wordless(_state(chosen), record):
+            scene = "failed"
+        shown = meeting_view(chosen, record, meetings, now, showcase)
     return {
         "now": now,
         "newest_received_at": max(live) if live else None,
-        "scene": "ready" if chosen is None else scene_of(_state(chosen)),
+        "scene": scene,
         "pinned": pinned,
         "showcase_id": showcase if on_disk else None,
-        "meeting": (
-            None
-            if chosen is None
-            else meeting_view(
-                chosen, read_record(chosen.meeting_id), meetings, now, showcase
-            )
-        ),
+        "meeting": shown,
     }
 
 

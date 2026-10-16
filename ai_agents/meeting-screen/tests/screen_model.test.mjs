@@ -183,3 +183,61 @@ test("text is escaped before it is drawn", () => {
   );
   assert.equal(m.escapeHtml(null), "");
 });
+
+test("a poll that lets go of a pin asks again at once", () => {
+  // The view it brought was asked for with the pin: drawing it would show
+  // the showcase, still marked pinned, for one more poll.
+  const at = (newest) => ({ now: 0, newest_received_at: newest });
+  let model = m.poll(m.initial(), { ok: true, view: at(100) }, 0);
+  assert.equal(model.again, false);
+  model = m.pinTo(model, "show");
+  model = m.poll(model, { ok: true, view: at(100) }, 0);
+  assert.equal(model.again, false);
+  model = m.poll(model, { ok: true, view: at(200) }, 0);
+  assert.equal(model.pin, null);
+  assert.equal(model.again, true);
+  model = m.poll(model, { ok: true, view: at(200) }, 0);
+  assert.equal(model.again, false);
+});
+
+test("Home holds the ready screen until a newer live meeting arrives", () => {
+  const at = (newest) => ({
+    now: 0,
+    newest_received_at: newest,
+    scene: "result",
+    meeting: { meeting_id: "rehearsal" },
+  });
+  let model = m.poll(m.initial(), { ok: true, view: at(100) }, 0);
+  assert.equal(m.shownScene(model), "result");
+  model = m.holdReady(m.pinTo(model, "show"));
+  assert.equal(model.pin, null);
+  assert.equal(m.shownScene(model), "ready");
+  model = m.poll(model, { ok: true, view: at(100) }, 0);
+  assert.equal(m.shownScene(model), "ready");
+  model = m.poll(model, { ok: true, view: at(200) }, 0);
+  assert.equal(model.ready, false);
+  assert.equal(model.again, false);
+  assert.equal(m.shownScene(model), "result");
+});
+
+test("PageDown, PageUp and Esc end the hold", () => {
+  const view = { now: 0, newest_received_at: 5, scene: "result" };
+  const held = m.holdReady(m.poll(m.initial(), { ok: true, view }, 0));
+  assert.equal(m.pinTo(held, "show").ready, false);
+  assert.equal(m.unpin(held).ready, false);
+  assert.equal(m.shownScene(m.initial()), null);
+});
+
+test("the redraw key changes when the ready screen is held", () => {
+  const view = { now: 0, newest_received_at: 5, scene: "result" };
+  assert.notEqual(m.contentKey(view, null, true), m.contentKey(view, null));
+});
+
+test("a record with no words has nothing for the transcript", () => {
+  assert.equal(m.hasWords(record), true);
+  assert.equal(
+    m.hasWords({ topics: [{ error: "ASR failed", utterances: [] }] }),
+    false
+  );
+  assert.equal(m.hasWords(null), false);
+});

@@ -28,6 +28,7 @@ the board after a power cut and the screen comes back by itself.
 | --- | --- |
 | PageDown, → | the showcase |
 | PageUp, ←, Esc | back to the live meeting |
+| Home | the ready screen until the next upload, e.g. after a rehearsal |
 | ↑ ↓ | scroll the transcript |
 | L | every meeting; ↑ ↓ and Enter to pin one |
 | Alt+F4 | leave the full-screen browser |
@@ -38,7 +39,8 @@ the board after a power cut and the screen comes back by itself.
    half an hour of going on: `tools/ambarella/prepare_meeting_demo.sh --warm`,
    so the first upload need not wait for the meeting worker (an idle one
    ends after 30 minutes).
-2. Opening: the ready screen. "All of the meeting AI is on this box."
+2. Opening: the ready screen -- press Home if a rehearsal's result is still
+   up. "All of the meeting AI is on this box."
 3. A short live meeting: two or three people, about a minute, from prepared
    questions, the phone on the table. Enter the real head count in the app.
    Each turn about ten seconds or more, without talking over each other:

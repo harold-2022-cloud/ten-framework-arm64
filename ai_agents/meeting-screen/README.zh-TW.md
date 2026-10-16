@@ -19,6 +19,7 @@ tools/ambarella/prepare_meeting_demo.sh              # 演示前：檢查是否�
 | --- | --- |
 | PageDown、→ | 範例會議 |
 | PageUp、←、Esc | 回到現場那場 |
+| Home | 回到待命畫面，直到下一次上傳（例如彩排之後） |
 | ↑ ↓ | 捲動逐字稿 |
 | L | 會議列表；用 ↑ ↓ 和 Enter 釘選一場 |
 | Alt+F4 | 離開全螢幕瀏覽器 |
@@ -26,7 +27,7 @@ tools/ambarella/prepare_meeting_demo.sh              # 演示前：檢查是否�
 ## 演示當天
 
 1. 前一天：`tools/ambarella/prepare_meeting_demo.sh`，全部 ok。上台前半小時內再跑 `tools/ambarella/prepare_meeting_demo.sh --warm`，讓第一次上傳不用等會議處理程式啟動（閒置 30 分鐘就會被收掉）。
-2. 開場：螢幕是待命畫面。「會議 AI 全部在這台裝置上。」
+2. 開場：螢幕是待命畫面；彩排的結果還在畫面上的話，按 Home。「會議 AI 全部在這台裝置上。」
 3. 現場小會：兩三個人照預先寫好的題目討論約一分鐘，手機放桌上錄音。App 裡填實際人數。每次發言約十秒以上，不搶話：聽得太短的聲音分辨不出是誰。
 4. 上傳：大屏自己切換，主講人照亮起的階段講解。
 5. 揭曉：逐字稿依說話人上色、時間軸、摘要。
