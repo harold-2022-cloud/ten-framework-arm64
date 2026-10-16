@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# fc-list, faked: a Traditional Chinese font when $FAKE_FONTS is set.
+[[ -n "${FAKE_FONTS:-}" ]] && echo "Noto Sans CJK TC"
+exit 0

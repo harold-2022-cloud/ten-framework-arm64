@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# loginctl, faked: one session of the caller, of type $FAKE_SESSION_TYPE,
+# when that is set.
+case "${1:-}" in
+  list-sessions) [[ -n "${FAKE_SESSION_TYPE:-}" ]] && echo "      5 $(id -u) $(id -un) seat0 tty2" ;;
+  show-session) echo "${FAKE_SESSION_TYPE:-}" ;;
+esac
+exit 0
