@@ -1,0 +1,321 @@
+/*
+ * This file is part of TEN Framework, an open source project.
+ * Licensed under the Apache License, Version 2.0.
+ *
+ * The demo screen at 1920x1080, read from a few metres: dark, large, and
+ * still -- no transition or animation anywhere.
+ */
+:root {
+  --bg: #0b1220;
+  --panel: #121b2e;
+  --line: #23304a;
+  --text: #e8edf6;
+  --muted: #8a97b0;
+  --accent: #4cc2ff;
+  --done: #3ddc97;
+  --fail: #ff6b6b;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    "Noto Sans CJK TC", "Noto Sans CJK SC", "Droid Sans Fallback", sans-serif;
+  font-size: 24px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 96px;
+  padding: 0 48px;
+  border-bottom: 2px solid var(--line);
+  box-sizing: border-box;
+}
+
+.name {
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.tag-line {
+  margin-left: 32px;
+  color: var(--muted);
+}
+
+.clock {
+  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 96px);
+  padding: 32px 48px;
+  box-sizing: border-box;
+}
+
+section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 64px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 40px;
+}
+
+.lead {
+  margin: 0;
+  font-size: 36px;
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  margin-top: 32px;
+}
+
+.card {
+  padding: 32px;
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.card b {
+  color: var(--done);
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.stages {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stages li {
+  flex: 1;
+  padding: 16px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 28px;
+  text-align: center;
+}
+
+.stages li.done {
+  border-color: var(--done);
+  color: var(--text);
+}
+
+.stages li.now {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 32px;
+}
+
+.status {
+  margin: 0;
+  font-size: 32px;
+  color: var(--accent);
+}
+
+.big {
+  margin: 0;
+  font-size: 56px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.lane .who {
+  width: 140px;
+}
+
+.track {
+  position: relative;
+  flex: 1;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+
+.topics p {
+  margin: 0 0 12px;
+  font-size: 26px;
+  line-height: 1.5;
+}
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 24px;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 26px;
+  line-height: 1.4;
+}
+
+.at {
+  flex: none;
+  width: 96px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row .who {
+  flex: none;
+  width: 120px;
+  font-weight: 700;
+}
+
+.grey .text {
+  color: var(--muted);
+}
+
+.numbers {
+  display: flex;
+  gap: 64px;
+  font-size: 28px;
+  color: var(--muted);
+}
+
+.numbers b {
+  display: block;
+  font-size: 52px;
+  color: var(--text);
+}
+
+.columns {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  min-height: 0;
+}
+
+.left {
+  overflow-y: auto;
+}
+
+.summary {
+  margin-bottom: 24px;
+  font-size: 30px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.failed h1 {
+  color: var(--fail);
+}
+
+.error {
+  margin: 0;
+  font-size: 30px;
+  color: var(--muted);
+}
+
+.hint,
+.muted {
+  color: var(--muted);
+}
+
+.tag {
+  margin-right: 16px;
+  padding: 2px 12px;
+  border-radius: 8px;
+  background: var(--done);
+  color: var(--bg);
+  font-size: 24px;
+}
+
+.stale {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  background: var(--fail);
+  color: #fff;
+}
+
+.list {
+  position: fixed;
+  inset: 120px 240px;
+  padding: 24px;
+  overflow-y: auto;
+  border: 2px solid var(--accent);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.item {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 26px;
+}
+
+.item.on {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+[hidden] {
+  display: none;
+}

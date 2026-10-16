@@ -1,0 +1,185 @@
+//
+// This file is part of TEN Framework, an open source project.
+// Licensed under the Apache License, Version 2.0.
+//
+// screen_model.mjs: what the page draws, and how a poll, a pin and a lost
+// connection change it.  node --test ai_agents/meeting-screen/tests/
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import * as m from "../meeting_screen/static/screen_model.mjs";
+
+const record = {
+  duration_s: 100,
+  summary: "結論",
+  topics: [
+    {
+      start_s: 0,
+      end_s: 50,
+      summary: "第一段",
+      utterances: [
+        { speaker: 1, start_s: 10, end_s: 20, text: "乙說" },
+        { speaker: 0, start_s: 0, end_s: 5, text: "甲說" },
+      ],
+    },
+    {
+      start_s: 50,
+      end_s: 100,
+      summary: "",
+      utterances: [{ speaker: 0, start_s: 1, end_s: 9, text: "甲又說" }],
+    },
+  ],
+};
+
+test("times read as m:ss, and h:mm:ss past an hour", () => {
+  assert.equal(m.mmss(0), "0:00");
+  assert.equal(m.mmss(72.9), "1:12");
+  assert.equal(m.mmss(3725), "1:02:05");
+  assert.equal(m.minutesText(45), "45 秒");
+  assert.equal(m.minutesText(35 * 60 + 14), "35 分鐘");
+});
+
+test("rows sit at the topic's start plus their own, in order", () => {
+  const rows = m.transcriptRows(record, true);
+  assert.deepEqual(
+    rows.map((r) => r.at),
+    [0, 10, 51]
+  );
+  assert.deepEqual(
+    rows.map((r) => r.speaker),
+    [1, 2, 1]
+  );
+  assert.equal(rows[0].color, m.COLORS[0]);
+});
+
+test("before the speakers are final, rows are unlabelled", () => {
+  const rows = m.transcriptRows(record, false);
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((r) => r.speaker === null && r.color === null));
+});
+
+test("lanes: none before final; one per speaker after, as shares", () => {
+  assert.deepEqual(m.lanes(record, 100, false), []);
+  const lanes = m.lanes(record, 100, true);
+  assert.deepEqual(
+    lanes.map((l) => l.speaker),
+    [1, 2]
+  );
+  assert.deepEqual(lanes[0].segments, [
+    { left: 0, width: 5 },
+    { left: 51, width: 8 },
+  ]);
+  assert.deepEqual(m.lanes(record, 0, true), []);
+});
+
+test("stages: done before, now at, todo after", () => {
+  assert.deepEqual(
+    m.stageItems(3).map((s) => s.status),
+    ["done", "done", "now", "todo", "todo"]
+  );
+  assert.ok(m.stageItems(6).every((s) => s.status === "done"));
+  assert.ok(m.stageItems(0).every((s) => s.status === "todo"));
+});
+
+test("speaker n always has the n-th colour", () => {
+  assert.equal(m.speakerColor(0), m.COLORS[0]);
+  assert.equal(m.speakerColor(12), m.COLORS[2]);
+  assert.equal(m.speakerCount(record), 2);
+});
+
+test("only topics with a summary are listed", () => {
+  assert.deepEqual(m.topicSummaries(record), [{ at: 0, text: "第一段" }]);
+  assert.deepEqual(m.topicSummaries(null), []);
+});
+
+test("a failed poll keeps the last view and says the screen is stale", () => {
+  const view = {
+    now: 10,
+    newest_received_at: 5,
+    scene: "ready",
+    meeting: null,
+  };
+  let model = m.poll(m.initial(), { ok: true, view }, 10);
+  model = m.poll(model, { ok: false }, 12);
+  assert.equal(model.view, view);
+  assert.equal(model.stale, true);
+  model = m.poll(model, { ok: true, view }, 14);
+  assert.equal(model.stale, false);
+});
+
+test("a pin lets go when a newer live meeting arrives, not before", () => {
+  const at = (newest) => ({
+    now: 0,
+    newest_received_at: newest,
+    scene: "result",
+    meeting: null,
+  });
+  let model = m.poll(m.initial(), { ok: true, view: at(100) }, 0);
+  model = m.pinTo(model, "show");
+  model = m.poll(model, { ok: true, view: at(100) }, 0);
+  assert.equal(model.pin, "show");
+  model = m.poll(model, { ok: true, view: at(200) }, 0);
+  assert.equal(model.pin, null);
+  let empty = m.poll(m.initial(), { ok: true, view: at(null) }, 0);
+  empty = m.pinTo(empty, "show");
+  empty = m.poll(empty, { ok: true, view: at(null) }, 0);
+  assert.equal(empty.pin, "show");
+  empty = m.poll(empty, { ok: true, view: at(1) }, 0);
+  assert.equal(empty.pin, null);
+  assert.equal(m.unpin(m.pinTo(model, "x")).pin, null);
+});
+
+test("the redraw key ignores the clock and the running time", () => {
+  const a = {
+    now: 1,
+    scene: "processing",
+    meeting: { meeting_id: "m", elapsed_s: 3, stage: 2 },
+  };
+  const b = {
+    now: 9,
+    scene: "processing",
+    meeting: { meeting_id: "m", elapsed_s: 11, stage: 2 },
+  };
+  const c = {
+    now: 9,
+    scene: "processing",
+    meeting: { meeting_id: "m", elapsed_s: 11, stage: 3 },
+  };
+  assert.equal(m.contentKey(a, null), m.contentKey(b, null));
+  assert.notEqual(m.contentKey(b, null), m.contentKey(c, null));
+  assert.notEqual(m.contentKey(b, null), m.contentKey(b, "show"));
+});
+
+test("the running time: to now while processing, to the end once ended", () => {
+  assert.equal(m.elapsedNow({ started_at: 10, finished_at: null }, 25), 15);
+  assert.equal(m.elapsedNow({ started_at: 10, finished_at: 40 }, 99), 30);
+  assert.equal(m.elapsedNow({ started_at: null }, 99), null);
+});
+
+test("a meeting with no speech and a failed one say so, not done", () => {
+  assert.equal(m.failureText({ state: "empty" }).title, "沒有偵測到語音");
+  const failed = m.failureText({ state: "failed", error: "boom" });
+  assert.equal(failed.title, "這段錄音沒有處理完成");
+  assert.equal(failed.reason, "boom");
+});
+
+test("progress lines follow the stage", () => {
+  const p = (stage, extra) =>
+    m.progressText({
+      stage,
+      progress: { topics_done: 1, topics_total: 3 },
+      ahead: 0,
+      ...extra,
+    });
+  assert.equal(p(0, { ahead: 2 }), "排隊中，前面還有 2 場");
+  assert.equal(p(2), "語音轉文字：第 2 / 3 段");
+  assert.equal(p(4), "話題摘要：1 / 3");
+  assert.equal(p(5), "正在寫會議結論……");
+});
+
+test("text is escaped before it is drawn", () => {
+  assert.equal(
+    m.escapeHtml(`<b a="1">&'`),
+    "&lt;b a=&quot;1&quot;&gt;&amp;&#39;"
+  );
+  assert.equal(m.escapeHtml(null), "");
+});

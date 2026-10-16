@@ -1,5 +1,19 @@
 <!doctype html>
 <html lang="zh-Hant">
-<head><meta charset="utf-8"><title>N1-655 本機會議 AI</title></head>
-<body><h1>N1-655 本機會議 AI</h1></body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N1-655 本機會議 AI</title>
+<link rel="stylesheet" href="/static/screen.css">
+<script type="module" src="/static/screen.mjs"></script>
+</head>
+<body>
+<header class="top">
+<div class="brand"><span class="name">N1-655 本機會議 AI</span><span class="tag-line">全程在這台裝置上處理 · 不經雲端</span></div>
+<div class="clock" id="clock"></div>
+</header>
+<main id="scene"></main>
+<div class="stale" id="stale" hidden>畫面暫停更新，重新連線中</div>
+<div class="list" id="list" hidden></div>
+</body>
 </html>
