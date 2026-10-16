@@ -75,3 +75,14 @@ def test_there_is_one_meeting_graph():
     names = [g["name"] for g in graphs()]
     assert names.count("meeting_minutes") == 1
     assert "meeting_minutes_qwen" not in names
+
+
+def test_the_transcriber_tells_the_controller_how_far_it_got():
+    graph = next(g for g in graphs() if g["name"] == "meeting_minutes")
+    sent = {
+        (c["extension"], d["name"], dest["extension"])
+        for c in graph["graph"]["connections"]
+        for d in c.get("data", [])
+        for dest in d["dest"]
+    }
+    assert ("transcriber", "transcribe_progress", "main_control") in sent

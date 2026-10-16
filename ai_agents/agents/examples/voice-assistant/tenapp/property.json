@@ -2721,6 +2721,14 @@
                       "extension": "main_control"
                     }
                   ]
+                },
+                {
+                  "name": "transcribe_progress",
+                  "dest": [
+                    {
+                      "extension": "main_control"
+                    }
+                  ]
                 }
               ]
             }

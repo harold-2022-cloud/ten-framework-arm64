@@ -132,6 +132,8 @@ class MeetingControlExtension(AsyncExtension):
             self._run(self.flow.on_segments_ready, payload_json)
         elif name == "segment_transcribed":
             self._run(self.flow.on_transcribed, payload_json)
+        elif name == "transcribe_progress":
+            self._run(self.flow.on_progress, payload_json)
 
     def _run(self, handler, payload_json: str) -> None:
         """Off the callback, so an hour of summaries never holds the loop,

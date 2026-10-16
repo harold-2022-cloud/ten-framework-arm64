@@ -30,6 +30,7 @@ class Board:
         self.answers = list(answers or [])
         self.work_dir = work_dir
         self.state_when_first_asked = None
+        self.logs = []
 
     async def segment_audio(self, ogg_path, work_dir):
         self.segment_requests.append((ogg_path, work_dir))
@@ -48,7 +49,7 @@ class Board:
         return self.answers.pop(0) if self.answers else ""
 
     def log(self, message):
-        pass
+        self.logs.append(message)
 
 
 def state(work_dir):
@@ -106,6 +107,28 @@ def transcribed(segment_id, *utterances, error=None):
         "utterances": list(utterances),
         "error": error,
     }
+
+
+def progress(segment_id, done, total, utterance=None, **extra):
+    payload = {
+        "segment_id": segment_id,
+        "step": "recognising",
+        "turns_done": done,
+        "turns_total": total,
+        **extra,
+    }
+    if utterance is not None:
+        payload["utterance"] = utterance
+    return payload
+
+
+def heard(start, end, speaker, text):
+    return {"start_s": start, "end_s": end, "speaker": speaker, "text": text}
+
+
+def record_texts(folder):
+    record = json.loads((folder / "record.json").read_text(encoding="utf-8"))
+    return [u["text"] for u in record["topics"][0]["utterances"]]
 
 
 def flow(board):
@@ -447,3 +470,121 @@ async def test_abandoning_with_nothing_in_hand_does_nothing(meeting):
     await flow(Board()).abandon("late")
 
     assert not (meeting / "work" / "state.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_each_topic_starts_by_telling_its_speakers_apart(meeting):
+    f = flow(Board())
+    await f.start(upload(meeting))
+    await f.on_segments_ready(
+        topics_ready(meeting, (0.0, 300.0), (300.0, 600.0))
+    )
+
+    now = state(meeting / "work")
+    assert (now["state"], now["step"], now["topic_s"]) == (
+        "transcribing",
+        "diarizing",
+        300.0,
+    )
+    assert (now["turns_done"], now["turns_total"]) == (0, 0)
+    assert isinstance(now["step_started_at"], float)
+
+
+@pytest.mark.asyncio
+async def test_recognition_counts_turns_and_shows_the_words_so_far(meeting):
+    f = flow(Board())
+    await f.start(upload(meeting, script="traditional"))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress(progress("t01", 0, 2, diarize_s=140.0))
+    now = state(meeting / "work")
+    assert (now["step"], now["turns_done"], now["turns_total"]) == (
+        "recognising",
+        0,
+        2,
+    )
+
+    await f.on_progress(progress("t01", 1, 2, heard(1, 5, 0, "我先說。")))
+    assert state(meeting / "work")["turns_done"] == 1
+    assert record_texts(meeting) == ["我先說。"]
+
+
+@pytest.mark.asyncio
+async def test_words_so_far_are_saved_at_most_once_a_second(meeting):
+    now = [1000.0]
+    f = MeetingFlow(MeetingControlConfig(), Board(), clock=lambda: now[0])
+    await f.start(upload(meeting, script="traditional"))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress(progress("t01", 1, 3, heard(1, 5, 0, "一。")))
+    now[0] += 0.4
+    await f.on_progress(progress("t01", 2, 3, heard(6, 9, 1, "二。")))
+    assert record_texts(meeting) == ["一。"]
+    now[0] += 0.4
+    # The last turn is always written.
+    await f.on_progress(progress("t01", 3, 3, heard(10, 12, 0, "三。")))
+    assert record_texts(meeting) == ["一。", "二。", "三。"]
+
+
+@pytest.mark.asyncio
+async def test_the_finished_topic_replaces_its_words_so_far(meeting):
+    board = Board()
+    f = flow(board)
+    await f.start(upload(meeting, script="traditional"))
+    await f.on_segments_ready(
+        topics_ready(meeting, (0.0, 300.0), (300.0, 600.0))
+    )
+    await f.on_progress(progress("t01", 1, 2, heard(1, 5, 0, "我先說。")))
+
+    timing = {"diarize_s": 140.0, "recognise_s": 90.0, "embed_s": 20.0}
+    timing["turns"] = 2
+    await f.on_transcribed(
+        {
+            **transcribed(
+                "t01", said(1, 5, 0, "我先說。", A), said(6, 9, 1, "好。", B)
+            ),
+            "timing": timing,
+        }
+    )
+
+    record = json.loads((meeting / "record.json").read_text(encoding="utf-8"))
+    topic = record["topics"][0]
+    assert [u["text"] for u in topic["utterances"]] == ["我先說。", "好。"]
+    assert topic["timing"] == timing
+    assert any("diarized 140.0 s" in line for line in board.logs)
+    now = state(meeting / "work")
+    assert (now["step"], now["topic_s"], now["topics_done"]) == (
+        "diarizing",
+        300.0,
+        1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_progress_for_another_topic_or_after_the_last_is_dropped(
+    meeting,
+):
+    f = flow(Board())
+    await f.start(upload(meeting))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress(progress("t02", 5, 9))
+    assert state(meeting / "work")["step"] == "diarizing"
+
+    await f.on_transcribed(transcribed("t01", said(1, 5, 0, "甲", A)))
+    ended = state(meeting / "work")
+    await f.on_progress(progress("t01", 1, 1, heard(1, 5, 0, "甲")))
+    assert state(meeting / "work") == ended
+
+
+@pytest.mark.asyncio
+async def test_a_broken_progress_report_is_dropped_not_fatal(meeting):
+    board = Board()
+    f = flow(board)
+    await f.start(upload(meeting))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress({"segment_id": "t01", "turns_done": "many"})
+
+    assert state(meeting / "work")["state"] == "transcribing"
+    assert any("progress dropped" in line for line in board.logs)

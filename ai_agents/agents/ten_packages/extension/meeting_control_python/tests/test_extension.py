@@ -86,6 +86,17 @@ class GraphTester(AsyncExtensionTester):
         elif name == "transcribe":
             await self._send(
                 ten_env,
+                "transcribe_progress",
+                {
+                    "segment_id": "t01",
+                    "step": "recognising",
+                    "turns_done": 0,
+                    "turns_total": 2,
+                    "diarize_s": 1.0,
+                },
+            )
+            await self._send(
+                ten_env,
                 "segment_transcribed",
                 {
                     "segment_id": "t01",
@@ -157,3 +168,10 @@ def test_a_segmenter_that_refuses_ends_the_meeting_failed(tmp_path):
 
     assert tester.final["state"] == "failed"
     assert "segment_audio" in tester.final["error"]
+
+
+def test_the_transcribers_progress_reaches_the_state(tmp_path):
+    tester = run(tmp_path)
+
+    assert tester.final["state"] == "archived"
+    assert tester.final.get("turns_total") == 2

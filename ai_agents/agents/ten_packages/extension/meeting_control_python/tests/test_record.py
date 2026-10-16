@@ -120,3 +120,14 @@ def test_the_json_record_has_no_embeddings_and_topics_in_order():
     assert out["summary"] == "整場結論。"
     assert out["title"] == "週會"
     assert out["speaker_count"] == 1
+
+
+def test_a_topic_keeps_where_its_time_went_and_one_without_says_nothing():
+    rec = MeetingRecord("m1")
+    rec.add_topic("t01", 0.0, 60.0, [], timing={"diarize_s": 30.0})
+    rec.add_topic("t02", 60.0, 120.0, [])
+
+    topics = rec.to_json(summary="", actions=[], actions_error=None)["topics"]
+
+    assert topics[0]["timing"] == {"diarize_s": 30.0}
+    assert "timing" not in topics[1]

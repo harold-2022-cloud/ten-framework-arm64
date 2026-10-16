@@ -24,6 +24,7 @@ archived.
 
 import json
 import os
+import time
 from typing import Callable, Optional
 
 from .actions import parse_actions
@@ -35,8 +36,16 @@ from .speakers import link
 from .state import write_state
 
 
+# How often the words of a topic still being recognised are written to
+# record.json for the screen: often enough to read as live, not so often
+# that the whole record is rewritten -- and converted -- for every turn.
+LIVE_SAVE_S = 1.0
+
+
 class MeetingFlow:
-    def __init__(self, config: MeetingControlConfig, ports) -> None:
+    def __init__(
+        self, config: MeetingControlConfig, ports, clock=time.time
+    ) -> None:
         self.config = config
         self.io = ports
         self.record: Optional[MeetingRecord] = None
@@ -52,6 +61,10 @@ class MeetingFlow:
         self._summary = ""
         self._actions: list = []
         self._actions_error: Optional[str] = None
+        self._clock = clock
+        # The topic in hand's words so far, and when they were last saved.
+        self._live: list = []
+        self._live_saved = 0.0
 
     # --- round 0: the upload -------------------------------------------
 
@@ -125,6 +138,19 @@ class MeetingFlow:
 
     async def _transcribe_next(self) -> None:
         topic = self._topics[self._cursor]
+        self._live, self._live_saved = [], 0.0
+        # The transcriber starts by telling the topic's speakers apart: no
+        # progress of its own until that is done, so the screen estimates
+        # it from the topic's length.
+        write_state(
+            self.work_dir,
+            "transcribing",
+            step="diarizing",
+            step_started_at=self._clock(),
+            topic_s=topic["end_s"] - topic["start_s"],
+            turns_done=0,
+            turns_total=0,
+        )
         await self.io.transcribe(
             self.pcm_path,
             topic["id"],
@@ -132,6 +158,41 @@ class MeetingFlow:
             topic["end_s"] - topic["start_s"],
             self.speakers,
         )
+
+    async def on_progress(self, payload: dict) -> None:
+        """How far the transcriber got with the topic in hand: the turns
+        recognised and their words, for the screen. For show only: a report
+        for another topic, a late one or a broken one is dropped, never
+        raised -- it must not end the meeting or turn its state back."""
+        try:
+            self._progress(payload)
+        except Exception as err:  # pylint: disable=broad-except
+            self.io.log(f"progress dropped: {type(err).__name__}: {err}")
+
+    def _progress(self, payload: dict) -> None:
+        if self._busy_with is None or self._cursor >= len(self._topics):
+            return
+        topic = self._topics[self._cursor]
+        if payload.get("segment_id") != topic["id"]:
+            return
+        done = int(payload.get("turns_done") or 0)
+        total = int(payload.get("turns_total") or 0)
+        fields = {"step": "recognising", "turns_done": done}
+        fields["turns_total"] = total
+        if done == 0:
+            fields["step_started_at"] = self._clock()
+        utterance = payload.get("utterance")
+        if isinstance(utterance, dict):
+            self._live.append(dict(utterance))
+            now = self._clock()
+            if now - self._live_saved >= LIVE_SAVE_S or done >= total:
+                # Replaced by the finished topic in on_transcribed.
+                self.record.add_topic(
+                    topic["id"], topic["start_s"], topic["end_s"], self._live
+                )
+                self._persist()
+                self._live_saved = now
+        write_state(self.work_dir, "transcribing", **fields)
 
     async def on_transcribed(self, payload: dict) -> None:
         if self._busy_with is None or self._cursor >= len(self._topics):
@@ -147,12 +208,23 @@ class MeetingFlow:
                 topic["id"], topic["start_s"], topic["end_s"], payload["error"]
             )
         else:
+            timing = payload.get("timing")
             self.record.add_topic(
                 topic["id"],
                 topic["start_s"],
                 topic["end_s"],
                 payload.get("utterances") or [],
+                timing=timing,
             )
+            if timing:
+                self.io.log(
+                    f"topic {topic['id']} "
+                    f"({topic['end_s'] - topic['start_s']:.0f} s): "
+                    f"diarized {timing.get('diarize_s')} s, "
+                    f"recognised {timing.get('recognise_s')} s, "
+                    f"embedded {timing.get('embed_s')} s, "
+                    f"{timing.get('turns')} turns"
+                )
         # On disk before anything slow happens next.
         self._persist()
         self._cursor += 1

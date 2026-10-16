@@ -30,6 +30,8 @@ class TopicRecord:
     utterances: List[dict] = field(default_factory=list)
     summary: str = ""
     error: Optional[str] = None
+    # Where the topic's time went, as the transcriber measured it.
+    timing: Optional[dict] = None
 
 
 def _mmss(seconds: float) -> str:
@@ -53,10 +55,19 @@ class MeetingRecord:
         self._topics: Dict[str, TopicRecord] = {}
 
     def add_topic(
-        self, topic_id: str, start_s: float, end_s: float, utterances
+        self,
+        topic_id: str,
+        start_s: float,
+        end_s: float,
+        utterances,
+        timing: Optional[dict] = None,
     ) -> None:
         self._topics[topic_id] = TopicRecord(
-            topic_id, start_s, end_s, [dict(u) for u in utterances]
+            topic_id,
+            start_s,
+            end_s,
+            [dict(u) for u in utterances],
+            timing=timing,
         )
 
     def mark_failed(
@@ -159,21 +170,25 @@ class MeetingRecord:
             "audio": self.audio,
             "speaker_count": self.speaker_count,
             "summary": summary,
-            "topics": [
-                {
-                    "id": t.id,
-                    "start_s": t.start_s,
-                    "end_s": t.end_s,
-                    "summary": t.summary,
-                    "error": t.error,
-                    "utterances": [
-                        {k: v for k, v in u.items() if k != "embedding"}
-                        for u in t.utterances
-                    ],
-                }
-                for t in self.ordered()
-            ],
+            "topics": [self._topic_json(t) for t in self.ordered()],
             "actions": actions,
             "actions_error": actions_error,
             "error": error,
         }
+
+    @staticmethod
+    def _topic_json(t: TopicRecord) -> dict:
+        out = {
+            "id": t.id,
+            "start_s": t.start_s,
+            "end_s": t.end_s,
+            "summary": t.summary,
+            "error": t.error,
+            "utterances": [
+                {k: v for k, v in u.items() if k != "embedding"}
+                for u in t.utterances
+            ],
+        }
+        if t.timing:
+            out["timing"] = t.timing
+        return out
