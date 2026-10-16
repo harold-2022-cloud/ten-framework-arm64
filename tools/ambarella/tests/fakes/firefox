@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# A browser, faked (firefox, and chromium under that name in a test): how it
+# was called goes to $FAKE_LOG, and it ends at once.
+echo "$(basename "$0") $*" >> "$FAKE_LOG"
+exit 0

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# xset, faked.
+echo "xset $*" >> "$FAKE_LOG"
+exit 0

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# kde-inhibit, faked: its own options to $FAKE_LOG, then the command it holds.
+opts=()
+while [[ "${1:-}" == --* ]]; do
+  opts+=("$1")
+  shift
+done
+echo "kde-inhibit ${opts[*]}" >> "$FAKE_LOG"
+exec "$@"
