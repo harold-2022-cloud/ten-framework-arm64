@@ -19,7 +19,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fakes import AS_ROOT, Sandbox, free_port, http_server  # noqa: E402  pylint: disable=wrong-import-position
+from fakes import AS_ROOT, Sandbox, free_port, http_server, read  # noqa: E402  pylint: disable=wrong-import-position
 
 USER = "nobody" if AS_ROOT else getpass.getuser()
 
@@ -28,7 +28,7 @@ class Board(Sandbox):
     def __init__(self, test, which="7b", stale=False, worker=False, active=""):
         super().__init__(test, scripts=["install_board_services.sh"])
         self.test = test
-        api = free_port()
+        self.api_port = api = free_port()
         http_server(test, api)
         if worker:
             http_server(test, int(self.env["MEETING_UPLOADER"].rsplit(":", 1)[1]))
@@ -37,6 +37,10 @@ class Board(Sandbox):
         self.write("model/.keep", "")
         self.write("vllm", "#!/bin/sh\n", 0o755)
         self.write("systemd/.keep", "")
+        self.screen_port = free_port()
+        http_server(test, self.screen_port)
+        self.write("meeting-screen/meeting_screen/server.py", "")
+        self.write("kiosk.sh", "#!/bin/sh\n", 0o755)
         self.env.update(
             SERVER_DIR=self.path("server"),
             ENV_FILE=self.path(".env"),
@@ -50,6 +54,12 @@ class Board(Sandbox):
             FAKE_WHICH=which,
             FAKE_UNITS="qwen35-vllm ambarella-llm ten-api",
             FAKE_ACTIVE=active,
+            SCREEN_DIR=self.path("meeting-screen"),
+            SCREEN_PY=sys.executable,
+            SCREEN_PORT=str(self.screen_port),
+            SCREEN_LOG=self.path("meeting_screen.log"),
+            KIOSK_SCRIPT=self.path("kiosk.sh"),
+            AUTOSTART=self.path("autostart", "meeting-screen.desktop"),
         )
         if stale:
             self.env["FAKE_STALE"] = "1"
@@ -121,11 +131,11 @@ class Switch(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(b.switches(), ["serve start"])
         calls = b.calls()
-        self.assertIn("systemctl enable qwen35-vllm ten-api", calls)
+        self.assertIn("systemctl enable qwen35-vllm ten-api meeting-screen", calls)
         self.assertIn("systemctl disable ambarella-llm", calls)
         self.assertEqual(
             sorted(f for f in os.listdir(b.path("systemd")) if f.endswith(".service")),
-            ["ambarella-llm.service", "qwen35-vllm.service", "ten-api.service"],
+            ["ambarella-llm.service", "meeting-screen.service", "qwen35-vllm.service", "ten-api.service"],
         )
 
     def test_a_meeting_in_progress_keeps_its_llm(self):
@@ -134,7 +144,7 @@ class Switch(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(b.switches(), [])
         self.assertIn("a meeting worker is up", r.stdout)
-        self.assertIn("systemctl enable qwen35-vllm ten-api", b.calls())
+        self.assertIn("systemctl enable qwen35-vllm ten-api meeting-screen", b.calls())
 
     def test_a_vllm_on_older_arguments_is_restarted(self):
         b = Board(self, which="qwen", stale=True, active="qwen35-vllm")
@@ -153,6 +163,58 @@ class Switch(unittest.TestCase):
         r = b.install()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(b.switches(), [])
+
+
+class Screen(unittest.TestCase):
+    def test_the_screen_unit_reads_meetings_dir_and_showcase_from_env_file(self):
+        b = Board(self)
+        b.write(".env", f"SERVER_PORT={b.api_port}\nMEETINGS_DIR=/data/meetings\nMEETING_SCREEN_SHOWCASE=demo-1\n")
+        unit = b.printed()["meeting-screen.service"]
+        self.assertIn(f"User={USER}\n", unit)
+        self.assertIn(f"WorkingDirectory={b.path('meeting-screen')}\n", unit)
+        self.assertIn(
+            f"ExecStart=/bin/sh -c \"exec '{sys.executable}' -m meeting_screen --meetings-dir '/data/meetings'"
+            f" --listen 127.0.0.1:{b.screen_port} --showcase 'demo-1' >> '{b.path('meeting_screen.log')}' 2>&1\"\n",
+            unit,
+        )
+        self.assertIn("Restart=on-failure\n", unit)
+
+    def test_meetings_dir_defaults_as_the_graph_does(self):
+        b = Board(self)
+        unit = b.printed()["meeting-screen.service"]
+        self.assertIn("--meetings-dir '/tmp/meetings'", unit)
+        self.assertNotIn("--showcase", unit)
+
+    def test_install_starts_the_screen_and_checks_it_answers(self):
+        b = Board(self, which="qwen", active="qwen35-vllm")
+        r = b.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("systemctl restart meeting-screen", b.calls())
+        self.assertIn("demo screen answers at", r.stdout)
+
+    def test_kiosk_on_and_off_without_sudo(self):
+        b = Board(self)
+        r = b.install("--kiosk", "on")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        entry = read(b.path("autostart", "meeting-screen.desktop"))
+        self.assertIn(f"Exec={b.path('kiosk.sh')}\n", entry)
+        self.assertIn("[Desktop Entry]\n", entry)
+        self.assertFalse([c for c in b.calls() if c.startswith("systemctl")])
+        r = b.install("--kiosk", "off")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(b.path("autostart", "meeting-screen.desktop")))
+
+    def test_kiosk_takes_on_or_off(self):
+        self.assertEqual(Board(self).install("--kiosk", "maybe").returncode, 2)
+
+    def test_status_shows_the_screen_and_the_kiosk(self):
+        b = Board(self, which="qwen", active="meeting-screen")
+        out = b.install("--status").stdout
+        self.assertIn("meeting-screen ", out)
+        self.assertIn("demo screen answers at", out)
+        self.assertIn("kiosk: off", out)
+        b.install("--kiosk", "on")
+        self.assertIn("kiosk: the screen opens when the desktop starts", b.install("--status").stdout)
 
 
 class Status(unittest.TestCase):

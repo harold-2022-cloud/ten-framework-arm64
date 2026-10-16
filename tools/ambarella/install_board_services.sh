@@ -11,6 +11,9 @@
 #   tools/ambarella/install_board_services.sh --status     is each one up
 #   tools/ambarella/install_board_services.sh --print      the unit files; nothing changes
 #   tools/ambarella/install_board_services.sh --uninstall  stop, disable, remove
+#   tools/ambarella/install_board_services.sh --kiosk on   the demo screen full screen
+#                                                          whenever the desktop starts
+#   tools/ambarella/install_board_services.sh --kiosk off  not any more
 #
 #   qwen35-vllm    Qwen3.5-4B on vLLM, port 8000, the LLM every board graph
 #                  asks: serve_qwen35.sh exec, as you, its output appended to
@@ -33,6 +36,14 @@
 #                  no request before the LLM answers; restarted if it dies;
 #                  its output appended to /tmp/task_run.log, where the checks
 #                  look
+#   meeting-screen the meeting demo screen's service on 127.0.0.1:8766: python3
+#                  -m meeting_screen in ai_agents/meeting-screen, as you, on
+#                  the board's own python3 (standard library only); it reads
+#                  the meetings in MEETINGS_DIR and serves the page the kiosk
+#                  shows; MEETING_SCREEN_SHOWCASE names the meeting PageDown
+#                  shows (both from the environment or ai_agents/.env);
+#                  restarted if it dies; its output appended to
+#                  /tmp/meeting_screen.log by the process itself
 #
 # With these up, any phone can ask for meeting minutes at any time: the
 # server starts the meeting worker for the request, the record stays on the
@@ -53,6 +64,10 @@
 # meeting being processed is not cut short; it then says to run this again
 # later.
 #
+# The kiosk starts with the desktop (~/.config/autostart, no sudo): the board
+# must be logged in for it -- by hand, or at every boot through
+# tools/ambarella/set_desktop_autologin.sh.
+#
 # Run it as the user who runs `task run`, not with sudo: sudo asks for your
 # password for systemctl and /etc/systemd/system. The LLM daemon's options
 # follow board_quickstart.md and can be changed through the environment:
@@ -61,11 +76,17 @@
 set -uo pipefail
 
 MODE=install
+KIOSK=""
 case "${1:-}" in
   "") ;;
   --status) MODE=status ;;
   --print) MODE=print ;;
   --uninstall) MODE=uninstall ;;
+  --kiosk)
+    MODE=kiosk
+    KIOSK="${2:-}"
+    [[ $KIOSK == on || $KIOSK == off ]] || { echo "--kiosk takes on or off" >&2; exit 2; }
+    ;;
   -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "unknown option: $1" >&2; exit 2 ;;
 esac
@@ -75,6 +96,12 @@ EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
 SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/ai_agents/server}"
 ENV_FILE="${ENV_FILE:-$REPO_ROOT/ai_agents/.env}"
 SERVE="${SERVE:-$REPO_ROOT/tools/ambarella/serve_qwen35.sh}"
+SCREEN_DIR="${SCREEN_DIR:-$REPO_ROOT/ai_agents/meeting-screen}"
+SCREEN_PY="${SCREEN_PY:-/usr/bin/python3}"
+SCREEN_PORT="${SCREEN_PORT:-8766}"
+SCREEN_LOG="${SCREEN_LOG:-/tmp/meeting_screen.log}"
+KIOSK_SCRIPT="${KIOSK_SCRIPT:-$REPO_ROOT/tools/ambarella/meeting_screen_kiosk.sh}"
+AUTOSTART="${AUTOSTART:-$HOME/.config/autostart/meeting-screen.desktop}"
 QWEN_VLLM="${QWEN_VLLM:-$HOME/workspace/cooper-vllm/venv_vllm/bin/vllm}"
 UPLOADER="${MEETING_UPLOADER:-http://127.0.0.1:8765}"
 TASK_LOG="${TASK_LOG:-/tmp/task_run.log}"
@@ -89,6 +116,13 @@ RUN_USER=$(id -un)
 
 port=$(grep -E '^SERVER_PORT=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '"'"'"' ')
 SERVER="http://127.0.0.1:${port:-8081}"
+# What ai_agents/.env says, quotes off; the environment wins over it.
+from_env_file() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'"; }
+# Where meetings land, as the graph's uploader and the checks read it.
+MEETINGS_DIR="${MEETINGS_DIR:-$(from_env_file MEETINGS_DIR)}"
+MEETINGS_DIR="${MEETINGS_DIR:-/tmp/meetings}"
+SHOWCASE="${MEETING_SCREEN_SHOWCASE:-$(from_env_file MEETING_SCREEN_SHOWCASE)}"
+SCREEN="http://127.0.0.1:$SCREEN_PORT"
 
 ok() { echo "  ok    $*"; }
 note() { echo "  note  $*"; }
@@ -218,9 +252,33 @@ WantedBy=multi-user.target
 EOF
 }
 
+screen_unit() {
+  local showcase=""
+  [[ -n "$SHOWCASE" ]] && showcase=" --showcase '$SHOWCASE'"
+  cat <<EOF
+[Unit]
+Description=Meeting demo screen: the board's meetings, read from disk, on 127.0.0.1:$SCREEN_PORT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$RUN_USER
+WorkingDirectory=$SCREEN_DIR
+Environment=$(q "HOME=$HOME")
+# The process appends to the log itself, not systemd (see ten-api.service).
+ExecStart=/bin/sh -c $(q "exec '$SCREEN_PY' -m meeting_screen --meetings-dir '$MEETINGS_DIR' --listen 127.0.0.1:$SCREEN_PORT$showcase >> '$SCREEN_LOG' 2>&1")
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 status() {
   local enabled active now qwen_up api_start
-  for unit in qwen35-vllm ambarella-llm ten-api; do
+  for unit in qwen35-vllm ambarella-llm ten-api meeting-screen; do
     # Both print the state even when they exit non-zero (disabled, inactive).
     enabled=$(systemctl is-enabled "$unit" 2>/dev/null)
     active=$(systemctl is-active "$unit" 2>/dev/null)
@@ -247,6 +305,12 @@ status() {
     fi
   fi
   if answers "$SERVER/graphs"; then ok "API server answers at $SERVER"; else note "nothing answers at $SERVER"; fi
+  if answers "$SCREEN/api/view"; then ok "demo screen answers at $SCREEN"; else note "the demo screen does not answer at $SCREEN"; fi
+  if [[ -f "$AUTOSTART" ]]; then
+    ok "kiosk: the screen opens when the desktop starts"
+  else
+    note "kiosk: off -- tools/ambarella/install_board_services.sh --kiosk on"
+  fi
   if answers "$UPLOADER/meetings"; then
     note "a meeting worker is up ($UPLOADER answers): a meeting is in progress or was just served"
   fi
@@ -257,9 +321,35 @@ if [[ $MODE == status ]]; then
   exit 0
 fi
 
+if [[ $MODE == kiosk ]]; then
+  # Before the install's own check: with sudo, the entry would go to
+  # root's desktop, which nobody logs into.
+  [[ $(id -u) -ne 0 ]] || fail "run it as the desktop user (${SUDO_USER:-lychee}), not with sudo"
+  if [[ $KIOSK == off ]]; then
+    rm -f "$AUTOSTART"
+    ok "the demo screen no longer opens with the desktop"
+    exit 0
+  fi
+  [[ -x "$KIOSK_SCRIPT" ]] || fail "no $KIOSK_SCRIPT"
+  mkdir -p "$(dirname "$AUTOSTART")"
+  cat > "$AUTOSTART" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Meeting demo screen
+Comment=The meeting demo screen, full screen; install_board_services.sh --kiosk off removes this
+Exec=$KIOSK_SCRIPT
+X-GNOME-Autostart-enabled=true
+EOF
+  ok "the demo screen opens full screen when $RUN_USER's desktop starts ($AUTOSTART)"
+  note "now: log out and in again, or reboot; Alt+F4 leaves it"
+  note "after a power cut it needs someone logged in, unless tools/ambarella/set_desktop_autologin.sh is on"
+  exit 0
+fi
+
 if [[ $MODE == uninstall ]]; then
-  sudo systemctl disable --now ten-api qwen35-vllm ambarella-llm 2>/dev/null
-  sudo rm -f "$UNIT_DIR/ten-api.service" "$UNIT_DIR/qwen35-vllm.service" "$UNIT_DIR/ambarella-llm.service"
+  sudo systemctl disable --now meeting-screen ten-api qwen35-vllm ambarella-llm 2>/dev/null
+  sudo rm -f "$UNIT_DIR/meeting-screen.service" "$UNIT_DIR/ten-api.service" "$UNIT_DIR/qwen35-vllm.service" "$UNIT_DIR/ambarella-llm.service"
+  rm -f "$AUTOSTART"
   sudo systemctl daemon-reload
   ok "removed; start by hand again as board_quickstart.md says"
   exit 0
@@ -272,6 +362,8 @@ fi
 [[ -d "$LLM_MODEL_PATH" ]] || fail "no model at $LLM_MODEL_PATH (LLM_MODEL_PATH=... picks another)"
 [[ -x "$QWEN_VLLM" ]] || fail "Qwen3.5-4B is not installed ($QWEN_VLLM): tools/ambarella/install_qwen35_vllm.sh"
 [[ -x "$SERVE" ]] || fail "no $SERVE"
+[[ -f "$SCREEN_DIR/meeting_screen/server.py" ]] || fail "no $SCREEN_DIR/meeting_screen: is this checkout up to date?"
+[[ -x "$SCREEN_PY" ]] || fail "no $SCREEN_PY: the demo screen runs on the board's own python3"
 
 if [[ $MODE == print ]]; then
   echo "# $ENV_OUT (variable names; values are written only on install)"
@@ -284,6 +376,9 @@ if [[ $MODE == print ]]; then
   echo "# $UNIT_DIR/ambarella-llm.service"
   llm_unit
   echo
+  echo "# $UNIT_DIR/meeting-screen.service"
+  screen_unit
+  echo
   echo "# $UNIT_DIR/ten-api.service"
   api_unit
   exit 0
@@ -294,6 +389,9 @@ fi
 # The service appends to $TASK_LOG as $RUN_USER.
 if [[ -e "$TASK_LOG" && ! -w "$TASK_LOG" ]]; then
   sudo chown "$RUN_USER" "$TASK_LOG" || fail "$TASK_LOG is not $RUN_USER's to write"
+fi
+if [[ -e "$SCREEN_LOG" && ! -w "$SCREEN_LOG" ]]; then
+  sudo chown "$RUN_USER" "$SCREEN_LOG" || fail "$SCREEN_LOG is not $RUN_USER's to write"
 fi
 
 why_not() {
@@ -310,17 +408,18 @@ tmp=$(mktemp -d)
 qwen_unit > "$tmp/qwen35-vllm.service"
 llm_unit > "$tmp/ambarella-llm.service"
 api_unit > "$tmp/ten-api.service"
+screen_unit > "$tmp/meeting-screen.service"
 environment > "$tmp/ten-api.env"
 nvars=$(grep -c . "$tmp/ten-api.env")
 sudo install -m 600 -o root -g root "$tmp/ten-api.env" "$ENV_OUT" ||
   fail "could not write $ENV_OUT"
-sudo install -m 644 "$tmp/qwen35-vllm.service" "$tmp/ambarella-llm.service" "$tmp/ten-api.service" "$UNIT_DIR/" ||
+sudo install -m 644 "$tmp/qwen35-vllm.service" "$tmp/ambarella-llm.service" "$tmp/ten-api.service" "$tmp/meeting-screen.service" "$UNIT_DIR/" ||
   fail "could not write $UNIT_DIR"
 rm -rf "$tmp"
 sudo systemctl daemon-reload
-sudo systemctl enable qwen35-vllm ten-api >/dev/null 2>&1 || fail "systemctl enable failed"
+sudo systemctl enable qwen35-vllm ten-api meeting-screen >/dev/null 2>&1 || fail "systemctl enable failed"
 sudo systemctl disable ambarella-llm >/dev/null 2>&1
-ok "qwen35-vllm and ten-api installed in $UNIT_DIR and enabled at boot; ambarella-llm installed, not started at boot"
+ok "qwen35-vllm, ten-api and meeting-screen installed in $UNIT_DIR and enabled at boot; ambarella-llm installed, not started at boot"
 ok "ten-api runs with this terminal's environment: $nvars variables in $ENV_OUT"
 changed=0
 [[ "$(sudo cat "$UNIT_DIR/ten-api.service" "$ENV_OUT" 2>/dev/null | md5sum)" != "$was" ]] && changed=1
@@ -388,8 +487,25 @@ if ! answers "$SERVER/graphs"; then
 fi
 ok "API server answers at $SERVER, run by the ten-api service"
 
+echo "== demo screen"
+# Restarted every time: it reads the checkout's code, and only the screen
+# notices -- for a second or two it says it is reconnecting.
+sudo systemctl restart meeting-screen || { why_not meeting-screen; fail "meeting-screen did not start"; }
+for _ in $(seq 20); do
+  answers "$SCREEN/api/view" && break
+  sleep 0.5
+done
+if ! answers "$SCREEN/api/view"; then
+  why_not meeting-screen
+  echo "  -- tail $SCREEN_LOG"
+  tail -5 "$SCREEN_LOG" 2>&1 | sed 's/^/     /'
+  fail "meeting-screen is installed but $SCREEN does not answer"
+fi
+ok "demo screen answers at $SCREEN, reading $MEETINGS_DIR${SHOWCASE:+, showcase $SHOWCASE}"
+
 echo
 status
 echo
-echo "From now on Qwen3.5-4B and the API server start at power-on (the 7B does not). To check after a reboot:"
+echo "From now on Qwen3.5-4B, the API server and the demo screen's service start at power-on (the 7B does not). To check after a reboot:"
 echo "  tools/ambarella/install_board_services.sh --status"
+[[ -f "$AUTOSTART" ]] || echo "The screen itself, full screen when the desktop starts: tools/ambarella/install_board_services.sh --kiosk on"
