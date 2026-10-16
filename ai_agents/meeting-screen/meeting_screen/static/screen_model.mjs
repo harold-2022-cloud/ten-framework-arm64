@@ -7,7 +7,7 @@
 
 export const STAGES = [
   "收到錄音",
-  "語音轉文字",
+  "分辨說話人＋轉文字",
   "分辨說話人",
   "話題摘要",
   "會議結論",
@@ -31,7 +31,7 @@ export const STATE_LABEL = {
   queued: "排隊中",
   received: "收到錄音",
   decoding: "收到錄音",
-  transcribing: "語音轉文字",
+  transcribing: "分辨說話人＋轉文字",
   linking: "分辨說話人",
   summarising: "話題摘要",
   concluding: "會議結論",
@@ -189,8 +189,8 @@ export function progressText(meeting) {
       return "收到錄音，準備處理";
     case 2:
       return total > 0
-        ? `語音轉文字：第 ${Math.min(done + 1, total)} / ${total} 段`
-        : "語音轉文字";
+        ? `分辨說話人＋轉文字：第 ${Math.min(done + 1, total)} / ${total} 段`
+        : "分辨說話人＋轉文字";
     case 3:
       return "分辨說話人：比對整場會議的聲音特徵";
     case 4:

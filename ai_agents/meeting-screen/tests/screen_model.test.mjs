@@ -171,7 +171,7 @@ test("progress lines follow the stage", () => {
       ...extra,
     });
   assert.equal(p(0, { ahead: 2 }), "排隊中，前面還有 2 場");
-  assert.equal(p(2), "語音轉文字：第 2 / 3 段");
+  assert.equal(p(2), "分辨說話人＋轉文字：第 2 / 3 段");
   assert.equal(p(4), "話題摘要：1 / 3");
   assert.equal(p(5), "正在寫會議結論……");
 });
@@ -240,4 +240,11 @@ test("a record with no words has nothing for the transcript", () => {
     false
   );
   assert.equal(m.hasWords(null), false);
+});
+
+test("the second stage names both things it does", () => {
+  // A topic is diarized (pyannote, 3D-Speaker) and then recognised
+  // (SenseVoice) in the same stage: meeting_transcriber/transcriber.py.
+  assert.equal(m.STAGES[1], "分辨說話人＋轉文字");
+  assert.equal(m.STATE_LABEL.transcribing, "分辨說話人＋轉文字");
 });
