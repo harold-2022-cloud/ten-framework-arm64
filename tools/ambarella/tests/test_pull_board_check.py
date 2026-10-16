@@ -104,6 +104,23 @@ class Pull(unittest.TestCase):
         self.assertIn("m80  failed  80:00  1000 bytes  boom", meetings)
         self.assertIn("half  (no state)", meetings)
 
+    def test_the_boards_uptime_memory_and_kernel_kills_come_back(self):
+        b = Board(self)
+        b.write("tmp/verify_meeting_20261016_053931.log", "v")
+        b.write(
+            "bin/journalctl",
+            "#!/bin/sh\necho \"journalctl $*\" >> \"$FAKE_LOG\"\n"
+            "echo 'kernel: Out of memory: Killed process 1234 (python3.12)'\n",
+            0o755,
+        )
+        r = b.pull("20261016")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        system = read(os.path.join(b.pulled("20261016_services"), "system.txt"))
+        for heading in ("== uptime", "== memory", "== kernel, this boot", "== kernel, the boot before"):
+            self.assertIn(heading, system)
+        self.assertIn("Killed process 1234", system)
+        self.assertIn("journalctl -k -b -1", "\n".join(b.calls()))
+
     def test_logs_come_back_before_any_meeting_ran(self):
         b = Board(self)
         b.write("tmp/prepare_meeting_demo_20261016_120000.log", "ready")

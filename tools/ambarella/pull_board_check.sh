@@ -15,8 +15,11 @@
 #             screen's and its kiosk's (their last 2000 lines), the API
 #             server's task_run.log (its last 5000), each meeting worker's own
 #             log of that day or after from the server's LOG_PATH (workers/,
-#             their last 20000), and every meeting on the board with its
-#             state (meetings.txt)
+#             their last 20000), every meeting on the board with its state
+#             (meetings.txt), and the board itself (system.txt): uptime and
+#             boot time, memory, and what the kernel said of memory and killed
+#             processes in this boot and the one before -- a board that went
+#             away mid-meeting says why there
 #
 #   tools/ambarella/pull_board_check.sh             today's
 #   tools/ambarella/pull_board_check.sh 20261015    that day's
@@ -70,6 +73,14 @@ for f in "$logpath"/app-*.log; do
   [ "$(date -r "$f" +%Y%m%d)" -ge "$day" ] || continue
   tail -n 20000 "$f" > "$svc/workers/$(basename "$f")"
 done
+{
+  echo "== uptime"; uptime; echo "booted $(uptime -s 2>/dev/null)"
+  echo "== memory"; free -m
+  for b in 0 -1; do
+    [ "$b" = 0 ] && echo "== kernel, this boot" || echo "== kernel, the boot before"
+    journalctl -k -b "$b" --no-pager 2>&1 | grep -aiE 'out of memory|oom|killed process|panic|watchdog|hung task|-- no entries|failed|permission' | tail -n 40
+  done
+} > "$svc/system.txt" 2>&1
 python3 -I - "$meetings" > "$svc/meetings.txt" <<'PY'
 import json, os, sys, time
 root = sys.argv[1]
