@@ -46,7 +46,9 @@ the board after a power cut and the screen comes back by itself.
    Each turn about ten seconds or more, without talking over each other:
    a voice heard too briefly cannot be told apart.
 4. Upload: the screen switches by itself; talk through each stage as it
-   lights.
+   lights -- 收到錄音, 分辨說話人 (an estimated bar: nothing to show until
+   the speakers are told apart), 轉文字 (the words appear turn by turn,
+   grey), 對齊說話人, 話題摘要, 會議結論.
 5. The reveal: the transcript takes the speakers' colours, the timeline,
    the summaries.
 6. Scale: PageDown for the full showcase meeting -- its length, its

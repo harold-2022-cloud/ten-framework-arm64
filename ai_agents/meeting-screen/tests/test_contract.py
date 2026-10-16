@@ -7,6 +7,7 @@ and the controller's state and record (meeting_uploader/store.py,
 meeting_control_python/state.py, record.py). Should either change its
 format, these fail."""
 
+import asyncio
 import json
 import os
 import time
@@ -17,6 +18,25 @@ from meeting_screen import disk, view
 store = writer("meeting_uploader", "store")
 cstate = writer("meeting_control_python", "state")
 crecord = writer("meeting_control_python", "record")
+cflow = writer("meeting_control_python", "flow")
+cconfig = writer("meeting_control_python", "config")
+
+
+class Quiet:
+    """The extensions around the controller, doing nothing."""
+
+    async def segment_audio(self, *_):
+        pass
+
+    async def transcribe(self, *_):
+        pass
+
+    async def ask_llm(self, _):
+        return ""
+
+    def log(self, _):
+        pass
+
 
 UPLOAD = {
     "title": "週會",
@@ -125,7 +145,7 @@ def test_summarising_makes_the_speakers_final(tmp_path):
         topics_total=2,
     )
     meeting = shown(tmp_path, 1000.0)["meeting"]
-    assert (meeting["stage"], meeting["speakers_final"]) == (4, True)
+    assert (meeting["stage"], meeting["speakers_final"]) == (5, True)
 
 
 def test_archived_is_the_result_with_its_processing_time(tmp_path):
@@ -147,3 +167,54 @@ def test_failed_with_its_reason(tmp_path):
     )
     v = shown(tmp_path, 1000.0)
     assert (v["scene"], v["meeting"]["error"]) == ("failed", "ASR failed")
+
+
+def test_the_controllers_steps_light_their_stages(tmp_path):
+    folder = landed(tmp_path, 900.0)
+    flow = cflow.MeetingFlow(cconfig.MeetingControlConfig(), Quiet())
+
+    async def go():
+        await flow.start(
+            {
+                "meeting_id": "m1",
+                "ogg_path": os.path.join(folder, "audio.ogg"),
+                "work_dir": os.path.join(folder, "work"),
+                "title": "週會",
+                "speakers": 2,
+                "script": "traditional",
+            }
+        )
+        await flow.on_segments_ready(
+            {
+                "pcm_path": os.path.join(folder, "work", "audio.pcm"),
+                "duration_s": 120.0,
+                "segments": [{"id": "t01", "start_s": 0.0, "end_s": 120.0}],
+                "error": None,
+            }
+        )
+        diarizing = shown(tmp_path, time.time())["meeting"]
+        await flow.on_progress(
+            {
+                "segment_id": "t01",
+                "step": "recognising",
+                "turns_done": 1,
+                "turns_total": 4,
+                "utterance": {
+                    "start_s": 1.0,
+                    "end_s": 3.0,
+                    "speaker": 0,
+                    "text": "我們先定時間。",
+                },
+            }
+        )
+        return diarizing, shown(tmp_path, time.time())["meeting"]
+
+    diarizing, recognising = asyncio.run(go())
+    assert (diarizing["stage"], diarizing["topic_s"]) == (2, 120.0)
+    assert (recognising["stage"], recognising["turns"]) == (
+        3,
+        {"done": 1, "total": 4},
+    )
+    words = recognising["record"]["topics"][0]["utterances"]
+    assert words[0]["text"] == "我們先定時間。"
+    assert recognising["speakers_final"] is False

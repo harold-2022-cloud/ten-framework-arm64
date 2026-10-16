@@ -5,13 +5,27 @@
 // The demo screen's model: what the page draws, worked out from /api/view.
 // No DOM here, so node --test runs it (tests/screen_model.test.mjs).
 
+// The board's own steps, in its order: each topic's speakers are told apart
+// (pyannote, 3D-Speaker), then each turn is recognised (SenseVoice); linking
+// then gives each person one number across the meeting.
 export const STAGES = [
   "收到錄音",
-  "分辨說話人＋轉文字",
   "分辨說話人",
+  "轉文字",
+  "對齊說話人",
   "話題摘要",
   "會議結論",
 ];
+
+// How long the steps with no progress of their own take on the board: a
+// topic's speakers are told apart in about half its length (0.49 measured
+// at two threads) plus loading two models; the conclusion took 41 s for a
+// 12-minute meeting and about 80 for 38 minutes. Rough on purpose: the
+// bar they drive says 預計 and stops short of the end until the step ends.
+export const DIARIZE_PER_AUDIO_S = 0.5;
+export const DIARIZE_START_S = 10;
+export const CONCLUDE_S = 45;
+const ESTIMATE_CAP = 0.95;
 
 // Ten fixed colours: speaker n is always the n-th, on the dark background.
 export const COLORS = [
@@ -32,7 +46,7 @@ export const STATE_LABEL = {
   received: "收到錄音",
   decoding: "收到錄音",
   transcribing: "分辨說話人＋轉文字",
-  linking: "分辨說話人",
+  linking: "對齊說話人",
   summarising: "話題摘要",
   concluding: "會議結論",
   archived: "完成",
@@ -175,11 +189,19 @@ export function topicSummaries(record) {
     .map((t) => ({ at: Number(t.start_s) || 0, text: String(t.summary) }));
 }
 
-// The line under the stages while a meeting is processed.
-export function progressText(meeting) {
+function topicOf(meeting) {
   const progress = meeting.progress || {};
   const done = Number(progress.topics_done) || 0;
   const total = Number(progress.topics_total) || 0;
+  return { done, total, at: total > 0 ? Math.min(done + 1, total) : 0 };
+}
+
+// The line under the stages while a meeting is processed.
+export function progressText(meeting) {
+  const topic = topicOf(meeting);
+  const turns = meeting.turns || {};
+  const ofTopics =
+    topic.total > 1 ? `（第 ${topic.at} / ${topic.total} 段）` : "";
   switch (meeting.stage) {
     case 0:
       return meeting.ahead > 0
@@ -188,18 +210,77 @@ export function progressText(meeting) {
     case 1:
       return "收到錄音，準備處理";
     case 2:
-      return total > 0
-        ? `分辨說話人＋轉文字：第 ${Math.min(done + 1, total)} / ${total} 段`
-        : "分辨說話人＋轉文字";
+      return `分辨說話人：找出誰在什麼時候說話${ofTopics}`;
     case 3:
-      return "分辨說話人：比對整場會議的聲音特徵";
+      return Number(turns.total) > 0
+        ? `轉文字：第 ${turns.done} / ${turns.total} 句${ofTopics}`
+        : `轉文字${ofTopics}`;
     case 4:
-      return total > 0 ? `話題摘要：${done} / ${total}` : "話題摘要";
+      return "對齊說話人：比對整場會議的聲音特徵";
     case 5:
+      return topic.total > 0
+        ? `話題摘要：${topic.done} / ${topic.total}`
+        : "話題摘要";
+    case 6:
       return "正在寫會議結論……";
     default:
       return "";
   }
+}
+
+function estimated(startedAt, expected, now) {
+  const spent = Math.max(0, now - startedAt);
+  return {
+    fraction: Math.min(ESTIMATE_CAP, spent / expected),
+    estimate: true,
+    left_s: Math.max(0, expected - spent),
+  };
+}
+
+// The bar under the line: the share done, and whether it is an estimate
+// (with the seconds it expects are left). null when the stage has nothing
+// to measure. Redrawn once a second, never animated.
+export function progressBar(meeting, serverNow) {
+  if (!meeting) {
+    return null;
+  }
+  const turns = meeting.turns || {};
+  const topic = topicOf(meeting);
+  if (
+    meeting.stage === 2 &&
+    meeting.step_started_at != null &&
+    meeting.topic_s != null
+  ) {
+    const expected = meeting.topic_s * DIARIZE_PER_AUDIO_S + DIARIZE_START_S;
+    return estimated(meeting.step_started_at, expected, serverNow);
+  }
+  if (meeting.stage === 3 && Number(turns.total) > 0) {
+    const fraction = Math.min(1, Number(turns.done) / Number(turns.total));
+    return { fraction, estimate: false, left_s: null };
+  }
+  if (meeting.stage === 5 && topic.total > 0) {
+    return {
+      fraction: topic.done / topic.total,
+      estimate: false,
+      left_s: null,
+    };
+  }
+  if (meeting.stage === 6 && meeting.since != null) {
+    return estimated(meeting.since, CONCLUDE_S, serverNow);
+  }
+  return null;
+}
+
+export function leftText(bar) {
+  if (!bar || !bar.estimate) {
+    return "";
+  }
+  if (bar.left_s < 5) {
+    return "快好了";
+  }
+  return bar.left_s < 60
+    ? `預計還要約 ${Math.ceil(bar.left_s / 5) * 5} 秒`
+    : `預計還要約 ${Math.round(bar.left_s / 60)} 分鐘`;
 }
 
 // What a meeting that did not finish says: never anything like done.

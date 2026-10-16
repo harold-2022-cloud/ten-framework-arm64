@@ -90,7 +90,7 @@ def test_failed_and_empty_are_the_failed_scene_with_the_reason():
     assert (v["scene"], v["meeting"]["error"], v["meeting"]["stage"]) == (
         "failed",
         "ASR failed",
-        6,
+        7,
     )
     assert build([m("a", "empty", NOW - 5)])["scene"] == "failed"
 
@@ -120,10 +120,10 @@ def test_each_state_lights_its_stage():
         ("received", 1),
         ("decoding", 1),
         ("transcribing", 2),
-        ("linking", 3),
-        ("summarising", 4),
-        ("concluding", 5),
-        ("archived", 6),
+        ("linking", 4),
+        ("summarising", 5),
+        ("concluding", 6),
+        ("archived", 7),
         ("something-new", 1),
     ):
         assert (
@@ -239,3 +239,38 @@ def test_archived_with_words_or_no_record_yet_is_the_result(record):
         == "result"
     )
     assert build([m("a", "archived", NOW - 5)])["scene"] == "result"
+
+
+def test_recognition_is_its_own_stage_with_its_turns():
+    v = build(
+        [
+            m(
+                "a",
+                "transcribing",
+                NOW - 5,
+                step="recognising",
+                step_started_at=NOW - 20,
+                topic_s=300,
+                turns_done=3,
+                turns_total=10,
+            )
+        ]
+    )["meeting"]
+    assert (v["stage"], v["step"], v["turns"]) == (
+        3,
+        "recognising",
+        {"done": 3, "total": 10},
+    )
+    assert (v["step_started_at"], v["topic_s"]) == (NOW - 20, 300.0)
+    diarizing = build([m("a", "transcribing", NOW - 5, step="diarizing")])
+    assert diarizing["meeting"]["stage"] == 2
+
+
+def test_a_step_left_over_from_transcribing_is_not_shown_later():
+    v = build([m("a", "summarising", NOW - 5, step="recognising")])["meeting"]
+    assert (v["stage"], v["step"], v["step_started_at"]) == (5, None, None)
+
+
+def test_when_the_current_state_began_is_passed_on():
+    v = build([m("a", "concluding", NOW - 5, updated_at=NOW - 30)])
+    assert v["meeting"]["since"] == NOW - 30

@@ -19,19 +19,20 @@ from typing import Callable, List, Optional, Tuple
 from .disk import Meeting
 
 # The controller's states in order (meeting_control_python/flow.py), and the
-# stage each lights: 0 queued, 1 received, 2 transcribing, 3 linking,
-# 4 summarising, 5 concluding, 6 ended.
+# stage each lights: 0 queued, 1 received, 2 telling the speakers apart,
+# 3 recognising their words (transcribing at step recognising), 4 linking,
+# 5 summarising, 6 concluding, 7 ended.
 STAGE = {
     "queued": 0,
     "received": 1,
     "decoding": 1,
     "transcribing": 2,
-    "linking": 3,
-    "summarising": 4,
-    "concluding": 5,
-    "archived": 6,
-    "failed": 6,
-    "empty": 6,
+    "linking": 4,
+    "summarising": 5,
+    "concluding": 6,
+    "archived": 7,
+    "failed": 7,
+    "empty": 7,
 }
 TERMINAL = ("archived", "empty", "failed")
 # Speaker numbers name one person across the meeting only once linked: the
@@ -76,6 +77,14 @@ def _topic_error(record) -> Optional[str]:
         if isinstance(t, dict) and t.get("error"):
             return str(t["error"])
     return None
+
+
+def stage_of(state: Optional[str], step: Optional[str]) -> int:
+    """A topic is told apart first, then recognised: two stages in one
+    state, told by the controller's step."""
+    if state == "transcribing" and step == "recognising":
+        return 3
+    return STAGE.get(state, 1)
 
 
 def scene_of(state: Optional[str]) -> str:
@@ -132,6 +141,8 @@ def meeting_view(
     showcase: Optional[str],
 ) -> dict:
     state = _state(m)
+    step = m.state.get("step") if state == "transcribing" else None
+    step = step if isinstance(step, str) else None
     started = _num(m.state.get("started_at"))
     finished = _num(m.state.get("updated_at")) if state in TERMINAL else None
     if started is None:
@@ -160,7 +171,17 @@ def meeting_view(
         "meeting_id": m.meeting_id,
         "title": title,
         "state": state,
-        "stage": STAGE.get(state, 1),
+        "stage": stage_of(state, step),
+        "step": step,
+        "step_started_at": (
+            _num(m.state.get("step_started_at")) if step else None
+        ),
+        "topic_s": _num(m.state.get("topic_s")) if step else None,
+        "turns": {
+            "done": int(_num(m.state.get("turns_done")) or 0),
+            "total": int(_num(m.state.get("turns_total")) or 0),
+        },
+        "since": _num(m.state.get("updated_at")),
         "error": error,
         "received_at": _num(m.state.get("received_at")),
         "started_at": started,

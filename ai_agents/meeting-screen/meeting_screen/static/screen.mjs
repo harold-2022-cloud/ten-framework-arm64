@@ -15,10 +15,12 @@ import {
   holdReady,
   initial,
   lanes,
+  leftText,
   minutesText,
   mmss,
   pinTo,
   poll,
+  progressBar,
   progressText,
   STATE_LABEL,
   shownScene,
@@ -37,6 +39,16 @@ let timer = null;
 const list = { open: false, items: [], index: 0 };
 
 const serverNow = () => Date.now() / 1000 + model.offset;
+
+const pct = (fraction) => Math.round(fraction * 1000) / 10;
+
+function barHtml(meeting) {
+  const bar = progressBar(meeting, serverNow());
+  if (!bar) {
+    return "";
+  }
+  return `<div class="bar"><i id="bar-fill" style="width:${pct(bar.fraction)}%"></i></div><p class="hint" id="bar-left">${leftText(bar)}</p>`;
+}
 
 function stagesHtml(stage) {
   const items = stageItems(stage)
@@ -133,7 +145,7 @@ const SCENES = {
     const found = meeting.speakers_final
       ? `<p class="big">分辨出 ${speakerCount(meeting.record)} 位說話人</p>`
       : "";
-    return `<section class="processing">${stagesHtml(meeting.stage)}${titleLine(meeting, "已用時")}<p class="status">${progressText(meeting)}</p>${found}${lanesHtml(meeting)}<div class="topics">${topicsHtml(meeting.record)}</div>${transcriptHtml(meeting)}${pinnedNote(view)}</section>`;
+    return `<section class="processing">${stagesHtml(meeting.stage)}${titleLine(meeting, "已用時")}<p class="status">${progressText(meeting)}</p>${barHtml(meeting)}${found}${lanesHtml(meeting)}<div class="topics">${topicsHtml(meeting.record)}</div>${transcriptHtml(meeting)}${pinnedNote(view)}</section>`;
   },
   result(view) {
     const meeting = view.meeting;
@@ -176,6 +188,13 @@ function tick() {
   } else {
     slot.textContent =
       model.view.scene === "result" ? minutesText(seconds) : mmss(seconds);
+  }
+  // An estimated bar moves with the clock, once a second.
+  const fill = byId("bar-fill");
+  const bar = progressBar(meeting, serverNow());
+  if (fill && bar) {
+    fill.style.width = `${pct(bar.fraction)}%`;
+    byId("bar-left").textContent = leftText(bar);
   }
 }
 

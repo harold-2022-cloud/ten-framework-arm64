@@ -74,9 +74,9 @@ test("lanes: none before final; one per speaker after, as shares", () => {
 test("stages: done before, now at, todo after", () => {
   assert.deepEqual(
     m.stageItems(3).map((s) => s.status),
-    ["done", "done", "now", "todo", "todo"]
+    ["done", "done", "now", "todo", "todo", "todo"]
   );
-  assert.ok(m.stageItems(6).every((s) => s.status === "done"));
+  assert.ok(m.stageItems(7).every((s) => s.status === "done"));
   assert.ok(m.stageItems(0).every((s) => s.status === "todo"));
 });
 
@@ -167,13 +167,20 @@ test("progress lines follow the stage", () => {
     m.progressText({
       stage,
       progress: { topics_done: 1, topics_total: 3 },
+      turns: { done: 7, total: 20 },
       ahead: 0,
       ...extra,
     });
   assert.equal(p(0, { ahead: 2 }), "排隊中，前面還有 2 場");
-  assert.equal(p(2), "分辨說話人＋轉文字：第 2 / 3 段");
-  assert.equal(p(4), "話題摘要：1 / 3");
-  assert.equal(p(5), "正在寫會議結論……");
+  assert.equal(p(2), "分辨說話人：找出誰在什麼時候說話（第 2 / 3 段）");
+  assert.equal(
+    p(2, { progress: { topics_done: 0, topics_total: 1 } }),
+    "分辨說話人：找出誰在什麼時候說話"
+  );
+  assert.equal(p(3), "轉文字：第 7 / 20 句（第 2 / 3 段）");
+  assert.equal(p(4), "對齊說話人：比對整場會議的聲音特徵");
+  assert.equal(p(5), "話題摘要：1 / 3");
+  assert.equal(p(6), "正在寫會議結論……");
 });
 
 test("text is escaped before it is drawn", () => {
@@ -242,9 +249,52 @@ test("a record with no words has nothing for the transcript", () => {
   assert.equal(m.hasWords(null), false);
 });
 
-test("the second stage names both things it does", () => {
-  // A topic is diarized (pyannote, 3D-Speaker) and then recognised
-  // (SenseVoice) in the same stage: meeting_transcriber/transcriber.py.
-  assert.equal(m.STAGES[1], "分辨說話人＋轉文字");
-  assert.equal(m.STATE_LABEL.transcribing, "分辨說話人＋轉文字");
+test("the stages are the board's own steps, in its order", () => {
+  assert.deepEqual(m.STAGES, [
+    "收到錄音",
+    "分辨說話人",
+    "轉文字",
+    "對齊說話人",
+    "話題摘要",
+    "會議結論",
+  ]);
+  assert.equal(m.STATE_LABEL.linking, "對齊說話人");
+});
+
+test("diarizing has an estimated bar that stops short of the end", () => {
+  // 240 s of audio: about 0.5 x 240 + 10 = 130 s expected.
+  const meeting = { stage: 2, step_started_at: 100, topic_s: 240 };
+  let bar = m.progressBar(meeting, 165);
+  assert.equal(bar.estimate, true);
+  assert.equal(bar.fraction, 0.5);
+  assert.equal(m.leftText(bar), "預計還要約 1 分鐘");
+  bar = m.progressBar(meeting, 1000);
+  assert.equal(bar.fraction, 0.95);
+  assert.equal(m.leftText(bar), "快好了");
+});
+
+test("recognition and summaries count what is done", () => {
+  const recognising = { stage: 3, turns: { done: 3, total: 12 } };
+  assert.deepEqual(m.progressBar(recognising, 0), {
+    fraction: 0.25,
+    estimate: false,
+    left_s: null,
+  });
+  assert.equal(m.leftText(m.progressBar(recognising, 0)), "");
+  const summaries = { stage: 5, progress: { topics_done: 1, topics_total: 4 } };
+  assert.equal(m.progressBar(summaries, 0).fraction, 0.25);
+});
+
+test("the conclusion is estimated from when it began", () => {
+  const bar = m.progressBar({ stage: 6, since: 100 }, 130);
+  assert.equal(bar.left_s, 15);
+  assert.equal(m.leftText(bar), "預計還要約 15 秒");
+});
+
+test("a stage with nothing to measure has no bar", () => {
+  for (const stage of [0, 1, 4, 7]) {
+    assert.equal(m.progressBar({ stage }, 0), null);
+  }
+  assert.equal(m.progressBar({ stage: 2 }, 0), null);
+  assert.equal(m.progressBar(null, 0), null);
 });

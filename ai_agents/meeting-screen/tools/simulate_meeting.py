@@ -9,11 +9,13 @@ writes it, so the screen can be watched without a board or a phone.
   python3 tools/simulate_meeting.py RECORD.json --meetings-dir /tmp/sim
   python3 -m meeting_screen --meetings-dir /tmp/sim   # http://localhost:8766/
 
-queued, received, decoding, transcribing topic by topic (each topic numbering
-its own speakers, as before linking), linking, summarising topic by topic,
-concluding, archived: about --seconds (120) in all. Each file is written to
-a temporary name and renamed, as the uploader and the controller write it,
-the record before the state. Standard library only.
+queued, received, decoding; then topic by topic its speakers told apart and
+its turns recognised one at a time (each topic numbering its own speakers,
+as before linking); linking, summarising topic by topic, concluding,
+archived: about --seconds (120) in all, a third of it telling speakers
+apart, as the board does. Each file is written to a temporary name and
+renamed, as the uploader and the controller write it, the record before
+the state. Standard library only.
 """
 
 import argparse
@@ -63,9 +65,25 @@ def steps(record: dict) -> Iterator[Step]:
     yield "transcribing", {"topics_done": 0, "topics_total": total}, None
     own = []
     for i, topic in enumerate(topics):
-        own.append(
-            {**topic, "utterances": _own_numbers(topic.get("utterances") or [])}
-        )
+        words = _own_numbers(topic.get("utterances") or [])
+        length = (topic.get("end_s") or 0.0) - (topic.get("start_s") or 0.0)
+        yield "transcribing", {
+            "step": "diarizing",
+            "topic_s": length,
+            "turns_done": 0,
+            "turns_total": 0,
+        }, None
+        yield "transcribing", {
+            "step": "recognising",
+            "turns_done": 0,
+            "turns_total": len(words),
+        }, None
+        for n in range(1, len(words) + 1):
+            live = {**topic, "utterances": words[:n]}
+            yield "transcribing", {"turns_done": n}, _partial(
+                record, own + [live]
+            )
+        own.append({**topic, "utterances": words})
         yield "transcribing", {"topics_done": i + 1}, _partial(record, own)
     yield "linking", {}, _partial(record, own)
     yield "summarising", {"topics_done": 0, "topics_total": total}, _partial(
@@ -122,12 +140,19 @@ def run(
     _write_json(state_path, state)
     say(f"queued        {folder}")
     plan = list(steps(record))
-    pause = seconds / max(1, len(plan))
+    # Telling a topic's speakers apart has nothing to show: on the board it
+    # takes about half the topic's length, so a third of the replay goes to
+    # it, and the rest is shared.
+    slow = sum(1 for _, fields, _ in plan if fields.get("step") == "diarizing")
+    long_pause = seconds / 3 / max(1, slow)
+    pause = (seconds - long_pause * slow) / max(1, len(plan) - slow + 1)
+    sleep(pause)
     for name, fields, partial in plan:
-        sleep(pause)
         now = clock()
         if name == "received":
             state["started_at"] = now
+        if "step" in fields:
+            state["step_started_at"] = now
         state.update(fields)
         state["state"] = name
         state["updated_at"] = now
@@ -135,6 +160,7 @@ def run(
             _write_json(record_path, partial)
         _write_json(state_path, state)
         say(f"{name:<13} {state['topics_done']}/{state['topics_total']}")
+        sleep(long_pause if fields.get("step") == "diarizing" else pause)
     return folder
 
 

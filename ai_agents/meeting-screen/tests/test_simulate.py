@@ -107,8 +107,29 @@ def test_every_step_is_a_view_the_screen_can_draw(tmp_path, record):
         1,
         2,
         3,
+        2,
+        3,
         4,
         5,
         6,
+        7,
     ]
-    assert scenes[-1] == ("result", 6)
+    assert scenes[-1] == ("result", 7)
+
+
+def test_words_arrive_one_turn_at_a_time(record):
+    counts = [
+        sum(len(t["utterances"]) for t in rec["topics"])
+        for state, _, rec in sim.steps(record)
+        if state == "transcribing" and rec is not None
+    ]
+    assert counts == [1, 2, 2, 3, 4, 4]
+
+
+def test_each_topic_is_told_apart_then_recognised(record):
+    told = [
+        fields.get("step")
+        for state, fields, _ in sim.steps(record)
+        if "step" in fields
+    ]
+    assert told == ["diarizing", "recognising", "diarizing", "recognising"]
