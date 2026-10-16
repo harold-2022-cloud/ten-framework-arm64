@@ -9,6 +9,7 @@ worker is named; --warm starts the meeting worker and waits for it.
   python3 -m unittest discover -s tools/ambarella/tests -v
 """
 
+import glob
 import json
 import os
 import sys
@@ -17,7 +18,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fakes import Sandbox, free_port, http_server  # noqa: E402  pylint: disable=wrong-import-position
+from fakes import Sandbox, free_port, http_server, read  # noqa: E402  pylint: disable=wrong-import-position
 
 SERVICES = "qwen35-vllm ten-api meeting-screen"
 
@@ -192,6 +193,15 @@ class Prepare(unittest.TestCase):
             {"channel_name": "meeting-room", "graph_name": "meeting_minutes", "timeout": 1800},
         )
         self.assertIn("the meeting worker is up", r.stdout)
+
+
+class Log(unittest.TestCase):
+    def test_what_it_says_is_kept_in_a_log_of_the_day(self):
+        b = Board(self)
+        r = b.prepare()
+        (log,) = glob.glob(b.path("prepare_meeting_demo_[0-9]*_[0-9]*.log"))
+        self.assertIn("ready for the demo", read(log))
+        self.assertIn(f"log: {log}", r.stdout)
 
 
 if __name__ == "__main__":

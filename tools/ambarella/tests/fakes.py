@@ -117,6 +117,8 @@ class Sandbox:
             "DAEMON_LOG": self.path("log.txt"),
             "GIVE_BACK_S": "30",
             "MEETING_UPLOADER": f"http://127.0.0.1:{free_port()}",
+            # Where the scripts keep their logs: here, not the machine's /tmp.
+            "LOG_DIR": self.root,
         }
         self.own()
 

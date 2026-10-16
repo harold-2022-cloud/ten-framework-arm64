@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# ssh, faked: the board is this machine. The host goes to $FAKE_LOG and the
+# command runs here, its stdin as it came.
+echo "ssh $1" >> "$FAKE_LOG"
+shift
+exec bash -c "$*"

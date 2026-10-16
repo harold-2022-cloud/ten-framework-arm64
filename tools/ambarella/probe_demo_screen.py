@@ -34,8 +34,9 @@ What it checks, in order:
             is being processed, since it would take CPU from it.
 
 Nothing on the board is changed: the browser it opens is closed again and its
-temporary profile removed. Everything printed is also written to a log, named
-at the end. Exits non-zero if any check failed.
+temporary profile removed. Everything printed is also written to a log of
+the day (LOG_DIR, else /tmp), named at the end; pull_board_check.sh brings it
+back. Exits non-zero if any check failed.
 """
 
 import argparse
@@ -1026,6 +1027,14 @@ def check_kiosk(args, env, browser):
 # --------------------------------------------------------------------------
 
 
+def log_path(now=None):
+    """Where the log goes: LOG_DIR, else the temporary directory, under the
+    day and time -- where tools/ambarella/pull_board_check.sh looks."""
+    folder = os.environ.get("LOG_DIR") or tempfile.gettempdir()
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+    return os.path.join(folder, f"probe_demo_screen_{stamp}.log")
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Check what the meeting demo screen relies on, on the board."
@@ -1089,9 +1098,7 @@ def main():
         emit(f"  warn  {msg}")
     if not failures and not warnings:
         emit("  everything held")
-    path = os.path.join(
-        tempfile.gettempdir(), f"probe_demo_screen-{os.getuid()}.log"
-    )
+    path = log_path()
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(log_lines) + "\n")

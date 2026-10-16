@@ -12,6 +12,7 @@ started against when Qwen3.5-4B was up.
 """
 
 import getpass
+import glob
 import os
 import shutil
 import subprocess
@@ -236,6 +237,20 @@ class Status(unittest.TestCase):
     def test_the_7b_serving_is_said(self):
         b = Board(self, which="7b")
         self.assertIn("the DeepSeek 7B daemon serves", b.install("--status").stdout)
+
+
+class Log(unittest.TestCase):
+    def test_an_install_is_kept_in_a_log_of_the_day(self):
+        b = Board(self, which="qwen", active="qwen35-vllm")
+        r = b.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        (log,) = glob.glob(b.path("install_board_services_[0-9]*_[0-9]*.log"))
+        self.assertIn("demo screen answers at", read(log))
+
+    def test_print_writes_no_log(self):
+        b = Board(self)
+        b.printed()
+        self.assertEqual(glob.glob(b.path("install_board_services_*.log")), [])
 
 
 if __name__ == "__main__":

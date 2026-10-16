@@ -91,6 +91,23 @@ case "${1:-}" in
   *) echo "unknown option: $1" >&2; exit 2 ;;
 esac
 
+if [[ $MODE != print ]]; then
+  # Everything but --print also goes to a log of the day, which
+  # tools/ambarella/pull_board_check.sh brings back. tee ignores Ctrl-C and a
+  # hangup, as in verify_meeting_board.sh, so the log keeps the last lines.
+  LOG="${LOG_DIR:-/tmp}/install_board_services_$(date +%Y%m%d_%H%M%S).log"
+  exec > >(trap '' INT HUP; exec tee "$LOG") 2>&1
+  TEE_PID=$!
+  on_exit() {
+    local rc=$?
+    echo "  log: $LOG"
+    exec >&- 2>&-
+    wait "$TEE_PID" 2>/dev/null
+    exit "$rc"
+  }
+  trap on_exit EXIT
+fi
+
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 EXAMPLE="$REPO_ROOT/ai_agents/agents/examples/voice-assistant"
 SERVER_DIR="${SERVER_DIR:-$REPO_ROOT/ai_agents/server}"

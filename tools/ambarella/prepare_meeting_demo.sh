@@ -30,7 +30,8 @@
 #                a new upload
 #
 # Run it on the board as the desktop user (lychee), not with sudo. Exits
-# non-zero if anything is not ready.
+# non-zero if anything is not ready. Its log: /tmp/prepare_meeting_demo_*.log
+# (LOG_DIR), brought back by pull_board_check.sh.
 #
 # Settings, from the environment or ai_agents/.env: MEETINGS_DIR,
 # MEETING_SCREEN_SHOWCASE, SERVER_PORT; from the environment: SCREEN_URL
@@ -46,6 +47,21 @@ case "${1:-}" in
   -h|--help) sed -n '6,/^set -uo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "unknown argument: $1" >&2; exit 2 ;;
 esac
+
+# Everything it says also goes to a log of the day, which
+# tools/ambarella/pull_board_check.sh brings back. tee ignores Ctrl-C and a
+# hangup, as in verify_meeting_board.sh, so the log keeps the last lines.
+LOG="${LOG_DIR:-/tmp}/prepare_meeting_demo_$(date +%Y%m%d_%H%M%S).log"
+exec > >(trap '' INT HUP; exec tee "$LOG") 2>&1
+TEE_PID=$!
+on_exit() {
+  local rc=$?
+  echo "  log: $LOG"
+  exec >&- 2>&-
+  wait "$TEE_PID" 2>/dev/null
+  exit "$rc"
+}
+trap on_exit EXIT
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$HERE/../.." && pwd)
