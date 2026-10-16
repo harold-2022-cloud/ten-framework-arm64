@@ -161,7 +161,10 @@ class Upload(unittest.TestCase):
 
     def test_follow_waits_for_the_end(self):
         board = FakeBoard(self)
-        code, out = run(board.args(audio_file(self), "--id", "pc-3", "--follow"))
+        results = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, results)
+        # --out, so a test never writes into the real results folder.
+        code, out = run(board.args(audio_file(self), "--id", "pc-3", "--follow", "--out", results))
         self.assertEqual(code, 0, out)
         self.assertIn("transcribing", out)
         self.assertIn("archived", out)
