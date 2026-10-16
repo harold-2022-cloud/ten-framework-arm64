@@ -133,7 +133,11 @@ class MeetingControlExtension(AsyncExtension):
         elif name == "segment_transcribed":
             self._run(self.flow.on_transcribed, payload_json)
         elif name == "transcribe_progress":
-            self._run(self.flow.on_progress, payload_json)
+            # For the screen only: not through _run, which ends the meeting
+            # when its handler raises. on_progress_json never does.
+            task = asyncio.create_task(self.flow.on_progress_json(payload_json))
+            self.tasks.add(task)
+            task.add_done_callback(self.tasks.discard)
 
     def _run(self, handler, payload_json: str) -> None:
         """Off the callback, so an hour of summaries never holds the loop,

@@ -22,6 +22,7 @@ an upload that cannot be decoded or holds no speech ends anywhere but
 archived.
 """
 
+import functools
 import json
 import os
 import time
@@ -37,9 +38,9 @@ from .state import write_state
 
 
 # How often the words of a topic still being recognised are written to
-# record.json for the screen: often enough to read as live, not so often
-# that the whole record is rewritten -- and converted -- for every turn.
-LIVE_SAVE_S = 1.0
+# record.json: as often as the screen asks (every 2 s), not for every turn
+# (one takes about 1.8 s on the board), since each write is the whole record.
+LIVE_SAVE_S = 2.0
 
 
 class MeetingFlow:
@@ -88,7 +89,11 @@ class MeetingFlow:
             self.work_dir = payload["work_dir"]
             self.folder = os.path.dirname(self.ogg_path)
             self.speakers = payload.get("speakers") or self.config.speakers
-            self._convert = self._script(payload.get("script"))
+            # Cached for the meeting: the record is written again and again
+            # while its words come in, and its texts never change.
+            self._convert = functools.lru_cache(maxsize=None)(
+                self._script(payload.get("script"))
+            )
             self.record = MeetingRecord(
                 meeting_id,
                 title=payload.get("title"),
@@ -168,6 +173,17 @@ class MeetingFlow:
             self._progress(payload)
         except Exception as err:  # pylint: disable=broad-except
             self.io.log(f"progress dropped: {type(err).__name__}: {err}")
+
+    async def on_progress_json(self, text: str) -> None:
+        """on_progress for the report as it came, parsed here: the
+        extension hands it on as text, outside the guard that would end the
+        meeting over a payload that does not parse."""
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError) as err:
+            self.io.log(f"progress dropped: {type(err).__name__}: {err}")
+            return
+        await self.on_progress(payload)
 
     def _progress(self, payload: dict) -> None:
         if self._busy_with is None or self._cursor >= len(self._topics):

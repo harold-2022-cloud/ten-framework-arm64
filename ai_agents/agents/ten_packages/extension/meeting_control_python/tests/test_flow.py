@@ -510,7 +510,7 @@ async def test_recognition_counts_turns_and_shows_the_words_so_far(meeting):
 
 
 @pytest.mark.asyncio
-async def test_words_so_far_are_saved_at_most_once_a_second(meeting):
+async def test_words_so_far_are_saved_at_most_every_live_save_s(meeting):
     now = [1000.0]
     f = MeetingFlow(MeetingControlConfig(), Board(), clock=lambda: now[0])
     await f.start(upload(meeting, script="traditional"))
@@ -588,3 +588,62 @@ async def test_a_broken_progress_report_is_dropped_not_fatal(meeting):
 
     assert state(meeting / "work")["state"] == "transcribing"
     assert any("progress dropped" in line for line in board.logs)
+
+
+@pytest.mark.asyncio
+async def test_words_so_far_are_written_no_oftener_than_the_screen_looks(
+    meeting,
+):
+    # A turn takes about 1.8 s on the board; the screen asks every 2 s.
+    now = [1000.0]
+    f = MeetingFlow(MeetingControlConfig(), Board(), clock=lambda: now[0])
+    await f.start(upload(meeting, script="traditional"))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress(progress("t01", 1, 3, heard(1, 5, 0, "一。")))
+    now[0] += 1.8
+    await f.on_progress(progress("t01", 2, 3, heard(6, 9, 1, "二。")))
+    assert record_texts(meeting) == ["一。"]
+
+
+@pytest.mark.asyncio
+async def test_each_text_is_converted_once_however_often_it_is_written(
+    meeting, monkeypatch
+):
+    seen = []
+
+    def counting(script):
+        def convert(text):
+            seen.append(text)
+            return text
+
+        return convert
+
+    monkeypatch.setattr("meeting_control_python.flow.converter", counting)
+    now = [1000.0]
+    f = MeetingFlow(MeetingControlConfig(), Board(), clock=lambda: now[0])
+    await f.start(upload(meeting, script="traditional"))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+    for n, text in enumerate(("一。", "二。", "三。"), 1):
+        now[0] += 3.0
+        await f.on_progress(progress("t01", n, 3, heard(n, n + 1, 0, text)))
+
+    assert seen.count("一。") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_progress_report_that_is_not_json_is_dropped_not_fatal(meeting):
+    # The extension hands progress on as text, outside _run: a payload that
+    # will not parse there would abandon the meeting.
+    board = Board()
+    f = flow(board)
+    await f.start(upload(meeting))
+    await f.on_segments_ready(topics_ready(meeting, (0.0, 300.0)))
+
+    await f.on_progress_json("")
+    await f.on_progress_json("{not json")
+    await f.on_progress_json(json.dumps(progress("t01", 0, 4)))
+
+    now = state(meeting / "work")
+    assert (now["state"], now["turns_total"]) == ("transcribing", 4)
+    assert sum("progress dropped" in line for line in board.logs) == 2
