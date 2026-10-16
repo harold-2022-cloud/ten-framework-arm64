@@ -12,17 +12,22 @@
 #
 #   1 services   qwen35-vllm, ten-api and meeting-screen running; the screen's
 #                /api/view answering
-#   2 desktop    a graphical session of this user, the kiosk's browser in it;
+#   2 desktop    a graphical session of this user, the kiosk's browser in it,
+#                held by kde-inhibit on KDE so the display stays awake;
 #                whether the board logs in by itself at boot (a note)
 #   3 font       a Traditional Chinese font (fc-list :lang=zh-tw)
 #   4 meeting    check_meeting_board.py --check under python3.12: models,
 #                packages, where meetings land, the graph, the LLM; before
 #                --warm, since it wants 8765 free
-#   5 showcase   MEETING_SCREEN_SHOWCASE names a meeting, and it is archived
-#   6 stuck      no meeting left between received and concluding with no
-#                worker to finish it (clear_meeting_worker.sh clears them)
-#   7 warm       with --warm: /start the meeting worker on channel
-#                meeting-room for 1800 s, and wait until 8765 answers
+#   5 showcase   MEETING_SCREEN_SHOWCASE names a meeting, it is archived, and
+#                the running screen shows it (the service reads .env only
+#                when install_board_services.sh installs it)
+#   6 warm       with --warm only: /start the meeting worker on channel
+#                meeting-room for 1800 s, and wait until 8765 answers; as it
+#                starts, the worker marks failed any meeting left mid-way
+#   7 leftovers  no meeting left mid-way with no worker to finish it, and
+#                none queued from before: a queued one is processed before
+#                a new upload
 #
 # Run it on the board as the desktop user (lychee), not with sudo. Exits
 # non-zero if anything is not ready.
@@ -92,6 +97,15 @@ if pgrep -u "$ME" -f -- "$PROFILE" >/dev/null; then
 else
   bad "the kiosk's browser is not running: tools/ambarella/install_board_services.sh --kiosk on, then log in again"
 fi
+# On KDE (Wayland, where xset reaches nothing) only kde-inhibit around the
+# browser keeps the display from dimming, turning off and locking.
+if pgrep -u "$ME" -x plasmashell >/dev/null; then
+  if pgrep -u "$ME" -f -- "kde-inhibit.*$PROFILE" >/dev/null; then
+    ok "kde-inhibit keeps the display awake while the kiosk's browser runs"
+  else
+    bad "the kiosk's browser is not held by kde-inhibit: the display may dim, turn off or lock (see /tmp/meeting_screen_kiosk.log)"
+  fi
+fi
 if "$HERE/set_desktop_autologin.sh" --status 2>/dev/null | grep -q "autologin: $ME into"; then
   ok "the board logs $ME in at boot"
 else
@@ -135,40 +149,24 @@ else
     bad "showcase $SHOWCASE: no such meeting in $MEETINGS_DIR"
   elif [[ "$shown" != archived ]]; then
     bad "showcase $SHOWCASE is $shown, not archived"
+  elif answers "$SCREEN_URL/api/view"; then
+    served=$(curl -s -m 3 "$SCREEN_URL/api/view" | python3 -I -c 'import json, sys
+try:
+    print(json.load(sys.stdin).get("showcase_id") or "")
+except (ValueError, AttributeError):
+    print("")')
+    if [[ "$served" == "$SHOWCASE" ]]; then
+      ok "showcase $SHOWCASE is there and archived, and the screen shows it"
+    else
+      bad "showcase $SHOWCASE is set, but the screen shows ${served:-none}: tools/ambarella/install_board_services.sh again, so its service reads ai_agents/.env"
+    fi
   else
-    ok "showcase $SHOWCASE is there and archived"
+    ok "showcase $SHOWCASE is there and archived (the screen does not answer: see 1)"
   fi
 fi
 
-echo "== 6 stuck"
-stuck=$(python3 -I - "$MEETINGS_DIR" <<'EOF'
-import json, os, sys
-going = ("received", "decoding", "transcribing", "linking", "summarising", "concluding")
-root = sys.argv[1]
-try:
-    names = sorted(os.listdir(root))
-except OSError:
-    names = []
-for name in names:
-    try:
-        with open(os.path.join(root, name, "work", "state.json"), encoding="utf-8") as f:
-            state = json.load(f).get("state")
-    except (OSError, ValueError, AttributeError):
-        continue
-    if state in going:
-        print(f"{name} ({state})")
-EOF
-)
-if [[ -z "$stuck" ]]; then
-  ok "no meeting left mid-way"
-elif answers "$UPLOADER/meetings"; then
-  note "being processed now: $(echo $stuck)"
-else
-  bad "meetings left mid-way with no worker to finish them: $(echo $stuck) -- tools/ambarella/clear_meeting_worker.sh"
-fi
-
 if ((WARM)); then
-  echo "== 7 warm"
+  echo "== 6 warm"
   if answers "$UPLOADER/meetings"; then
     ok "the meeting worker is up already"
   else
@@ -185,6 +183,48 @@ if ((WARM)); then
       bad "/start answered '$reply', but $UPLOADER did not answer within 60 s"
     fi
   fi
+fi
+
+echo "== 7 leftovers"
+# After a warm-up: the worker it started has marked failed what was left
+# mid-way (store.fail_interrupted), and takes what is queued in turn.
+leftovers=$(python3 -I - "$MEETINGS_DIR" <<'EOF'
+import json, os, sys
+going = ("received", "decoding", "transcribing", "linking", "summarising", "concluding")
+root = sys.argv[1]
+try:
+    names = sorted(os.listdir(root))
+except OSError:
+    names = []
+for name in names:
+    try:
+        with open(os.path.join(root, name, "work", "state.json"), encoding="utf-8") as f:
+            state = json.load(f).get("state")
+    except (OSError, ValueError, AttributeError):
+        continue
+    if state in going:
+        print(f"going {name} ({state})")
+    elif state == "queued":
+        print(f"queued {name}")
+EOF
+)
+going=$(sed -n 's/^going //p' <<<"$leftovers" | tr '\n' ' ')
+queued=$(sed -n 's/^queued //p' <<<"$leftovers" | tr '\n' ' ')
+up=0
+answers "$UPLOADER/meetings" && up=1
+if [[ -z "$going" ]]; then
+  ok "no meeting left mid-way"
+elif ((up)); then
+  note "being processed now: $going"
+else
+  bad "meetings left mid-way with no worker to finish them: ${going% } -- tools/ambarella/prepare_meeting_demo.sh --warm: the worker it starts marks them failed"
+fi
+if [[ -z "$queued" ]]; then
+  ok "no meeting queued from before"
+elif ((up)); then
+  bad "queued from before, each processed before a new upload: ${queued% } -- the worker is on them; run this again once they are done"
+else
+  bad "queued from before, each processed before a new upload: ${queued% } -- tools/ambarella/prepare_meeting_demo.sh --warm well before the demo, and let them finish"
 fi
 
 echo
