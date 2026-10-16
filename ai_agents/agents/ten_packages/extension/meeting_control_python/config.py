@@ -51,3 +51,6 @@ class MeetingControlConfig(BaseModel):
     link_over_factor: int = 3
     link_threshold: float = 0.4
     link_same_voice: float = 0.55
+    # The share of the speech below which a cluster is a piece of someone,
+    # not a person of its own (speakers.link).
+    link_min_share: float = 0.015

@@ -41,11 +41,15 @@ def link(
     threshold: float = 0.4,
     same_voice: float = 0.55,
     max_turn_s: float = 10.0,
+    min_share: float = 0.015,
 ) -> List[int]:
     """A meeting-wide speaker number for every turn, in the order given.
 
-    Numbers follow who spoke first. With speakers <= 0 the clusters are cut
-    at threshold instead of at a count.
+    Numbers follow who spoke first. speakers is an upper bound -- the app
+    asks who attended, and not everyone speaks -- so a kept cluster holding
+    less than min_share of the speech is taken for a piece of someone and
+    folded into the nearest kept one. With speakers <= 0 the clusters are
+    cut at threshold instead of at a count.
     """
     if not turns:
         return []
@@ -62,6 +66,15 @@ def link(
         groups = _average_linkage(x, w, speakers * over_factor, same_voice)
         groups.sort(key=lambda m: -w[m].sum())
         keep, rest = groups[:speakers], groups[speakers:]
+        # Measured on AISHELL-4 with the count given up to 15 for 6 and 7
+        # people: each person held 2 % of the speech or more, and what the
+        # count over-asked for 1.1 % or less (one piece of the chair, 3.8 %,
+        # stays a speaker of its own).
+        floor = min_share * float(w.sum())
+        small = [m for m in keep if w[m].sum() < floor]
+        if small and len(small) < len(keep):
+            keep = [m for m in keep if w[m].sum() >= floor]
+            rest = small + rest
     else:
         keep, rest = _average_linkage(x, w, -1, threshold), []
 

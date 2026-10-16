@@ -120,3 +120,33 @@ def test_a_short_meeting_does_not_keep_two_pieces_of_one_voice():
     ]
 
     assert link(turns, speakers=2) == [0, 1, 0, 1]
+
+
+# Four voices, none alike enough to merge: the fourth is 0.5 alike to each.
+P = unit(1.0, 0.0, 0.0, 0.0)
+Q = unit(0.0, 1.0, 0.0, 0.0)
+R = unit(0.0, 0.0, 1.0, 0.0)
+S = unit(1.0, 1.0, 1.0, 1.0)
+
+
+def three_people_and(voice_s):
+    turns = []
+    for n, voice in enumerate((P, Q, R)):
+        for k in range(3):
+            turns.append(turn(n, 0, 100 * n + 12 * k, voice, length=10.0))
+    turns.append(turn(3, 0, 400, S, length=voice_s))
+    return turns
+
+
+def test_the_count_is_an_upper_bound_a_piece_of_speech_is_no_person():
+    # Fifteen attended; three spoke, and 1 s of 91 came out a voice of its
+    # own -- what over-asking left on AISHELL-4 held 1.1 % or less.
+    labels = link(three_people_and(1.0), speakers=15)
+    assert len(set(labels)) == 3
+    assert labels[-1] in labels[:-1]
+
+
+def test_someone_who_speaks_a_little_is_still_a_person():
+    # 3 s of 93: on AISHELL-4 the quietest person held 2 % of the speech.
+    labels = link(three_people_and(3.0), speakers=15)
+    assert len(set(labels)) == 4
