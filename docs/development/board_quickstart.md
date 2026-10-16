@@ -317,6 +317,20 @@ running), which is fine — upload to it. Don't `/stop` it, since it may be
 in the middle of someone else's meeting. The board reaps it ten minutes
 after its last meeting.
 
+### The demo screen
+
+The board's own HDMI screen can follow every meeting, for an audience: a
+service from power-on (`meeting-screen`, installed with the others) and the
+page full screen when the desktop starts:
+
+```bash
+tools/ambarella/install_board_services.sh --kiosk on
+tools/ambarella/prepare_meeting_demo.sh
+```
+
+How it works, its keys and a demo day:
+[`ai_agents/meeting-screen/README.md`](../../ai_agents/meeting-screen/README.md).
+
 ### Already measured
 
 Whether the board's 7B can produce structured action items has been

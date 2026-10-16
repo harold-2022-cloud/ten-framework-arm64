@@ -280,6 +280,17 @@ channel 一律用 `meeting-room`（Android App 也是），板子上就永遠只
 worker：再打一次 `/start` 會回 code `10003`（已經在跑），照樣上傳就好。不要
 `/stop` 它，它可能正在處理別人的會議；最後一場結束 10 分鐘後板子會自己收掉。
 
+### 演示大屏
+
+板子自己的 HDMI 螢幕可以跟著每一場會議顯示給觀眾看：一個開機就啟動的服務（`meeting-screen`，跟其他服務一起安裝），加上桌面一啟動就全螢幕開的頁面：
+
+```bash
+tools/ambarella/install_board_services.sh --kiosk on
+tools/ambarella/prepare_meeting_demo.sh
+```
+
+運作方式、按鍵和演示當天的流程：[`ai_agents/meeting-screen/README.zh-TW.md`](../../ai_agents/meeting-screen/README.zh-TW.md)。
+
 ### 已經量過的
 
 結構化待辦那件事已經量過了，結論是這顆 7B 做不到——六輪數據和探測腳本在：
