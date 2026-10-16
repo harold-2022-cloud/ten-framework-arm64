@@ -9,10 +9,15 @@ worker on the app's channel, meeting-room (a /ping instead when it already
 runs), wait for its uploader, then upload the file as multipart with the
 app's fields -- saying how much went and how fast. The board then takes it
 as any phone's meeting, its screen included. With --follow, follow the
-meeting to its end.
+meeting to its end and bring its results back, as the app keeps them:
+minutes.txt and record.json, into ambarella_ai_developer_kit_doc/meetings/
+<id>/ (git-ignored; --out picks another folder). --fetch brings an earlier
+meeting's back -- the uploader that serves them runs only with a worker,
+so it starts one as the app would.
 
   python3 tools/ambarella/upload_meeting.py meeting.ogg --speakers 15
   python3 tools/ambarella/upload_meeting.py meeting.ogg --speakers 15 --follow
+  python3 tools/ambarella/upload_meeting.py --fetch pc-20261016-181231
 
 For a recording the phone could not send, pull it off the phone first, by
 way of its Download folder (a PowerShell > would mangle the bytes):
@@ -21,7 +26,8 @@ way of its Download folder (a PowerShell > would mangle the bytes):
   adb pull /sdcard/Download/meeting.ogg
 
 Run it here, not on the board. Standard library only. Exits non-zero when
-the board refused the meeting, or with --follow when it did not end archived.
+the board refused the meeting, or with --follow or --fetch when it did not
+end archived.
 """
 
 import argparse
@@ -38,6 +44,12 @@ CHANNEL = "meeting-room"  # the app's: domain/Small.kt Ids.CHANNEL
 GRAPH = "meeting_minutes"
 FINAL = ("archived", "failed", "empty")
 CHUNK = 64 * 1024
+RESULTS = ("minutes.txt", "record.json")
+DEFAULT_OUT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "ambarella_ai_developer_kit_doc",
+    "meetings",
+)
 
 
 def post_json(url, body, timeout=15):
@@ -171,9 +183,46 @@ def follow(uploader, meeting_id, poll_s):
         time.sleep(poll_s)
 
 
+def fetch_results(uploader, meeting_id, out):
+    """minutes.txt and record.json into out/<id>/; the paths written."""
+    folder = os.path.join(out, meeting_id)
+    written = []
+    for name in RESULTS:
+        try:
+            with urllib.request.urlopen(f"{uploader}/meeting/{meeting_id}/{name}", timeout=30) as answer:
+                data = answer.read()
+        except (OSError, ValueError) as err:
+            print(f"  warn  no {name}: {err}")
+            continue
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        written.append(path)
+        print(f"  ok    {name} -> {path}")
+    return written
+
+
+def fetch(uploader, meeting_id, out):
+    """An earlier meeting's results, when it has ended; 0 if archived."""
+    status, reply = get_json(f"{uploader}/meeting/{meeting_id}")
+    if status != 200:
+        print(f"  FAIL  the board has no meeting {meeting_id} ({status})")
+        return 1
+    state = reply.get("state")
+    if state not in FINAL:
+        print(f"  FAIL  {meeting_id} is still {state}: nothing to bring back yet")
+        return 1
+    print(f"  ok    {meeting_id} ended {state}" + (f": {reply['error']}" if reply.get("error") else ""))
+    fetch_results(uploader, meeting_id, out)
+    return 0 if state == "archived" else 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    p.add_argument("audio", help="the recording, 16 kHz mono Ogg-Opus as the app records it")
+    p.add_argument("audio", nargs="?", help="the recording, 16 kHz mono Ogg-Opus as the app records it")
+    p.add_argument("--fetch", metavar="ID", help="bring an earlier meeting's results back instead")
+    p.add_argument("--out", default=DEFAULT_OUT, help="where results land, a folder per meeting")
     p.add_argument("--host", default="192.168.0.19", help="the board (192.168.0.19)")
     p.add_argument("--server-port", type=int, default=8081, help="its API server (8081)")
     p.add_argument("--uploader-port", type=int, default=8765, help="its meeting uploader (8765)")
@@ -185,9 +234,16 @@ def main(argv=None):
     p.add_argument("--follow", action="store_true", help="follow the meeting to its end")
     p.add_argument("--poll-s", type=float, default=10.0, help=argparse.SUPPRESS)
     args = p.parse_args(argv)
+    if bool(args.audio) == bool(args.fetch):
+        p.error("give a recording to send, or --fetch ID")
 
     server = f"http://{args.host}:{args.server_port}"
     uploader = f"http://{args.host}:{args.uploader_port}"
+    if args.fetch:
+        print(f"{args.fetch}: its results from {args.host}")
+        if not begin(server, args.timeout) or not wait_ready(uploader):
+            return 1
+        return fetch(uploader, args.fetch, args.out)
     meeting_id = args.id or time.strftime("pc-%Y%m%d-%H%M%S")
     size = os.path.getsize(args.audio)
     print(f"{args.audio}: {size / 2**20:.1f} MB, to {args.host} as {meeting_id}")
@@ -208,9 +264,11 @@ def main(argv=None):
     print(f"  ok    {reply.get('status')}: {reply.get('meeting_id')}, "
           f"{reply.get('ahead', 0)} ahead, about {reply.get('wait_s', 0):.0f} s to wait")
     if not args.follow:
-        print(f"        its state: GET {uploader}/meeting/{meeting_id} (or run this with --follow)")
+        print(f"        its results, once it ends: python3 tools/ambarella/upload_meeting.py --fetch {meeting_id}")
         return 0
-    return 0 if follow(uploader, meeting_id, args.poll_s) == "archived" else 1
+    final = follow(uploader, meeting_id, args.poll_s)
+    fetch_results(uploader, meeting_id, args.out)
+    return 0 if final == "archived" else 1
 
 
 if __name__ == "__main__":

@@ -10,11 +10,13 @@ went, and with --follow follows the meeting to its end.
   python3 -m unittest discover -s tools/ambarella/tests -v
 """
 
+import contextlib
 import email.parser
 import email.policy
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -29,13 +31,14 @@ import upload_meeting  # noqa: E402  pylint: disable=wrong-import-position
 class FakeBoard:
     """The API server and the meeting worker's uploader, on two ports."""
 
-    def __init__(self, test, running=False, refuse=None):
+    def __init__(self, test, running=False, refuse=None, final_after=2):
         self.started = []
         self.pinged = []
         self.uploads = []
         self.polls = 0
         self.running = running
         self.refuse = refuse
+        self.final_after = final_after
         board = self
 
         class Server(BaseHTTPRequestHandler):
@@ -65,8 +68,16 @@ class FakeBoard:
                 if self.path == "/meetings":
                     self._json(200, [])
                     return
+                if self.path.endswith(("/record.json", "/minutes.txt")):
+                    name = self.path.rsplit("/", 1)[1]
+                    data = f"{name} of {self.path.split('/')[2]}".encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 board.polls += 1
-                state = "transcribing" if board.polls < 2 else "archived"
+                state = "transcribing" if board.polls < board.final_after else "archived"
                 self._json(200, {"state": state, "progress": {"topics_done": board.polls, "topics_total": 2}, "error": None})
 
             def do_POST(self):  # pylint: disable=invalid-name
@@ -94,9 +105,9 @@ class FakeBoard:
             test.addCleanup(httpd.server_close)
             test.addCleanup(httpd.shutdown)
 
-    def args(self, audio, *more):
+    def args(self, *more):
         return [
-            audio,
+            *more,
             "--host",
             "127.0.0.1",
             "--server-port",
@@ -105,7 +116,6 @@ class FakeBoard:
             str(self.uploader.server_address[1]),
             "--poll-s",
             "0",
-            *more,
         ]
 
 
@@ -162,6 +172,44 @@ class Upload(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("415", out)
         self.assertIn("only Ogg-Opus", out)
+
+
+class Results(unittest.TestCase):
+    def test_follow_brings_the_minutes_and_the_record_back(self):
+        board = FakeBoard(self)
+        out = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out)
+        code, said = run(board.args(audio_file(self), "--id", "pc-5", "--follow", "--out", out))
+        self.assertEqual(code, 0, said)
+        for name in ("record.json", "minutes.txt"):
+            with open(os.path.join(out, "pc-5", name), encoding="utf-8") as f:
+                self.assertEqual(f.read(), f"{name} of pc-5")
+        self.assertIn(os.path.join(out, "pc-5", "minutes.txt"), said)
+
+    def test_fetch_brings_an_earlier_meetings_results_back(self):
+        board = FakeBoard(self, final_after=1)
+        out = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out)
+        code, said = run(board.args("--fetch", "pc-6", "--out", out))
+        self.assertEqual(code, 0, said)
+        self.assertEqual(board.uploads, [])
+        self.assertEqual(len(board.started), 1)
+        self.assertTrue(os.path.isfile(os.path.join(out, "pc-6", "minutes.txt")))
+
+    def test_fetch_of_a_meeting_still_processed_says_so(self):
+        board = FakeBoard(self, final_after=99)
+        out = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out)
+        code, said = run(board.args("--fetch", "pc-7", "--out", out))
+        self.assertEqual(code, 1)
+        self.assertIn("transcribing", said)
+        self.assertFalse(os.path.exists(os.path.join(out, "pc-7")))
+
+    def test_neither_a_recording_nor_fetch_is_an_error(self):
+        board = FakeBoard(self)
+        with self.assertRaises(SystemExit):
+            with redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                upload_meeting.main(board.args())
 
 
 if __name__ == "__main__":
