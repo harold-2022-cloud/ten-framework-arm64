@@ -621,6 +621,27 @@ def process(args, channel, meeting_id, upload, duration, auth, out_dir):
     )
 
 
+def timing_lines(topics):
+    """Where each topic's minutes went, as the transcriber measured them
+    (record.json, topic timing): the base for making them shorter."""
+    lines = []
+    for t in topics:
+        timing = t.get("timing") or {}
+        if not timing:
+            continue
+        length = max((t.get("end_s") or 0.0) - (t.get("start_s") or 0.0), 1.0)
+        diarize = timing.get("diarize_s") or 0.0
+        recognise = timing.get("recognise_s") or 0.0
+        lines.append(
+            f"{t.get('id')} ({mmss(length)}): told speakers apart in "
+            f"{diarize:.0f} s ({diarize / length:.2f} x), recognised in "
+            f"{recognise:.0f} s ({recognise / length:.2f} x), voices "
+            f"embedded in {timing.get('embed_s') or 0.0:.0f} s, "
+            f"{timing.get('turns') or 0} turns"
+        )
+    return lines
+
+
 def report(args, meeting_id, state, duration, took, memory, auth, out_dir):
     say("result")
     for name in ("record.json", "minutes.txt"):
@@ -650,6 +671,8 @@ def report(args, meeting_id, state, duration, took, memory, auth, out_dir):
                 info(f"{t['id']}: {t['error'][:200]}")
     else:
         ok(f"{len(topics)} topics, none failed")
+    for line in timing_lines(topics):
+        info(line)
     info(f"speakers in the record {record.get('speaker_count')}"
          + (f" (said {args.speakers})" if args.speakers else ""))
     info(f"worker peak memory {memory['worker']:.0f} MB")

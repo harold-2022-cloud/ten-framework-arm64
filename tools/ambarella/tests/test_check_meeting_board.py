@@ -107,5 +107,35 @@ class Memory(unittest.TestCase):
         self.assertGreater(cmb.mem_available_mb(), 0)
 
 
+class Timing(unittest.TestCase):
+    def test_each_topic_says_where_its_time_went(self):
+        lines = cmb.timing_lines(
+            [
+                {
+                    "id": "t01",
+                    "start_s": 0.0,
+                    "end_s": 360.0,
+                    "timing": {
+                        "diarize_s": 170.0,
+                        "recognise_s": 120.0,
+                        "embed_s": 30.0,
+                        "turns": 85,
+                    },
+                },
+                {"id": "t02", "start_s": 360.0, "end_s": 420.0},
+            ]
+        )
+        self.assertEqual(
+            lines,
+            [
+                "t01 (06:00): told speakers apart in 170 s (0.47 x), "
+                "recognised in 120 s (0.33 x), voices embedded in 30 s, 85 turns"
+            ],
+        )
+
+    def test_a_record_without_timing_says_nothing(self):
+        self.assertEqual(cmb.timing_lines([{"id": "t01"}]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
