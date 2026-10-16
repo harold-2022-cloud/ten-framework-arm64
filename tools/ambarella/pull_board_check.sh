@@ -12,8 +12,11 @@
 #             verify_meeting_board.sh, prepare_meeting_demo.sh,
 #             install_board_services.sh, probe_demo_screen.py
 #   services  the service logs as they are now, in <day>_services/: the demo
-#             screen's and its kiosk's (their last 2000 lines), and the
-#             meeting worker's own lines from task_run.log (its last 5000)
+#             screen's and its kiosk's (their last 2000 lines), the API
+#             server's task_run.log (its last 5000), each meeting worker's own
+#             log of that day or after from the server's LOG_PATH (workers/,
+#             their last 20000), and every meeting on the board with its
+#             state (meetings.txt)
 #
 #   tools/ambarella/pull_board_check.sh             today's
 #   tools/ambarella/pull_board_check.sh 20261015    that day's
@@ -23,7 +26,9 @@
 # else is removed.
 #
 # Settings, from the environment: BOARD (lychee@192.168.0.19), DEST,
-# BOARD_LOG_DIR (/tmp, where the board tools write their logs).
+# BOARD_LOG_DIR (/tmp, where the board tools write their logs), BOARD_REPO
+# (the board's checkout, ~/ten-framework, whose ai_agents/.env names LOG_PATH
+# and MEETINGS_DIR).
 
 set -euo pipefail
 
@@ -39,7 +44,12 @@ mkdir -p "$DEST"
 # as one tar stream, or a word on stderr and exit 3 when the day left none.
 read -r -d '' remote <<'BOARD' || true
 set -u
-day=$1 logs=$2
+day=$1 logs=$2 repo=${3:-$HOME/ten-framework}
+setting() { grep -E "^$1=" "$repo/ai_agents/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'"; }
+logpath=$(setting LOG_PATH)
+logpath=${logpath:-/tmp/ten_agent}
+meetings=$(setting MEETINGS_DIR)
+meetings=${meetings:-/tmp/meetings}
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 runs=$(cd ~/meeting_probe/board_check 2>/dev/null && ls -d "$day"-*/ 2>/dev/null | tr -d /) || true
@@ -51,9 +61,51 @@ mkdir -p "$svc"
 for f in meeting_screen.log meeting_screen_kiosk.log; do
   if [ -r "$logs/$f" ]; then tail -n 2000 "$logs/$f" > "$svc/$f"; fi
 done
-if [ -r "$logs/task_run.log" ]; then
-  grep -a '\[meeting_' "$logs/task_run.log" | tail -n 5000 > "$svc/task_run_meeting.log"
-fi
+if [ -r "$logs/task_run.log" ]; then tail -n 5000 "$logs/task_run.log" > "$svc/task_run.log"; fi
+# A worker's own log, when the server keeps one per worker (LOG_STDOUT false):
+# the day's, and any still written to since.
+mkdir -p "$svc/workers"
+for f in "$logpath"/app-*.log; do
+  [ -f "$f" ] || continue
+  [ "$(date -r "$f" +%Y%m%d)" -ge "$day" ] || continue
+  tail -n 20000 "$f" > "$svc/workers/$(basename "$f")"
+done
+python3 -I - "$meetings" > "$svc/meetings.txt" <<'PY'
+import json, os, sys, time
+root = sys.argv[1]
+print(f"meetings in {root}, as they are now:")
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+try:
+    names = sorted(os.listdir(root))
+except OSError as err:
+    names = []
+    print(f"  cannot list it: {err}")
+for name in names:
+    folder = os.path.join(root, name)
+    if not os.path.isdir(folder):
+        continue
+    state = load(os.path.join(folder, "work", "state.json"))
+    if state is None:
+        print(f"{name}  (no state)")
+        continue
+    seconds = int((load(os.path.join(folder, "upload.json")) or {}).get("duration_s") or 0)
+    try:
+        size = os.path.getsize(os.path.join(folder, "audio.ogg"))
+    except OSError:
+        size = 0
+    received = state.get("received_at")
+    when = "-"
+    if isinstance(received, (int, float)):
+        when = time.strftime("%m-%d %H:%M:%S", time.localtime(received))
+    print(f"{name}  {state.get('state')}  {seconds // 60:02d}:{seconds % 60:02d}  "
+          f"{size} bytes  {state.get('error') or '-'}  received {when}")
+PY
 set --
 if [ -n "$runs" ]; then set -- "$@" -C ~/meeting_probe/board_check $runs; fi
 if [ -n "$daylogs" ]; then set -- "$@" -C "$logs" $daylogs; fi
@@ -63,7 +115,7 @@ BOARD
 echo "from $BOARD, $DAY, into $DEST"
 stream=$(mktemp)
 trap 'rm -f "$stream"' EXIT
-ssh "$BOARD" "bash -s -- $DAY $(printf %q "$LOGS")" <<< "$remote" > "$stream" || exit 3
+ssh "$BOARD" "bash -s -- $DAY $(printf %q "$LOGS") $(printf %q "${BOARD_REPO:-}")" <<< "$remote" > "$stream" || exit 3
 tar xf "$stream" -C "$DEST"
 
 echo "runs:"
@@ -78,4 +130,4 @@ echo "logs:"
 ls "$DEST"/{verify_meeting,prepare_meeting_demo,install_board_services,probe_demo_screen}_"$DAY"_*.log \
   2>/dev/null | sed 's/^/  /' || echo "  none"
 echo "services, as they are now:"
-ls "$DEST/${DAY}_services"/* 2>/dev/null | sed 's/^/  /' || echo "  none"
+(cd "$DEST" && find "${DAY}_services" -type f | sort) 2>/dev/null | sed 's/^/  /' || echo "  none"

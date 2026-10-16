@@ -32,8 +32,13 @@ class Board(Sandbox):
             BOARD="lychee@board",
             DEST=self.path("dest"),
             BOARD_LOG_DIR=self.path("tmp"),
+            BOARD_REPO=self.path("repo"),
         )
         self.write("tmp/.keep", "")
+        self.write(
+            "repo/ai_agents/.env",
+            f"LOG_PATH={self.path('ten_agent')}\nMEETINGS_DIR={self.path('meetings')}\n",
+        )
 
     def pull(self, *args):
         return self.run(["bash", self.path("pull_board_check.sh"), *args], timeout=60)
@@ -70,12 +75,34 @@ class Pull(unittest.TestCase):
         services = b.pulled("20261016_services")
         self.assertEqual(read(os.path.join(services, "meeting_screen.log")), "screen\n")
         self.assertEqual(read(os.path.join(services, "meeting_screen_kiosk.log")), "kiosk\n")
-        self.assertEqual(
-            read(os.path.join(services, "task_run_meeting.log")),
-            "[meeting_control_python] topic t01 (720 s): diarized 300.0 s\n"
-            "[meeting_transcriber] segment t02 failed\n",
-        )
+        self.assertIn("the server's own line", read(os.path.join(services, "task_run.log")))
         self.assertIn("prepare_meeting_demo_20261016_120000.log", r.stdout)
+
+    def test_each_workers_own_log_and_every_meeting_on_the_board_come_back(self):
+        # With LOG_STDOUT false the server gives each worker a file of its
+        # own under LOG_PATH (server/internal/http_server.go:829).
+        b = Board(self)
+        b.write("tmp/verify_meeting_20261016_053931.log", "v")
+        b.write("ten_agent/app-meeting-room-20261016_165900.log", "[meeting_uploader] refused\n")
+        b.write(
+            "meetings/m80/work/state.json",
+            '{"state": "failed", "error": "boom", "received_at": 1760605200}',
+        )
+        b.write("meetings/m80/upload.json", '{"duration_s": 4800.0}')
+        b.write("meetings/m80/audio.ogg", "x" * 1000)
+        b.write("meetings/half/upload.json", "{}")
+
+        r = b.pull("20261016")
+
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        services = b.pulled("20261016_services")
+        self.assertEqual(
+            read(os.path.join(services, "workers", "app-meeting-room-20261016_165900.log")),
+            "[meeting_uploader] refused\n",
+        )
+        meetings = read(os.path.join(services, "meetings.txt"))
+        self.assertIn("m80  failed  80:00  1000 bytes  boom", meetings)
+        self.assertIn("half  (no state)", meetings)
 
     def test_logs_come_back_before_any_meeting_ran(self):
         b = Board(self)
