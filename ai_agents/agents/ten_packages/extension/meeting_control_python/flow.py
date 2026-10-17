@@ -264,6 +264,7 @@ class MeetingFlow:
             threshold=self.config.link_threshold,
             same_voice=self.config.link_same_voice,
             min_share=self.config.link_min_share,
+            fold_alike=self.config.link_fold_alike,
         )
         self.record.relabel(labels)
         self._persist()

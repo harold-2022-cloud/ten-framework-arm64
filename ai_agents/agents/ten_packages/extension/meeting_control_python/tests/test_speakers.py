@@ -150,3 +150,12 @@ def test_someone_who_speaks_a_little_is_still_a_person():
     # 3 s of 93: on AISHELL-4 the quietest person held 2 % of the speech.
     labels = link(three_people_and(3.0), speakers=15)
     assert len(set(labels)) == 4
+
+
+def test_a_quiet_voice_of_its_own_is_still_a_person():
+    # A guest's one question: little speech, but like nobody else -- a
+    # person, not a piece of one, whatever the count.
+    guest = unit(0.0, 0.0, 0.0, 1.0)
+    turns = three_people_and(1.0)[:-1] + [turn(3, 0, 400, guest, length=1.0)]
+    assert len(set(link(turns, speakers=4))) == 4
+    assert len(set(link(turns, speakers=15))) == 4

@@ -42,13 +42,15 @@ def link(
     same_voice: float = 0.55,
     max_turn_s: float = 10.0,
     min_share: float = 0.015,
+    fold_alike: float = 0.4,
 ) -> List[int]:
     """A meeting-wide speaker number for every turn, in the order given.
 
     Numbers follow who spoke first. speakers is an upper bound -- the app
     asks who attended, and not everyone speaks -- so a kept cluster holding
-    less than min_share of the speech is taken for a piece of someone and
-    folded into the nearest kept one. With speakers <= 0 the clusters are
+    less than min_share of the speech, and at least fold_alike like one that
+    holds more, is taken for a piece of that someone and folded into the
+    nearest kept one. A quiet voice like nobody else's stays a person. With speakers <= 0 the clusters are
     cut at threshold instead of at a count.
     """
     if not turns:
@@ -70,11 +72,20 @@ def link(
         # people: each person held 2 % of the speech or more, and what the
         # count over-asked for 1.1 % or less (one piece of the chair, 3.8 %,
         # stays a speaker of its own).
+        # Every such piece was 0.41 alike or more to a larger kept cluster;
+        # a guest's question in a voice of its own is not folded.
         floor = min_share * float(w.sum())
-        small = [m for m in keep if w[m].sum() < floor]
-        if small and len(small) < len(keep):
-            keep = [m for m in keep if w[m].sum() >= floor]
-            rest = small + rest
+        big = [m for m in keep if w[m].sum() >= floor]
+        if big and len(big) < len(keep):
+            big_cents = np.asarray([_centroid(x, w, m) for m in big])
+            pieces = [
+                n
+                for n, m in enumerate(keep)
+                if w[m].sum() < floor
+                and float(np.max(big_cents @ _centroid(x, w, m))) >= fold_alike
+            ]
+            rest = [keep[n] for n in pieces] + rest
+            keep = [m for n, m in enumerate(keep) if n not in pieces]
     else:
         keep, rest = _average_linkage(x, w, -1, threshold), []
 

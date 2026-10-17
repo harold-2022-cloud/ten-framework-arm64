@@ -34,6 +34,7 @@
         "link_threshold": { "type": "float64" },
         "link_same_voice": { "type": "float64" },
         "link_min_share": { "type": "float64" },
+        "link_fold_alike": { "type": "float64" },
         "output_script": { "type": "string" }
       }
     },

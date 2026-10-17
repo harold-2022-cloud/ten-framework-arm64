@@ -54,3 +54,6 @@ class MeetingControlConfig(BaseModel):
     # The share of the speech below which a cluster is a piece of someone,
     # not a person of its own (speakers.link).
     link_min_share: float = 0.015
+    # ...and only one at least this alike to a cluster that holds more: a
+    # quiet voice of its own stays a person.
+    link_fold_alike: float = 0.4
