@@ -191,7 +191,8 @@ export function listRow(item) {
 // The conclusion's lines as the LLM writes them: "一、會議結論" headings,
 // "1. ..." items, and paragraphs (minutes_html.py reads them the same way).
 const HEADING = /^[一二三四五六七八九十]+、\s*(.+)$/;
-const ITEM = /^\d+[.、．]\s*(.+)$/;
+// "1. ...", not "1.5 hours" or "2026.10.20": one or two digits, no digit after.
+const ITEM = /^\d{1,2}[.、．](?!\d)\s*(.+)$/;
 
 export function summaryBlocks(text) {
   const blocks = [];

@@ -334,3 +334,14 @@ test("the conclusion reads as headings, numbered items and paragraphs", () => {
   assert.deepEqual(m.summaryBlocks(""), []);
   assert.deepEqual(m.summaryBlocks(null), []);
 });
+
+test("a conclusion line that starts with a number keeps it", () => {
+  assert.deepEqual(
+    m.summaryBlocks("1.5 小時後再議。\n2026.10.20 前交付。\n3. 第三項。"),
+    [
+      { kind: "para", text: "1.5 小時後再議。" },
+      { kind: "para", text: "2026.10.20 前交付。" },
+      { kind: "item", text: "第三項。" },
+    ]
+  );
+});
