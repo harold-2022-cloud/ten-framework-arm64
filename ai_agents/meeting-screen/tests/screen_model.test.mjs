@@ -320,3 +320,17 @@ test("a meeting in the list says its length, speakers and state", () => {
   assert.equal(untitled.title, "pc-2");
   assert.equal(untitled.detail, "1:00 · 分辨說話人＋轉文字");
 });
+
+test("the conclusion reads as headings, numbered items and paragraphs", () => {
+  const text =
+    "一、會議結論\n決定週三上線。\n\n二、待辦事項\n1. 說話人 1 準備測試。\n2. 說話人 2 寫文件。";
+  assert.deepEqual(m.summaryBlocks(text), [
+    { kind: "heading", text: "會議結論" },
+    { kind: "para", text: "決定週三上線。" },
+    { kind: "heading", text: "待辦事項" },
+    { kind: "item", text: "說話人 1 準備測試。" },
+    { kind: "item", text: "說話人 2 寫文件。" },
+  ]);
+  assert.deepEqual(m.summaryBlocks(""), []);
+  assert.deepEqual(m.summaryBlocks(null), []);
+});

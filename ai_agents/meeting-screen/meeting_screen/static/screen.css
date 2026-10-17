@@ -266,17 +266,31 @@ h2 {
   color: var(--muted);
 }
 
-.numbers {
-  display: flex;
-  gap: 64px;
+.facts {
   font-size: 28px;
   color: var(--muted);
 }
 
-.numbers b {
-  display: block;
-  font-size: 52px;
+.facts b {
   color: var(--text);
+}
+
+/* On the result the lanes stay small: the conclusion is what is read. */
+.lanes.compact {
+  gap: 3px;
+}
+
+.lanes.compact .lane {
+  gap: 12px;
+}
+
+.lanes.compact .who {
+  width: 104px;
+  font-size: 18px;
+}
+
+.lanes.compact .track {
+  height: 8px;
 }
 
 .columns {
@@ -287,15 +301,49 @@ h2 {
   min-height: 0;
 }
 
+.result .columns {
+  grid-template-columns: 3fr 2fr;
+}
+
 .left {
   overflow-y: auto;
 }
 
 .summary {
-  margin-bottom: 24px;
+  margin-bottom: 8px;
+}
+
+.summary h3 {
+  margin: 20px 0 8px;
+  font-size: 34px;
+  color: var(--accent);
+}
+
+.summary h3:first-child {
+  margin-top: 0;
+}
+
+.summary p,
+.summary li {
+  margin: 0 0 10px;
   font-size: 30px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.summary ol {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.sub {
+  margin: 24px 0 8px;
+  font-size: 26px;
+  color: var(--muted);
+}
+
+.result .topics p {
+  font-size: 23px;
+  color: var(--muted);
 }
 
 .failed h1 {

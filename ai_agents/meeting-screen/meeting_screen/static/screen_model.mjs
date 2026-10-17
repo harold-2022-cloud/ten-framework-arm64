@@ -188,6 +188,31 @@ export function listRow(item) {
   };
 }
 
+// The conclusion's lines as the LLM writes them: "一、會議結論" headings,
+// "1. ..." items, and paragraphs (minutes_html.py reads them the same way).
+const HEADING = /^[一二三四五六七八九十]+、\s*(.+)$/;
+const ITEM = /^\d+[.、．]\s*(.+)$/;
+
+export function summaryBlocks(text) {
+  const blocks = [];
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line) {
+      continue;
+    }
+    const heading = HEADING.exec(line);
+    const item = ITEM.exec(line);
+    if (heading) {
+      blocks.push({ kind: "heading", text: heading[1] });
+    } else if (item) {
+      blocks.push({ kind: "item", text: item[1] });
+    } else {
+      blocks.push({ kind: "para", text: line });
+    }
+  }
+  return blocks;
+}
+
 export function speakerCount(record) {
   const seen = new Set();
   for (const topic of topicsOf(record)) {

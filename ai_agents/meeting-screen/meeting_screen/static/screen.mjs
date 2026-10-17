@@ -26,6 +26,7 @@ import {
   shownScene,
   speakerCount,
   stageItems,
+  summaryBlocks,
   topicSummaries,
   transcriptRows,
   unpin,
@@ -74,7 +75,36 @@ function rowsHtml(meeting) {
     .join("");
 }
 
-function lanesHtml(meeting) {
+function conclusionHtml(summary) {
+  const out = [];
+  let items = [];
+  const flush = () => {
+    if (items.length > 0) {
+      out.push(
+        `<ol>${items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ol>`
+      );
+      items = [];
+    }
+  };
+  for (const block of summaryBlocks(summary)) {
+    if (block.kind === "item") {
+      items.push(block.text);
+      continue;
+    }
+    flush();
+    out.push(
+      block.kind === "heading"
+        ? `<h3>${escapeHtml(block.text)}</h3>`
+        : `<p>${escapeHtml(block.text)}</p>`
+    );
+  }
+  flush();
+  return out.join("");
+}
+
+// Who spoke when, a lane per speaker; compact on the result, where the
+// conclusion is what the room reads.
+function lanesHtml(meeting, compact = false) {
   const rows = lanes(
     meeting.record,
     meeting.duration_s,
@@ -94,7 +124,7 @@ function lanesHtml(meeting) {
       return `<div class="lane"><span class="who" style="color:${lane.color}">說話人${lane.speaker}</span><div class="track">${bars}</div></div>`;
     })
     .join("");
-  return `<div class="lanes">${html}</div>`;
+  return `<div class="lanes${compact ? " compact" : ""}">${html}</div>`;
 }
 
 function topicsHtml(record) {
@@ -152,14 +182,9 @@ const SCENES = {
     const record = meeting.record || {};
     const topics = Array.isArray(record.topics) ? record.topics.length : 0;
     return `<section class="result">
-<div class="numbers">
-<div>會議長度<b>${minutesText(meeting.duration_s)}</b></div>
-<div>說話人<b>${speakerCount(record)} 位</b></div>
-<div>話題<b>${topics} 個</b></div>
-<div>處理用時<b id="elapsed"></b></div>
-</div>${lanesHtml(meeting)}
+<div class="facts"><b>${minutesText(meeting.duration_s)}</b> · <b>${speakerCount(record)}</b> 位說話人 · <b>${topics}</b> 個話題 · 處理 <b id="elapsed"></b></div>${lanesHtml(meeting, true)}
 <div class="columns">
-<div class="left"><h2>${escapeHtml(meeting.title || "會議摘要")}</h2><div class="summary">${escapeHtml(record.summary || "")}</div><div class="topics">${topicsHtml(record)}</div></div>
+<div class="left"><h2>${escapeHtml(meeting.title || "會議摘要")}</h2><div class="summary">${conclusionHtml(record.summary)}</div><h3 class="sub">各話題重點</h3><div class="topics">${topicsHtml(record)}</div></div>
 ${transcriptHtml(meeting)}
 </div>${pinnedNote(view)}</section>`;
   },
