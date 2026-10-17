@@ -43,8 +43,10 @@ the board after a power cut and the screen comes back by itself.
 2. Opening: the ready screen -- press Home if a rehearsal's result is still
    up. "All of the meeting AI is on this box."
 3. A short live meeting: two or three people, about a minute, from prepared
-   questions, the phone on the table. Enter how many attend in the app: the
-   board finds how many of them spoke.
+   questions, the phone on the table. Enter in the app exactly how many will
+   speak: in a one-minute meeting every turn is a large share of it, so the
+   board cannot tell a piece of a voice from a person (for a longer meeting
+   how many attend is enough -- the board finds how many spoke).
    Each turn about ten seconds or more, without talking over each other:
    a voice heard too briefly cannot be told apart.
 4. Upload: the screen switches by itself; talk through each stage as it
