@@ -39,7 +39,8 @@ COLORS = [
     "#a35bb4",
 ]
 HEADING = re.compile(r"^[一二三四五六七八九十]+、\s*(.+)$")
-ITEM = re.compile(r"^\d+[.、．]\s*(.+)$")
+# "1. ...", not "1.5 hours" or "2026.10.20": one or two digits, no digit after.
+ITEM = re.compile(r"^\d{1,2}[.、．](?!\d)\s*(.+)$")
 
 STYLE = """
 :root { color-scheme: light dark; --bg: #f7f8fb; --card: #fff; --text: #1d2433;
@@ -160,7 +161,8 @@ def speakers_html(record):
             f'<div class="bar"><i style="width:{share:.1f}%;background:{color(speaker)}"></i></div>'
             f'<span class="share">{share:.1f}%</span>'
         )
-    length = float(record.get("duration_s") or 0) or max(e for _, e, _, _ in turns(record))
+    # The meeting's length, or past it if a line ends later; never 0.
+    length = max([float(record.get("duration_s") or 0)] + [e for _, e, _, _ in turns(record)]) or 1.0
     lanes = []
     for speaker in sorted(said):
         marks = "".join(
@@ -184,8 +186,10 @@ def topics_html(record):
             body.append(f'<p class="error">這個話題沒有處理完成：{esc(topic["error"])}</p>')
         if topic.get("summary"):
             body.append(f"<p>{esc(topic['summary'])}</p>")
+        # In the meeting, as minutes.txt times it: the topic's start plus
+        # the line's own (record.py lines_for).
         rows = [
-            f'<div class="row"><span class="at">[{mmss(u.get("start_s"))}]</span>'
+            f'<div class="row"><span class="at">[{mmss(start + float(u.get("start_s") or 0))}]</span>'
             + (f'<span class="who" style="color:{color(u["speaker"])}">說話人 {u["speaker"] + 1}</span>'
                if isinstance(u.get("speaker"), int) else "<span></span>")
             + f'<span class="text">{esc(u.get("text"))}</span></div>'

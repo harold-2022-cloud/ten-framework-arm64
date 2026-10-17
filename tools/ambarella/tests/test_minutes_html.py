@@ -49,6 +49,16 @@ RECORD = {
             "error": "ASR timed out",
             "utterances": [],
         },
+        {
+            "id": "t03",
+            "start_s": 600.0,
+            "end_s": 660.0,
+            "summary": "補充。",
+            "error": None,
+            "utterances": [
+                {"start_s": 2.0, "end_s": 8.0, "speaker": 0, "text": "再補一句。"},
+            ],
+        },
     ],
     "actions": [],
     "actions_error": None,
@@ -74,15 +84,27 @@ class Render(unittest.TestCase):
         self.assertIn("發言 2 人", self.page)
 
     def test_who_spoke_how_much(self):
-        # 60 s and 30 s of 90.
-        self.assertIn("66.7%", self.page)
-        self.assertIn("33.3%", self.page)
+        # 66 s and 30 s of 96.
+        self.assertIn("68.8%", self.page)
+        self.assertIn("31.2%", self.page)
+
+    def test_the_lanes_stay_inside_and_a_zero_length_does_not_break_it(self):
+        self.assertIsNone(re.search(r"left:1\d\d\.", self.page))
+        empty = {**RECORD, "duration_s": 0, "topics": [
+            {"id": "t01", "start_s": 0, "end_s": 0, "utterances": [
+                {"start_s": 0, "end_s": 0, "speaker": 0, "text": "嗯"}]}]}
+        self.assertIn("說話人 1", minutes_html.render(empty))
 
     def test_every_topic_with_its_time_its_summary_and_its_transcript(self):
         self.assertIn("話題 1 · 00:00–05:00", self.page)
         self.assertIn("話題 2 · 05:00–10:00", self.page)
         self.assertIn("[00:01]", self.page)
         self.assertIn("我們週三上線。", self.page)
+
+    def test_a_line_is_timed_in_the_meeting_as_minutes_txt_times_it(self):
+        # 2 s into a topic that starts at 10:00 (record.py lines_for).
+        self.assertIn("[10:02]", self.page)
+        self.assertNotIn("[00:02]", self.page)
 
     def test_a_failed_topic_says_why(self):
         self.assertIn("ASR timed out", self.page)
@@ -92,6 +114,12 @@ class Render(unittest.TestCase):
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;好。", self.page)
         self.assertIsNone(re.search(r'(src|href)="?https?:', self.page))
         self.assertNotIn("<link", self.page)
+
+    def test_a_line_that_starts_with_a_number_keeps_it(self):
+        page = minutes_html.render({**RECORD, "summary": "1.5 小時後再議。\n2026.10.20 前交付。\n3. 第三項。"})
+        self.assertIn("<p>1.5 小時後再議。</p>", page)
+        self.assertIn("<p>2026.10.20 前交付。</p>", page)
+        self.assertIn("<li>第三項。</li>", page)
 
     def test_a_record_without_a_conclusion_says_so(self):
         page = minutes_html.render({**RECORD, "summary": ""})
