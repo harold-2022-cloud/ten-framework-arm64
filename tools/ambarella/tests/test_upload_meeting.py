@@ -70,7 +70,10 @@ class FakeBoard:
                     return
                 if self.path.endswith(("/record.json", "/minutes.txt")):
                     name = self.path.rsplit("/", 1)[1]
-                    data = f"{name} of {self.path.split('/')[2]}".encode()
+                    meeting_id = self.path.split("/")[2]
+                    data = f"{name} of {meeting_id}".encode()
+                    if name == "record.json":
+                        data = json.dumps({"meeting_id": meeting_id, "title": f"週會 {meeting_id}", "summary": "結論", "topics": []}).encode()
                     self.send_response(200)
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
@@ -184,10 +187,14 @@ class Results(unittest.TestCase):
         self.addCleanup(shutil.rmtree, out)
         code, said = run(board.args(audio_file(self), "--id", "pc-5", "--follow", "--out", out))
         self.assertEqual(code, 0, said)
-        for name in ("record.json", "minutes.txt"):
-            with open(os.path.join(out, "pc-5", name), encoding="utf-8") as f:
-                self.assertEqual(f.read(), f"{name} of pc-5")
-        self.assertIn(os.path.join(out, "pc-5", "minutes.txt"), said)
+        with open(os.path.join(out, "pc-5", "minutes.txt"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "minutes.txt of pc-5")
+        with open(os.path.join(out, "pc-5", "record.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["meeting_id"], "pc-5")
+        # And the page to read it in: minutes_html.py, beside them.
+        with open(os.path.join(out, "pc-5", "minutes.html"), encoding="utf-8") as f:
+            self.assertIn("週會 pc-5", f.read())
+        self.assertIn(os.path.join(out, "pc-5", "minutes.html"), said)
 
     def test_fetch_brings_an_earlier_meetings_results_back(self):
         board = FakeBoard(self, final_after=1)

@@ -11,7 +11,8 @@ app's fields -- saying how much went and how fast. The board then takes it
 as any phone's meeting, its screen included. With --follow, follow the
 meeting to its end and bring its results back, as the app keeps them:
 minutes.txt and record.json, into ambarella_ai_developer_kit_doc/meetings/
-<id>/ (git-ignored; --out picks another folder). --fetch brings an earlier
+<id>/ (git-ignored; --out picks another folder), with minutes.html to read
+them in (minutes_html.py). --fetch brings an earlier
 meeting's back -- the uploader that serves them runs only with a worker,
 so it starts one as the app would.
 
@@ -39,6 +40,8 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+
+import minutes_html
 
 CHANNEL = "meeting-room"  # the app's: domain/Small.kt Ids.CHANNEL
 GRAPH = "meeting_minutes"
@@ -200,6 +203,15 @@ def fetch_results(uploader, meeting_id, out):
             f.write(data)
         written.append(path)
         print(f"  ok    {name} -> {path}")
+    record = os.path.join(folder, "record.json")
+    if record in written:
+        try:
+            page = minutes_html.write(record)
+        except (OSError, ValueError) as err:
+            print(f"  warn  no minutes.html: {err}")
+        else:
+            written.append(page)
+            print(f"  ok    minutes.html -> {page}  (open it in a browser)")
     return written
 
 
