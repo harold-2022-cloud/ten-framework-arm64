@@ -31,7 +31,7 @@ import upload_meeting  # noqa: E402  pylint: disable=wrong-import-position
 class FakeBoard:
     """The API server and the meeting worker's uploader, on two ports."""
 
-    def __init__(self, test, running=False, refuse=None, final_after=2):
+    def __init__(self, test, running=False, refuse=None, final_after=2, vanish=False):
         self.started = []
         self.pinged = []
         self.uploads = []
@@ -39,6 +39,7 @@ class FakeBoard:
         self.running = running
         self.refuse = refuse
         self.final_after = final_after
+        self.vanish = vanish
         board = self
 
         class Server(BaseHTTPRequestHandler):
@@ -100,6 +101,13 @@ class FakeBoard:
                     200,
                     {"meeting_id": parts["meeting_id"].decode(), "bytes": len(parts["file"]), "status": "accepted", "ahead": 0, "wait_s": 0},
                 )
+                if board.vanish:
+                    # The worker dies right after taking the meeting.
+                    def gone():
+                        board.uploader.shutdown()
+                        board.uploader.server_close()
+
+                    threading.Thread(target=gone, daemon=True).start()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
         self.uploader = ThreadingHTTPServer(("127.0.0.1", 0), Uploader)
@@ -220,6 +228,15 @@ class Results(unittest.TestCase):
         with self.assertRaises(SystemExit):
             with redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 upload_meeting.main(board.args())
+
+
+class Gone(unittest.TestCase):
+    def test_follow_says_the_board_stopped_answering_and_gives_up(self):
+        board = FakeBoard(self, vanish=True)
+        code, said = run(board.args(audio_file(self), "--id", "pc-8", "--follow", "--give-up-min", "0.02"))
+        self.assertEqual(code, 1, said)
+        self.assertEqual(said.count("stopped answering"), 1)
+        self.assertIn("--fetch pc-8", said)
 
 
 if __name__ == "__main__":

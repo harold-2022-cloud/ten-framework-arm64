@@ -169,10 +169,29 @@ def upload(host, port, path, fields, say_every_s=5.0):
     return status, reply, sent, took
 
 
-def follow(uploader, meeting_id, poll_s):
+def follow(uploader, meeting_id, poll_s, give_up_s=1800.0):
+    """The meeting's states as they change, to its end; None when the
+    uploader stopped answering for give_up_s -- the worker died, or the
+    board went away -- said once when it stops and once if it comes back."""
     last = None
+    silent_since = None
     while True:
         status, reply = get_json(f"{uploader}/meeting/{meeting_id}")
+        if status is None:
+            now_s = time.monotonic()
+            if silent_since is None:
+                silent_since = now_s
+                print(f"  warn  {time.strftime('%H:%M:%S')}  the board stopped answering: "
+                      "its meeting worker may have stopped, or the network dropped", flush=True)
+            elif now_s - silent_since > give_up_s:
+                print(f"  FAIL  no answer for {give_up_s / 60:.0f} minutes; when the board is back: "
+                      f"python3 tools/ambarella/upload_meeting.py --fetch {meeting_id}", flush=True)
+                return None
+            time.sleep(poll_s)
+            continue
+        if silent_since is not None:
+            print(f"  ok    {time.strftime('%H:%M:%S')}  answering again", flush=True)
+            silent_since = None
         if status == 200:
             progress = reply.get("progress") or {}
             now = (reply.get("state"), progress.get("topics_done"), progress.get("topics_total"))
@@ -238,12 +257,14 @@ def main(argv=None):
     p.add_argument("--host", default="192.168.0.19", help="the board (192.168.0.19)")
     p.add_argument("--server-port", type=int, default=8081, help="its API server (8081)")
     p.add_argument("--uploader-port", type=int, default=8765, help="its meeting uploader (8765)")
-    p.add_argument("--speakers", type=int, help="how many people spoke, as entered in the app")
+    p.add_argument("--speakers", type=int, help="how many attend, as entered in the app: an upper bound, the board finds how many spoke")
     p.add_argument("--title", default="", help="the meeting's title")
     p.add_argument("--script", default="traditional", help="traditional (the app's default) or simplified")
     p.add_argument("--id", help="the meeting's id (pc-<date>-<time> by default)")
     p.add_argument("--timeout", type=int, default=600, help="the worker's idle timeout, as the app's (600 s)")
     p.add_argument("--follow", action="store_true", help="follow the meeting to its end")
+    p.add_argument("--give-up-min", type=float, default=30.0,
+                   help="with --follow, stop after the board has not answered this long (30)")
     p.add_argument("--poll-s", type=float, default=10.0, help=argparse.SUPPRESS)
     args = p.parse_args(argv)
     if bool(args.audio) == bool(args.fetch):
@@ -278,7 +299,9 @@ def main(argv=None):
     if not args.follow:
         print(f"        its results, once it ends: python3 tools/ambarella/upload_meeting.py --fetch {meeting_id}")
         return 0
-    final = follow(uploader, meeting_id, args.poll_s)
+    final = follow(uploader, meeting_id, args.poll_s, args.give_up_min * 60)
+    if final is None:
+        return 1
     fetch_results(uploader, meeting_id, args.out)
     return 0 if final == "archived" else 1
 
