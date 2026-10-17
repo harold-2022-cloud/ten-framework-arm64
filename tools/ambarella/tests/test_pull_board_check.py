@@ -128,12 +128,20 @@ class Pull(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(read(b.pulled("prepare_meeting_demo_20261016_120000.log")), "ready")
 
-    def test_nothing_that_day_says_so(self):
+    def test_a_day_without_runs_or_logs_still_brings_the_board_as_it_is(self):
+        # After a reboot /tmp starts empty (tmpfs): no tool log of the day,
+        # and that is when the board's own state matters most.
         b = Board(self)
         b.write("tmp/prepare_meeting_demo_20261015_120000.log", "ready")
+        b.write("tmp/task_run.log", "the server's own line\n")
         r = b.pull("20261016")
-        self.assertEqual(r.returncode, 3)
-        self.assertIn("nothing from 20261016", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("no runs or tool logs from 20261016", r.stderr)
+        services = b.pulled("20261016_services")
+        self.assertIn("the server's own line", read(os.path.join(services, "task_run.log")))
+        self.assertTrue(os.path.isfile(os.path.join(services, "system.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(services, "meetings.txt")))
+        self.assertFalse(os.path.exists(b.pulled("prepare_meeting_demo_20261015_120000.log")))
 
 
 if __name__ == "__main__":

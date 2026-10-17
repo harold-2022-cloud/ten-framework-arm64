@@ -43,8 +43,9 @@ DEST="${DEST:-$REPO_ROOT/ambarella_ai_developer_kit_doc/board_check}"
 LOGS="${BOARD_LOG_DIR:-/tmp}"
 
 mkdir -p "$DEST"
-# Run on the board, fed on stdin: the day's runs, logs and the service logs
-# as one tar stream, or a word on stderr and exit 3 when the day left none.
+# Run on the board, fed on stdin: the day's runs and logs, and the board and
+# its services as they are now, as one tar stream. A day that left no run or
+# tool log -- /tmp starts empty after a reboot -- still brings the latter.
 read -r -d '' remote <<'BOARD' || true
 set -u
 day=$1 logs=$2 repo=${3:-$HOME/ten-framework}
@@ -58,7 +59,9 @@ trap 'rm -rf "$out"' EXIT
 runs=$(cd ~/meeting_probe/board_check 2>/dev/null && ls -d "$day"-*/ 2>/dev/null | tr -d /) || true
 daylogs=$(cd "$logs" 2>/dev/null && ls verify_meeting_"$day"_*.log prepare_meeting_demo_"$day"_*.log \
   install_board_services_"$day"_*.log probe_demo_screen_"$day"_*.log 2>/dev/null) || true
-[ -n "$runs$daylogs" ] || { echo "nothing from $day on the board" >&2; exit 3; }
+if [ -z "$runs$daylogs" ]; then
+  echo "no runs or tool logs from $day on the board (after a reboot /tmp starts empty); the board and its services as they are now" >&2
+fi
 svc="$out/${day}_services"
 mkdir -p "$svc"
 for f in meeting_screen.log meeting_screen_kiosk.log; do
