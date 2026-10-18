@@ -8,7 +8,7 @@
 import argparse
 import sys
 
-from .server import Screen, make_server
+from .server import Screen, boot_time, make_server
 
 
 def parser() -> argparse.ArgumentParser:
@@ -40,7 +40,12 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
-    screen = Screen(args.meetings_dir, args.showcase, args.recent_min)
+    screen = Screen(
+        args.meetings_dir,
+        args.showcase,
+        args.recent_min,
+        booted_at=boot_time(),
+    )
     httpd = make_server(screen, args.listen)
     print(
         f"meeting-screen: {args.meetings_dir} on http://{args.listen}/",

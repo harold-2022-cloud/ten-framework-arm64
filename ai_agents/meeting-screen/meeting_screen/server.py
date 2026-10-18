@@ -32,6 +32,18 @@ FILES = {
 }
 
 
+def boot_time(path: str = "/proc/stat") -> Optional[float]:
+    """When this machine booted (the kernel's btime), or None."""
+    try:
+        with open(path, encoding="ascii") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return float(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 class Screen:
     def __init__(
         self,
@@ -39,11 +51,14 @@ class Screen:
         showcase: Optional[str] = None,
         recent_min: float = 120.0,
         clock=time.time,
+        booted_at: Optional[float] = None,
     ):
         self.meetings_dir = meetings_dir
         self.showcase = showcase or None
         self.recent_min = recent_min
         self.clock = clock
+        # None: no meeting is taken as cut off by a reboot (view.settle).
+        self.booted_at = booted_at
 
     def view(self, pin: Optional[str] = None) -> Tuple[int, object]:
         if pin is not None:
@@ -59,6 +74,7 @@ class Screen:
             self.showcase,
             pin,
             self.recent_min,
+            self.booted_at,
         )
 
     def meetings(self) -> Tuple[int, object]:
@@ -66,6 +82,7 @@ class Screen:
             disk.list_meetings(self.meetings_dir),
             self.showcase,
             lambda meeting_id: disk.read_record(self.meetings_dir, meeting_id),
+            self.booted_at,
         )
 
 

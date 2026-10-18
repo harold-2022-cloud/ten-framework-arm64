@@ -15,6 +15,8 @@ tools/ambarella/prepare_meeting_demo.sh              # 演示前：檢查是否�
 
 範例會議（按 PageDown 顯示的那場已完成會議）設定在 `ai_agents/.env`：`MEETING_SCREEN_SHOWCASE=<meeting_id>`，設好後再跑一次 `install_board_services.sh`。沒開自動登入的話，斷電重開後要有人在板子上登入，登入後大屏會自己出來。
 
+斷電時處理到一半的會議，重開後大屏直接顯示「處理到一半停了」，請重新上傳，不會一直停在處理中；下次會議處理程式啟動時，也會在磁碟上把它標成失敗。這種失敗從最後一次處理的時間算起，所以前一天中斷的會議不會在開場跳出來。
+
 | 按鍵 | |
 | --- | --- |
 | PageDown、→ | 範例會議 |

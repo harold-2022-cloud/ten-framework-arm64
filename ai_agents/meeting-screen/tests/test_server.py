@@ -116,10 +116,18 @@ def test_localhost_8766_unless_told():
     )
 
 
+def test_the_boot_time_is_read_from_proc_stat(tmp_path):
+    stat = tmp_path / "stat"
+    stat.write_text("cpu  1 2 3\nbtime 1760000000\nprocesses 7\n")
+    assert server.boot_time(str(stat)) == 1760000000.0
+    assert server.boot_time(str(tmp_path / "missing")) is None
+
+
 def test_python3_m_meeting_screen_serves(tmp_path):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         free = s.getsockname()[1]
+    put(str(tmp_path), "m1", "transcribing", 1000.0)
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -143,6 +151,9 @@ def test_python3_m_meeting_screen_serves(tmp_path):
             except OSError:
                 time.sleep(0.1)
         assert (status, json.loads(body).get("scene")) == (200, "ready")
+        # Left mid-way in 1970, long before this machine booted.
+        _, _, body = get(free, "/api/meetings")
+        assert [m["state"] for m in json.loads(body)] == ["failed"]
     finally:
         proc.terminate()
         proc.wait(timeout=5)

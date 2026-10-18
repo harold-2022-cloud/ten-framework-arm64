@@ -12,6 +12,9 @@ Auto mode, the showcase meeting left out:
   3. else the ready screen.
 A pin shows that meeting, the showcase included; the page lets go of it
 when newest_received_at grows.
+
+A meeting left mid-way before the board last booted is shown failed at
+once: nothing that ran then runs now (settle).
 """
 
 from typing import Callable, List, Optional, Tuple
@@ -41,6 +44,13 @@ TERMINAL = ("archived", "empty", "failed")
 SPEAKERS_FINAL = ("summarising", "concluding", "archived")
 # What an archived meeting with no words says when no topic says why.
 NO_WORDS = "沒有轉出任何文字"
+# The uploader's words for a meeting the next worker found unfinished
+# (meeting_uploader/store.py INTERRUPTED), and what the screen says instead.
+INTERRUPTED = (
+    "processing stopped before it finished (the worker was stopped or "
+    "restarted); upload it again"
+)
+INTERRUPTED_ZH = "處理到一半停了（板子重開，或處理程序被停掉）；請重新上傳"
 
 
 def _num(value) -> Optional[float]:
@@ -77,6 +87,46 @@ def _topic_error(record) -> Optional[str]:
         if isinstance(t, dict) and t.get("error"):
             return str(t["error"])
     return None
+
+
+def settle(
+    meetings: List[Meeting], booted_at: Optional[float]
+) -> List[Meeting]:
+    """The meetings as they stand: one left mid-way (neither ended nor
+    queued) and last written before the board booted has no worker on it,
+    so it is failed, as the next worker will mark it (store.py
+    fail_interrupted). A queued one still waits its turn."""
+    if booted_at is None:
+        return meetings
+    out = []
+    for m in meetings:
+        written = _num(m.state.get("updated_at"))
+        written = written if written is not None else m.received_at
+        if _state(m) not in TERMINAL + ("queued",) and written < booted_at:
+            m = Meeting(
+                m.meeting_id,
+                {**m.state, "state": "failed", "error": INTERRUPTED},
+                m.upload,
+            )
+        out.append(m)
+    return out
+
+
+def _interrupted(m: Meeting) -> bool:
+    return _state(m) == "failed" and m.state.get("error") == INTERRUPTED
+
+
+def ended_at(m: Meeting) -> Optional[float]:
+    """When a finished meeting ended. An interrupted one ended when it was
+    last worked on: the worker that says so may start a day later, and
+    stamps updated_at then."""
+    if _interrupted(m):
+        times = [
+            _num(m.state.get(k))
+            for k in ("received_at", "started_at", "step_started_at")
+        ]
+        return max([t for t in times if t is not None], default=None)
+    return _num(m.state.get("updated_at"))
 
 
 def stage_of(state: Optional[str], step: Optional[str]) -> int:
@@ -117,7 +167,7 @@ def choose(
         newest = max(live, key=_key)
         # From when it ended, not when it came: a meeting processed for
         # longer than recent_min would otherwise never show its result.
-        ended = _num(newest.state.get("updated_at"))
+        ended = ended_at(newest)
         since = ended if ended is not None else newest.received_at
         if now - since <= recent_min * 60:
             return newest, False
@@ -148,7 +198,7 @@ def meeting_view(
     step = m.state.get("step") if state == "transcribing" else None
     step = step if isinstance(step, str) else None
     started = _num(m.state.get("started_at"))
-    finished = _num(m.state.get("updated_at")) if state in TERMINAL else None
+    finished = ended_at(m) if state in TERMINAL else None
     if started is None:
         elapsed = None
     elif finished is not None:
@@ -158,6 +208,8 @@ def meeting_view(
     record = record if isinstance(record, dict) else None
     from_record = record or {}
     error = m.state.get("error")
+    if _interrupted(m):
+        error = INTERRUPTED_ZH
     if _wordless(state, record):
         error = error or _topic_error(record) or NO_WORDS
     title = (
@@ -210,8 +262,10 @@ def build(
     showcase: Optional[str] = None,
     pin: Optional[str] = None,
     recent_min: float = 120.0,
+    booted_at: Optional[float] = None,
 ) -> dict:
     """The body of GET /api/view."""
+    meetings = settle(meetings, booted_at)
     chosen, pinned = choose(meetings, now, showcase, pin, recent_min)
     live = [m.received_at for m in meetings if m.meeting_id != showcase]
     on_disk = any(m.meeting_id == showcase for m in meetings)
@@ -248,9 +302,11 @@ def listing(
     meetings: List[Meeting],
     showcase: Optional[str] = None,
     read_record: Optional[Callable[[str], Optional[dict]]] = None,
+    booted_at: Optional[float] = None,
 ) -> List[dict]:
     """The body of GET /api/meetings: the newest received first, each
     finished one with the speakers it found."""
+    meetings = settle(meetings, booted_at)
     return [
         {
             "meeting_id": m.meeting_id,

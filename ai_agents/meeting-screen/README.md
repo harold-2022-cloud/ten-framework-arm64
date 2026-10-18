@@ -24,6 +24,11 @@ The showcase -- the finished meeting PageDown shows -- is set in
 `install_board_services.sh` again. Without autologin, someone logs in on
 the board after a power cut and the screen comes back by itself.
 
+A meeting the power cut left mid-way shows at once as stopped (處理到一半停了;
+upload it again), not as still processing; the meeting worker marks it so
+on disk when it next starts. Such a failure counts from when the meeting was
+last worked on, so yesterday's does not open the demo.
+
 | Key | |
 | --- | --- |
 | PageDown, → | the showcase |

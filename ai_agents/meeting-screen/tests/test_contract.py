@@ -218,3 +218,9 @@ def test_the_controllers_steps_light_their_stages(tmp_path):
     words = recognising["record"]["topics"][0]["utterances"]
     assert words[0]["text"] == "我們先定時間。"
     assert recognising["speakers_final"] is False
+
+
+def test_the_screen_knows_the_uploaders_words_for_an_interrupted_meeting():
+    # view.py turns them into Chinese and times the failure from when the
+    # meeting was last worked on, not from when the next worker said so.
+    assert view.INTERRUPTED == store.INTERRUPTED

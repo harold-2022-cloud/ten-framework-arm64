@@ -306,3 +306,77 @@ def test_a_long_meeting_stays_for_recent_min_from_when_it_ended():
     assert build([done_long_ago])["scene"] == "ready"
     failed_now = m("a", "failed", NOW - 200 * 60, updated_at=NOW - 5, error="x")
     assert build([failed_now])["scene"] == "failed"
+
+
+# The board last booted 5 minutes before NOW.
+BOOT = NOW - 300.0
+
+
+def test_a_meeting_left_mid_way_before_the_boot_shows_as_cut_off():
+    # Power went at NOW - 400: nothing that ran then runs now. The next
+    # worker marks it failed when it starts (store.py fail_interrupted);
+    # until then it must not read "processing".
+    left = m(
+        "a",
+        "transcribing",
+        NOW - 900,
+        started_at=NOW - 890,
+        step="diarizing",
+        step_started_at=NOW - 500,
+        updated_at=NOW - 400,
+    )
+    v = build([left], booted_at=BOOT)
+    assert (v["scene"], v["meeting"]["state"], v["meeting"]["stage"]) == (
+        "failed",
+        "failed",
+        7,
+    )
+    assert v["meeting"]["error"] == view.INTERRUPTED_ZH
+
+
+def test_a_meeting_worked_on_since_the_boot_is_still_processed():
+    going = m("a", "transcribing", NOW - 900, updated_at=NOW - 100)
+    assert build([going], booted_at=BOOT)["scene"] == "processing"
+    before = m("a", "transcribing", NOW - 900, updated_at=NOW - 400)
+    assert build([before])["scene"] == "processing"
+
+
+def test_a_meeting_queued_before_the_boot_still_waits_its_turn():
+    queued = m("q", "queued", NOW - 900, updated_at=NOW - 900)
+    assert build([queued], booted_at=BOOT)["scene"] == "queued"
+
+
+def test_an_interrupted_failure_counts_from_when_it_was_last_worked_on():
+    # prepare --warm starts a worker the next morning, and the worker
+    # stamps yesterday's interrupted meeting failed now (updated_at):
+    # no fresh failure to open the demo with.
+    day = 24 * 3600.0
+    yesterday = m(
+        "a",
+        "failed",
+        NOW - day,
+        started_at=NOW - day + 10,
+        step_started_at=NOW - day + 600,
+        updated_at=NOW - 60,
+        error=view.INTERRUPTED,
+    )
+    assert build([yesterday])["scene"] == "ready"
+    just_now = m(
+        "a",
+        "failed",
+        NOW - 3000,
+        started_at=NOW - 2990,
+        step_started_at=NOW - 600,
+        updated_at=NOW - 60,
+        error=view.INTERRUPTED,
+    )
+    v = build([just_now])["meeting"]
+    assert (v["error"], v["finished_at"]) == (view.INTERRUPTED_ZH, NOW - 600)
+
+
+def test_the_list_says_a_meeting_cut_off_by_the_boot_did_not_finish():
+    rows = view.listing(
+        [m("a", "summarising", NOW - 900, updated_at=NOW - 400)],
+        booted_at=BOOT,
+    )
+    assert rows[0]["state"] == "failed"
