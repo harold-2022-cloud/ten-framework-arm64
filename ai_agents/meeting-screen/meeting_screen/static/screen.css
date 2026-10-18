@@ -226,7 +226,11 @@ h2 {
   border-radius: 3px;
 }
 
+/* The time in its own column, as in a transcript row: inline, .at's
+   width would not hold and the time ran into the text. */
 .topics p {
+  display: flex;
+  gap: 16px;
   margin: 0 0 12px;
   font-size: 26px;
   line-height: 1.5;
@@ -399,6 +403,12 @@ h2 {
 .item.on {
   background: var(--accent);
   color: var(--bg);
+}
+
+/* Grey on the accent could not be read: the row's own dark, a little lighter. */
+.item.on .muted {
+  color: inherit;
+  opacity: 0.75;
 }
 
 [hidden] {
