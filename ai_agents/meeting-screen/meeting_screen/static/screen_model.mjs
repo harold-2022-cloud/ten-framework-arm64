@@ -18,11 +18,13 @@ export const STAGES = [
 ];
 
 // How long the steps with no progress of their own take on the board: a
-// topic's speakers are told apart in about half its length (0.49 measured
-// at two threads) plus loading two models; the conclusion took 41 s for a
+// topic's speakers are told apart in 0.71-0.93 of its length for topics of
+// 5-10 minutes (26 topics, 2026-10-16/17; the 0.5 first used came from a
+// short clip) plus loading two models; the conclusion took 41 s for a
 // 12-minute meeting and about 80 for 38 minutes. Rough on purpose: the
-// bar they drive says 預計 and stops short of the end until the step ends.
-export const DIARIZE_PER_AUDIO_S = 0.5;
+// bar they drive says 預計 and stops short of the end until the step ends;
+// set a little high, it ends early rather than sitting at 快好了.
+export const DIARIZE_PER_AUDIO_S = 0.85;
 export const DIARIZE_START_S = 10;
 export const CONCLUDE_S = 45;
 const ESTIMATE_CAP = 0.95;

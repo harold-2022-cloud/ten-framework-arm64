@@ -262,15 +262,32 @@ test("the stages are the board's own steps, in its order", () => {
 });
 
 test("diarizing has an estimated bar that stops short of the end", () => {
-  // 240 s of audio: about 0.5 x 240 + 10 = 130 s expected.
+  // 240 s of audio: about 0.85 x 240 + 10 = 214 s expected.
   const meeting = { stage: 2, step_started_at: 100, topic_s: 240 };
-  let bar = m.progressBar(meeting, 165);
+  let bar = m.progressBar(meeting, 207);
   assert.equal(bar.estimate, true);
   assert.equal(bar.fraction, 0.5);
-  assert.equal(m.leftText(bar), "預計還要約 1 分鐘");
+  assert.equal(m.leftText(bar), "預計還要約 2 分鐘");
   bar = m.progressBar(meeting, 1000);
   assert.equal(bar.fraction, 0.95);
   assert.equal(m.leftText(bar), "快好了");
+});
+
+test("diarizing as slowly as the board does is not 快好了 for minutes", () => {
+  // Measured on the board (2026-10-16/17): a 6:09 topic took 344 s, a
+  // 10-minute one 434-503 s. A minute before each ends the bar is short
+  // of its cap and says how long is left.
+  for (const [topic_s, took] of [
+    [369, 344],
+    [600, 490],
+  ]) {
+    const bar = m.progressBar(
+      { stage: 2, step_started_at: 0, topic_s },
+      took - 60
+    );
+    assert.ok(bar.fraction < 0.95, `${topic_s} s: ${bar.fraction}`);
+    assert.notEqual(m.leftText(bar), "快好了");
+  }
 });
 
 test("recognition and summaries count what is done", () => {
