@@ -44,7 +44,7 @@ def main(argv=None) -> int:
         args.meetings_dir,
         args.showcase,
         args.recent_min,
-        booted_at=boot_time(),
+        boot=boot_time,
     )
     httpd = make_server(screen, args.listen)
     print(

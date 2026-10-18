@@ -123,6 +123,19 @@ def test_the_boot_time_is_read_from_proc_stat(tmp_path):
     assert server.boot_time(str(tmp_path / "missing")) is None
 
 
+def test_the_boot_time_is_asked_at_each_request(tmp_path):
+    # A cold boot with no clock battery: NTP steps the clock forward after
+    # the screen started, and the kernel's btime moves with it. A boot time
+    # read once would stay far in the past and miss the cut-off meeting.
+    put(str(tmp_path), "m1", "transcribing", time.time() - 600)
+    boots = [time.time() - 3600, time.time() - 60]
+    screen = server.Screen(str(tmp_path), boot=lambda: boots[0])
+    assert screen.meetings()[1][0]["state"] == "transcribing"
+    boots.pop(0)
+    assert screen.meetings()[1][0]["state"] == "failed"
+    assert screen.view()[1]["scene"] == "failed"
+
+
 def test_python3_m_meeting_screen_serves(tmp_path):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

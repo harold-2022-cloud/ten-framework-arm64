@@ -380,3 +380,16 @@ def test_the_list_says_a_meeting_cut_off_by_the_boot_did_not_finish():
         booted_at=BOOT,
     )
     assert rows[0]["state"] == "failed"
+
+
+def test_a_meeting_queued_behind_one_the_boot_cut_off_is_next():
+    # The next worker marks the cut-off one failed and takes this first.
+    cut = m("a", "summarising", NOW - 900, updated_at=NOW - 400)
+    queued = m("q", "queued", NOW - 800, updated_at=NOW - 800)
+    v = build([cut, queued], booted_at=BOOT)
+    assert (v["meeting"]["meeting_id"], v["meeting"]["ahead"]) == ("q", 0)
+
+
+def test_an_interrupted_failure_with_no_times_has_no_end():
+    bare = view.Meeting("a", {"state": "failed", "error": view.INTERRUPTED})
+    assert view.ended_at(bare) is None

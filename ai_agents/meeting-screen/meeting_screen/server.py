@@ -19,7 +19,7 @@ import os
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from . import disk, view
 
@@ -51,14 +51,20 @@ class Screen:
         showcase: Optional[str] = None,
         recent_min: float = 120.0,
         clock=time.time,
-        booted_at: Optional[float] = None,
+        boot: Optional[Callable[[], Optional[float]]] = None,
     ):
         self.meetings_dir = meetings_dir
         self.showcase = showcase or None
         self.recent_min = recent_min
         self.clock = clock
+        # When the board booted, asked at each request: the kernel moves
+        # btime when the clock is stepped (NTP after a cold boot with no
+        # clock battery), and the meetings' times are on the new clock.
         # None: no meeting is taken as cut off by a reboot (view.settle).
-        self.booted_at = booted_at
+        self.boot = boot
+
+    def booted_at(self) -> Optional[float]:
+        return self.boot() if self.boot is not None else None
 
     def view(self, pin: Optional[str] = None) -> Tuple[int, object]:
         if pin is not None:
@@ -74,7 +80,7 @@ class Screen:
             self.showcase,
             pin,
             self.recent_min,
-            self.booted_at,
+            self.booted_at(),
         )
 
     def meetings(self) -> Tuple[int, object]:
@@ -82,7 +88,7 @@ class Screen:
             disk.list_meetings(self.meetings_dir),
             self.showcase,
             lambda meeting_id: disk.read_record(self.meetings_dir, meeting_id),
-            self.booted_at,
+            self.booted_at(),
         )
 
 
